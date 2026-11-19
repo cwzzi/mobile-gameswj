@@ -1,0 +1,838 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#1b2a1b">
+<title>개척왕</title>
+<style>
+  :root { --ui: rgba(15,20,15,.72); --line: rgba(255,255,255,.18); --txt: #f4f1e6; --accent: #f2c14e; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #1b2a1b; color: var(--txt);
+    font-family: system-ui, -apple-system, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+    touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+  canvas#game { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+  .hud { position: fixed; z-index: 2; }
+  #res { top: calc(8px + env(safe-area-inset-top)); left: 8px; background: var(--ui); border-radius: 12px;
+    padding: 6px 10px; font-size: 14px; line-height: 1.5; border: 1px solid var(--line); }
+  #res b { font-variant-numeric: tabular-nums; }
+  #goal { top: calc(72px + env(safe-area-inset-top)); left: 8px; font-size: 12px; background: var(--ui);
+    border-radius: 10px; padding: 4px 8px; max-width: 55vw; border: 1px solid var(--line); }
+  #minimap { top: calc(8px + env(safe-area-inset-top)); right: 8px; width: 96px; height: 96px; border-radius: 10px;
+    border: 2px solid var(--line); background: #000; image-rendering: pixelated; }
+  #minimap.big { width: min(86vw, 86vh); height: min(86vw, 86vh); top: 50%; right: 50%; transform: translate(50%, -50%); z-index: 20; }
+  #menuBtn { top: calc(112px + env(safe-area-inset-top)); right: 8px; width: 40px; height: 40px; border-radius: 10px;
+    background: var(--ui); border: 1px solid var(--line); color: var(--txt); font-size: 20px; }
+  .btn { position: fixed; z-index: 3; border-radius: 50%; border: 2px solid rgba(255,255,255,.35);
+    color: #fff; font-weight: 700; display: flex; align-items: center; justify-content: center; text-align: center;
+    font-size: 15px; box-shadow: 0 3px 10px rgba(0,0,0,.35); }
+  .btn:active, .btn.on { filter: brightness(1.3); transform: scale(.96); }
+  #actBtn { right: 20px; bottom: calc(28px + env(safe-area-inset-bottom)); width: 86px; height: 86px; background: rgba(200,70,50,.82); font-size: 17px; }
+  #buildBtn { right: 118px; bottom: calc(24px + env(safe-area-inset-bottom)); width: 64px; height: 64px; background: rgba(60,120,190,.82); }
+  #rideBtn { right: 34px; bottom: calc(128px + env(safe-area-inset-bottom)); width: 58px; height: 58px; background: rgba(140,95,50,.85); font-size: 13px; display: none; }
+  #hint { left: 50%; transform: translateX(-50%); bottom: calc(130px + env(safe-area-inset-bottom)); font-size: 13px;
+    background: var(--ui); padding: 5px 10px; border-radius: 10px; white-space: nowrap; border: 1px solid var(--line); pointer-events: none; }
+  #toast { left: 50%; transform: translateX(-50%); top: calc(110px + env(safe-area-inset-top)); font-size: 14px; background: rgba(0,0,0,.78);
+    padding: 8px 14px; border-radius: 12px; max-width: 86vw; text-align: center; opacity: 0; transition: opacity .3s; pointer-events: none; }
+  #toast.show { opacity: 1; }
+  .panel { position: fixed; z-index: 30; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(92vw, 380px);
+    max-height: 86vh; overflow: auto; background: #1f2a20; border: 1px solid var(--line); border-radius: 16px; padding: 16px;
+    display: none; box-shadow: 0 10px 40px rgba(0,0,0,.6); touch-action: pan-y; }
+  .panel.show { display: block; }
+  .panel h2 { margin: 0 0 4px; font-size: 18px; }
+  .panel .sub { color: #b8c2b0; font-size: 13px; margin-bottom: 12px; line-height: 1.5; }
+  .opt { display: flex; width: 100%; align-items: center; gap: 10px; text-align: left; padding: 12px; margin-bottom: 8px;
+    border-radius: 12px; border: 1px solid var(--line); background: #2b3a2c; color: var(--txt); font-size: 15px; }
+  .opt .ic { font-size: 24px; width: 30px; text-align: center; }
+  .opt small { display: block; color: #b8c2b0; font-size: 12px; margin-top: 2px; }
+  .opt:disabled { opacity: .42; }
+  .close { width: 100%; padding: 12px; border-radius: 12px; border: 0; background: #555; color: #fff; font-size: 15px; margin-top: 4px; }
+  .help p { font-size: 14px; line-height: 1.6; margin: 6px 0; }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+
+<div id="res" class="hud">🪵 <b id="rWood">0</b> &nbsp;🪨 <b id="rStone">0</b> &nbsp;🪙 <b id="rGold">0</b><br>❤️ <b id="rHp">10</b> &nbsp;🏘️ <b id="rTowns">0</b> &nbsp;👥 <b id="rPop">0</b></div>
+<div id="goal" class="hud"></div>
+<canvas id="minimap" class="hud" width="120" height="120"></canvas>
+<button id="menuBtn" class="hud">☰</button>
+<div id="hint" class="hud"></div>
+<div id="toast" class="hud"></div>
+
+<div id="actBtn" class="btn">행동</div>
+<div id="buildBtn" class="btn">건설</div>
+<div id="rideBtn" class="btn">내리기</div>
+
+<div id="buildPanel" class="panel"></div>
+<div id="menuPanel" class="panel help">
+  <h2>개척왕</h2>
+  <p>넓은 땅을 마음대로 돌아다니며 자원을 모으고, 마을을 세워 영토를 넓히세요. 산적이 마을을 노립니다.</p>
+  <p><b>이동</b> 화면 왼쪽을 누르고 끌기<br>
+     <b>행동</b> 나무 베기 · 돌/금 캐기 · 공격 · 말 타기 (누르고 있으면 반복)<br>
+     <b>건설</b> 영토 밖: 마을 세우기 / 영토 안: 집·농장·망루·시장</p>
+  <p>🏘️ 마을은 시간이 지나면 인구가 늘고, 인구가 늘면 레벨이 오르며 영토가 넓어집니다. 인구는 금을 벌어 줍니다.<br>
+     🐎 야생 말을 타면 두 배 빨라요.<br>
+     ⛺ 산적 소굴을 부수면 큰 보상. 망루가 마을을 지켜 줍니다.</p>
+  <p id="goalHelp"></p>
+  <button class="opt" id="newGameBtn"><span class="ic">🔄</span><span>새 게임 시작<small>지금 진행은 지워집니다</small></span></button>
+  <button class="close" id="menuClose">계속하기</button>
+</div>
+
+<script>
+(() => {
+'use strict';
+// ---------- 설정 ----------
+const T = 32, W = 128, H = 128;
+const GOAL_TILES = 1200;
+const SAVE_KEY = 'frontier-save-v1';
+const WATER = 0, SAND = 1, FOREST = 2, GRASS = 3, MOUNTAIN = 4, GOLD = 5;
+const TOWN_NAMES = ['새벽골','솔내','한빛','바람재','달무리','푸른들','돌샘','별터','노을촌','은빛내','소나무골','들꽃마을','큰나루','해오름','가람','미르골'];
+const TOWN_COLORS = ['#4fa3ff','#ffb347','#c77dff','#5be0b0','#ff6b9d','#f2e863','#7dd3fc','#fb923c','#a3e635','#f472b6'];
+const BUILD = {
+  house:  { name: '집',   icon: '🏠', cost: { wood: 12 },                  desc: '인구 한도 +5' },
+  farm:   { name: '농장', icon: '🌾', cost: { wood: 10, stone: 4 },        desc: '인구 증가 속도 ↑' },
+  tower:  { name: '망루', icon: '🗼', cost: { wood: 10, stone: 15 },       desc: '근처 산적에게 화살 발사' },
+  market: { name: '시장', icon: '🏪', cost: { wood: 20, stone: 10, gold: 15 }, desc: '마을 금 수입 +3' },
+};
+
+// ---------- 유틸 ----------
+const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
+const dist2 = (ax, ay, bx, by) => (ax - bx) ** 2 + (ay - by) ** 2;
+function mulberry(seed) { return () => { seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+let rand = Math.random;
+const ri = n => Math.floor(rand() * n);
+
+function makeNoise(r, cell) {
+  const gw = Math.ceil(W / cell) + 2, g = new Float32Array(gw * gw);
+  for (let i = 0; i < g.length; i++) g[i] = r();
+  const s = t => t * t * (3 - 2 * t);
+  return (x, y) => {
+    const fx = x / cell, fy = y / cell, ix = fx | 0, iy = fy | 0, tx = s(fx - ix), ty = s(fy - iy);
+    const a = g[iy * gw + ix], b = g[iy * gw + ix + 1], c = g[(iy + 1) * gw + ix], d = g[(iy + 1) * gw + ix + 1];
+    return a + (b - a) * tx + (c - a) * ty + (a - b - c + d) * tx * ty;
+  };
+}
+
+// ---------- 상태 ----------
+let S; // 게임 상태 전체
+let owner = new Int16Array(W * H).fill(-1);
+let ownedCount = 0;
+const bandits = [], arrows = [], floats = [];
+
+function newWorld(seed) {
+  const r = mulberry(seed);
+  const n1 = makeNoise(r, 16), n2 = makeNoise(r, 7), n3 = makeNoise(r, 3), m1 = makeNoise(r, 12), m2 = makeNoise(r, 5);
+  const tiles = new Uint8Array(W * H), hp = new Uint8Array(W * H);
+  const hs = new Float32Array(W * H), ms = new Float32Array(W * H);
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const dx = (x - W / 2) / (W / 2), dy = (y - H / 2) / (H / 2);
+    const edge = Math.max(0, Math.sqrt(dx * dx + dy * dy) - 0.62) * 1.3;
+    hs[y * W + x] = n1(x, y) * 0.6 + n2(x, y) * 0.3 + n3(x, y) * 0.1 - edge;
+    ms[y * W + x] = m1(x, y) * 0.7 + m2(x, y) * 0.3;
+  }
+  // 산은 땅 중 높은 쪽 약 9%, 숲은 습한 쪽 약 35%가 되도록 분위수로 정함
+  const land = [], wet = [];
+  for (let i = 0; i < W * H; i++) if (hs[i] >= 0.31) { land.push(hs[i]); wet.push(ms[i]); }
+  land.sort((a, b) => a - b); wet.sort((a, b) => a - b);
+  const mtnH = land[Math.floor(land.length * 0.91)] || 0.68, forM = wet[Math.floor(wet.length * 0.65)] || 0.54;
+  for (let i = 0; i < W * H; i++) {
+    const h = hs[i], m = ms[i];
+    let t;
+    if (h < 0.27) t = WATER; else if (h < 0.31) t = SAND;
+    else if (h > mtnH) t = r() < 0.07 ? GOLD : MOUNTAIN;
+    else if (m > forM) t = FOREST; else t = GRASS;
+    tiles[i] = t;
+    hp[i] = t === FOREST ? 4 : t === GOLD ? 12 : 0;
+  }
+  return { tiles, hp };
+}
+
+function landTile(x, y) { const t = tileAt(x, y); return t === GRASS || t === SAND || t === FOREST; }
+
+function newGame() {
+  const seed = (Date.now() & 0xffffff) ^ 0x5eed;
+  const { tiles, hp } = newWorld(seed);
+  S = { seed, tiles, hp, wood: 0, stone: 0, gold: 0, towns: [], buildings: [], camps: [], horses: [], won: false, time: 0,
+        player: { x: 0, y: 0, hp: 10, maxHp: 10, mounted: false, dir: 0 }, spawnT: 0 };
+  // 시작 지점: 가운데에서 가까운 풀밭
+  let best = null;
+  for (let k = 0; k < 4000; k++) {
+    const x = W / 2 + ri(40) - 20, y = H / 2 + ri(40) - 20;
+    if (tileAt(x, y) === GRASS && neighborsLand(x, y)) { best = { x, y }; break; }
+  }
+  if (!best) best = { x: W / 2, y: H / 2 };
+  S.player.x = (best.x + .5) * T; S.player.y = (best.y + .5) * T;
+  // 말
+  for (let k = 0; k < 400 && S.horses.length < 14; k++) {
+    const x = ri(W), y = ri(H);
+    if (tileAt(x, y) === GRASS && dist2(x, y, best.x, best.y) > 16) S.horses.push({ x: (x + .5) * T, y: (y + .5) * T, vx: 0, vy: 0, t: 0, ridden: false });
+  }
+  // 시작 근처에 말 한 마리 보장
+  for (let k = 0; k < 200; k++) {
+    const x = best.x + ri(9) - 4, y = best.y + ri(9) - 4;
+    if (tileAt(x, y) === GRASS && (x !== best.x || y !== best.y)) { S.horses.push({ x: (x + .5) * T, y: (y + .5) * T, vx: 0, vy: 0, t: 0, ridden: false }); break; }
+  }
+  for (let k = 0; k < 6; k++) spawnCamp(best.x, best.y, 26);
+  bandits.length = 0; arrows.length = 0; floats.length = 0;
+  recomputeOwner();
+  toast('마을을 세울 곳을 찾아 <b>건설</b>을 누르세요. 첫 마을은 무료!', 5);
+}
+
+function neighborsLand(x, y) { for (let j = -1; j <= 1; j++) for (let i = -1; i <= 1; i++) if (!landTile(x + i, y + j)) return false; return true; }
+
+function spawnCamp(avoidX, avoidY, minD) {
+  for (let k = 0; k < 3000; k++) {
+    const x = 4 + ri(W - 8), y = 4 + ri(H - 8);
+    if (!neighborsLand(x, y)) continue;
+    if (dist2(x, y, avoidX, avoidY) < minD * minD) continue;
+    if (owner[y * W + x] >= 0) continue;
+    let ok = true;
+    for (const t of S.towns) if (dist2(x, y, t.x, t.y) < 18 * 18) ok = false;
+    for (const c of S.camps) if (dist2(x, y, c.x, c.y) < 14 * 14) ok = false;
+    if (!ok) continue;
+    S.camps.push({ x, y, hp: 15, maxHp: 15, t: ri(10) });
+    return true;
+  }
+  return false;
+}
+
+function tileAt(x, y) { x = Math.floor(x); y = Math.floor(y); if (x < 0 || y < 0 || x >= W || y >= H) return WATER; return S.tiles[y * W + x]; }
+function passable(px, py) {
+  const t = tileAt(px / T, py / T);
+  return t !== WATER && t !== MOUNTAIN && t !== GOLD;
+}
+function canStand(px, py, r) {
+  return passable(px - r, py - r) && passable(px + r, py - r) && passable(px - r, py + r) && passable(px + r, py + r);
+}
+function moveEnt(e, dx, dy, r) {
+  let moved = false;
+  if (canStand(e.x + dx, e.y, r)) { e.x += dx; moved = true; }
+  if (canStand(e.x, e.y + dy, r)) { e.y += dy; moved = true; }
+  return moved;
+}
+
+// ---------- 마을/영토 ----------
+function townLevel(t) { return Math.min(5, 1 + Math.floor(t.pop / 10)); }
+function townRadius(t) { return 3 + townLevel(t); }
+function townCap(t) { return 6 + 5 * S.buildings.filter(b => b.town === t.id && b.type === 'house').length; }
+function recomputeOwner() {
+  owner.fill(-1); ownedCount = 0;
+  for (const t of S.towns) {
+    const r = townRadius(t);
+    for (let y = t.y - r; y <= t.y + r; y++) for (let x = t.x - r; x <= t.x + r; x++) {
+      if (x < 0 || y < 0 || x >= W || y >= H) continue;
+      if (dist2(x, y, t.x, t.y) > r * r + r) continue;
+      const i = y * W + x;
+      if (owner[i] >= 0 || S.tiles[i] === WATER) continue;
+      owner[i] = t.id; ownedCount++;
+    }
+  }
+  minimapDirty = true;
+}
+function townById(id) { return S.towns.find(t => t.id === id); }
+function playerTile() { return { x: Math.floor(S.player.x / T), y: Math.floor(S.player.y / T) }; }
+function newTownCost() {
+  const n = S.towns.length;
+  if (n === 0) return {};
+  return { wood: 15 + n * 10, stone: 8 + n * 6, gold: 10 + n * 15 };
+}
+function canAfford(c) { return (S.wood >= (c.wood || 0)) && (S.stone >= (c.stone || 0)) && (S.gold >= (c.gold || 0)); }
+function pay(c) { S.wood -= c.wood || 0; S.stone -= c.stone || 0; S.gold -= c.gold || 0; }
+function costText(c) {
+  const p = [];
+  if (c.wood) p.push('🪵' + c.wood); if (c.stone) p.push('🪨' + c.stone); if (c.gold) p.push('🪙' + c.gold);
+  return p.length ? p.join(' ') : '무료';
+}
+
+function foundTownCheck() {
+  const { x, y } = playerTile();
+  if (owner[y * W + x] >= 0) return '이미 영토 안입니다';
+  if (!landTile(x, y)) return '땅 위에 세워야 해요';
+  for (const t of S.towns) if (dist2(x, y, t.x, t.y) < 10 * 10) return '다른 마을과 너무 가까워요';
+  for (const c of S.camps) if (dist2(x, y, c.x, c.y) < 7 * 7) return '산적 소굴이 너무 가까워요';
+  return null;
+}
+function foundTown() {
+  const { x, y } = playerTile();
+  const id = S.towns.length ? Math.max(...S.towns.map(t => t.id)) + 1 : 0;
+  const t = { id, x, y, pop: 2, name: TOWN_NAMES[id % TOWN_NAMES.length], growT: 0, taxT: 0 };
+  S.towns.push(t);
+  S.tiles[y * W + x] = GRASS;
+  recomputeOwner();
+  toast(`🏘️ <b>${t.name}</b> 마을을 세웠습니다!`, 3);
+  save();
+}
+
+function buildCheck(type) {
+  const { x, y } = playerTile(), i = y * W + x;
+  const tid = owner[i];
+  if (tid < 0) return '영토 안에서만 지을 수 있어요';
+  const t = townById(tid);
+  if (t.x === x && t.y === y) return '마을 중심에는 지을 수 없어요';
+  if (S.buildings.some(b => b.x === x && b.y === y)) return '이미 건물이 있어요';
+  const tt = S.tiles[i];
+  if (tt !== GRASS && tt !== SAND) return '풀밭이나 모래 위에 지어요 (숲은 먼저 베기)';
+  return null;
+}
+function build(type) {
+  const { x, y } = playerTile();
+  S.buildings.push({ type, x, y, town: owner[y * W + x], t: 0 });
+  pay(BUILD[type].cost);
+  toast(`${BUILD[type].icon} ${BUILD[type].name} 완성`, 2);
+  save();
+}
+
+// ---------- 입력 ----------
+const cv = document.getElementById('game'), ctx = cv.getContext('2d');
+let VW = 0, VH = 0, DPR = 1, ZOOM = 1;
+function resize() {
+  DPR = Math.min(2, window.devicePixelRatio || 1);
+  VW = innerWidth; VH = innerHeight;
+  cv.width = VW * DPR; cv.height = VH * DPR;
+  ZOOM = clamp(Math.min(VW, VH) / (11 * T), 0.9, 2.2);
+}
+addEventListener('resize', resize); resize();
+
+const joy = { id: null, ox: 0, oy: 0, x: 0, y: 0, active: false };
+const keys = {};
+let actHeld = false, actCd = 0;
+cv.addEventListener('touchstart', e => {
+  e.preventDefault();
+  for (const t of e.changedTouches) {
+    if (joy.id === null && t.clientX < VW * 0.6) { joy.id = t.identifier; joy.ox = t.clientX; joy.oy = t.clientY; joy.x = 0; joy.y = 0; joy.active = true; }
+  }
+}, { passive: false });
+cv.addEventListener('touchmove', e => {
+  e.preventDefault();
+  for (const t of e.changedTouches) if (t.identifier === joy.id) {
+    let dx = t.clientX - joy.ox, dy = t.clientY - joy.oy; const d = Math.hypot(dx, dy), R = 55;
+    if (d > R) { joy.ox += dx * (1 - R / d); joy.oy += dy * (1 - R / d); dx = t.clientX - joy.ox; dy = t.clientY - joy.oy; }
+    joy.x = dx / R; joy.y = dy / R;
+  }
+}, { passive: false });
+const endTouch = e => { for (const t of e.changedTouches) if (t.identifier === joy.id) { joy.id = null; joy.active = false; joy.x = joy.y = 0; } };
+cv.addEventListener('touchend', endTouch); cv.addEventListener('touchcancel', endTouch);
+// 마우스(PC 테스트용)
+let mouseDown = false;
+cv.addEventListener('mousedown', e => { mouseDown = true; joy.ox = e.clientX; joy.oy = e.clientY; joy.x = joy.y = 0; joy.active = true; });
+addEventListener('mousemove', e => { if (!mouseDown) return; let dx = e.clientX - joy.ox, dy = e.clientY - joy.oy; const d = Math.hypot(dx, dy), R = 55; if (d > R) { dx *= R / d; dy *= R / d; } joy.x = dx / R; joy.y = dy / R; });
+addEventListener('mouseup', () => { mouseDown = false; joy.active = false; joy.x = joy.y = 0; });
+addEventListener('keydown', e => { keys[e.key.toLowerCase()] = true; if (e.key === ' ' || e.key.toLowerCase() === 'j') actHeld = true; if (e.key.toLowerCase() === 'b') openBuild(); });
+addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; if (e.key === ' ' || e.key.toLowerCase() === 'j') actHeld = false; });
+
+function holdBtn(el, down, up) {
+  el.addEventListener('touchstart', e => { e.preventDefault(); el.classList.add('on'); down(); }, { passive: false });
+  el.addEventListener('touchend', e => { e.preventDefault(); el.classList.remove('on'); up && up(); });
+  el.addEventListener('touchcancel', () => { el.classList.remove('on'); up && up(); });
+  el.addEventListener('mousedown', e => { e.preventDefault(); down(); });
+  el.addEventListener('mouseup', () => up && up());
+  el.addEventListener('mouseleave', () => up && up());
+}
+const $ = id => document.getElementById(id);
+holdBtn($('actBtn'), () => { actHeld = true; if (!paused && actCd <= 0) { doAction(); actCd = 0.32; } }, () => { actHeld = false; });
+holdBtn($('buildBtn'), () => openBuild());
+holdBtn($('rideBtn'), () => dismount());
+
+// ---------- 행동 ----------
+let swing = 0;
+function nearestHarvest() {
+  const p = S.player, px = p.x / T, py = p.y / T;
+  let best = null, bd = 1.7 * 1.7;
+  for (let y = Math.floor(py) - 2; y <= Math.floor(py) + 2; y++) for (let x = Math.floor(px) - 2; x <= Math.floor(px) + 2; x++) {
+    const t = tileAt(x, y);
+    if (t !== FOREST && t !== MOUNTAIN && t !== GOLD) continue;
+    const d = dist2(px, py, x + .5, y + .5);
+    if (d < bd) { bd = d; best = { x, y, t }; }
+  }
+  return best;
+}
+function nearest(list, x, y, maxD, fn) {
+  let best = null, bd = maxD * maxD;
+  for (const e of list) { if (fn && !fn(e)) continue; const d = dist2(x, y, e.x, e.y); if (d < bd) { bd = d; best = e; } }
+  return best;
+}
+function campPos(c) { return { x: (c.x + .5) * T, y: (c.y + .5) * T }; }
+function nearestCamp(maxPx) {
+  const p = S.player; let best = null, bd = maxPx * maxPx;
+  for (const c of S.camps) { const q = campPos(c), d = dist2(p.x, p.y, q.x, q.y); if (d < bd) { bd = d; best = c; } }
+  return best;
+}
+function contextAction() {
+  const p = S.player;
+  const b = nearest(bandits, p.x, p.y, 52);
+  if (b) return { kind: 'attack', target: b, label: '공격' };
+  const c = nearestCamp(64);
+  if (c) return { kind: 'camp', target: c, label: '소굴 공격' };
+  if (!p.mounted) { const h = nearest(S.horses, p.x, p.y, 40, h => !h.ridden); if (h) return { kind: 'mount', target: h, label: '말 타기' }; }
+  const hv = nearestHarvest();
+  if (hv) return { kind: 'harvest', target: hv, label: hv.t === FOREST ? '나무 베기' : hv.t === GOLD ? '금 캐기' : '돌 캐기' };
+  return null;
+}
+function doAction() {
+  const a = contextAction();
+  swing = 0.18;
+  if (!a) return;
+  const p = S.player;
+  if (a.kind === 'attack') {
+    const b = a.target; b.hp -= 1; b.hit = 0.15;
+    const ang = Math.atan2(b.y - p.y, b.x - p.x); b.kx = Math.cos(ang) * 120; b.ky = Math.sin(ang) * 120;
+    if (b.hp <= 0) { killBandit(b, true); }
+  } else if (a.kind === 'camp') {
+    const c = a.target; c.hp -= 1; c.hit = 0.15;
+    if (c.hp <= 0) {
+      S.camps.splice(S.camps.indexOf(c), 1);
+      const q = campPos(c);
+      S.gold += 40; S.wood += 10; S.stone += 5;
+      floatText(q.x, q.y, '+40🪙 +10🪵 +5🪨', '#ffe27a');
+      toast('⛺ 산적 소굴을 부쉈습니다!', 3); minimapDirty = true; save();
+    }
+  } else if (a.kind === 'mount') {
+    const h = a.target; h.ridden = true; p.mounted = true; p.x = h.x; p.y = h.y;
+    $('rideBtn').style.display = 'flex';
+  } else if (a.kind === 'harvest') {
+    const { x, y, t } = a.target, i = y * W + x;
+    if (t === FOREST) {
+      S.wood++; floatText((x + .5) * T, y * T, '+1🪵', '#c9f29b');
+      if (--S.hp[i] <= 0) { S.tiles[i] = GRASS; minimapDirty = true; }
+    } else if (t === GOLD) {
+      S.gold += 2; floatText((x + .5) * T, y * T, '+2🪙', '#ffe27a');
+      if (--S.hp[i] <= 0) { S.tiles[i] = MOUNTAIN; minimapDirty = true; }
+    } else { S.stone++; floatText((x + .5) * T, y * T, '+1🪨', '#ddd'); }
+  }
+}
+function dismount() {
+  const p = S.player; if (!p.mounted) return;
+  const h = S.horses.find(h => h.ridden); if (h) { h.ridden = false; h.x = p.x; h.y = p.y; h.t = 2; }
+  p.mounted = false; $('rideBtn').style.display = 'none';
+}
+function killBandit(b, byPlayer) {
+  const i = bandits.indexOf(b); if (i >= 0) bandits.splice(i, 1);
+  const loot = 4 + (b.loot || 0);
+  S.gold += loot; floatText(b.x, b.y, `+${loot}🪙`, '#ffe27a');
+}
+function floatText(x, y, s, c) { floats.push({ x, y, s, c, t: 1 }); }
+
+// ---------- 패널 ----------
+const bp = $('buildPanel');
+let paused = false;
+function openBuild() {
+  if (!S) return;
+  paused = true; actHeld = false;
+  const { x, y } = playerTile();
+  const tid = owner[y * W + x];
+  let html = '';
+  if (tid < 0) {
+    const err = foundTownCheck(), cost = newTownCost(), ok = !err && canAfford(cost);
+    html += `<h2>마을 세우기</h2><div class="sub">지금 서 있는 자리에 새 마을을 세웁니다. 마을은 스스로 자라며 금을 벌고 영토를 넓힙니다.</div>`;
+    html += `<button class="opt" data-a="town" ${ok ? '' : 'disabled'}><span class="ic">🏘️</span><span>새 마을 (${S.towns.length + 1}번째)<small>${costText(cost)}${err ? ' · ' + err : !canAfford(cost) ? ' · 자원 부족' : ''}</small></span></button>`;
+  } else {
+    const t = townById(tid), cap = townCap(t);
+    const cnt = k => S.buildings.filter(b => b.town === t.id && b.type === k).length;
+    html += `<h2>${t.name} <span style="font-size:13px;color:#b8c2b0">Lv${townLevel(t)}</span></h2>`;
+    html += `<div class="sub">인구 ${t.pop}/${cap} · 영토 반경 ${townRadius(t)} · 수입 ${townIncome(t)}🪙/5초<br>집 ${cnt('house')} · 농장 ${cnt('farm')} · 망루 ${cnt('tower')} · 시장 ${cnt('market')}<br>인구가 10 늘 때마다 레벨업 → 영토 확장</div>`;
+    for (const k in BUILD) {
+      const B = BUILD[k], err = buildCheck(k), ok = !err && canAfford(B.cost);
+      html += `<button class="opt" data-a="${k}" ${ok ? '' : 'disabled'}><span class="ic">${B.icon}</span><span>${B.name} — ${B.desc}<small>${costText(B.cost)}${err ? ' · ' + err : !canAfford(B.cost) ? ' · 자원 부족' : ''}</small></span></button>`;
+    }
+  }
+  html += `<button class="close" data-a="close">닫기</button>`;
+  bp.innerHTML = html; bp.classList.add('show');
+}
+function closePanels() { bp.classList.remove('show'); $('menuPanel').classList.remove('show'); paused = false; }
+bp.addEventListener('click', e => {
+  const btn = e.target.closest('button'); if (!btn || btn.disabled) return;
+  const a = btn.dataset.a;
+  if (a === 'town') { pay(newTownCost()); foundTown(); }
+  else if (BUILD[a]) build(a);
+  closePanels();
+});
+$('menuBtn').addEventListener('click', () => { paused = true; $('goalHelp').innerHTML = `<b>목표</b> 영토 ${GOAL_TILES}칸 차지하기 (지금 ${ownedCount}칸)`; $('menuPanel').classList.add('show'); });
+$('menuClose').addEventListener('click', closePanels);
+$('newGameBtn').addEventListener('click', () => { try { localStorage.removeItem(SAVE_KEY); } catch (e) {} newGame(); closePanels(); });
+const mm = $('minimap');
+mm.addEventListener('click', () => mm.classList.toggle('big'));
+
+let toastT = 0;
+function toast(html, sec) { const el = $('toast'); el.innerHTML = html; el.classList.add('show'); toastT = sec || 2.5; }
+
+// ---------- 업데이트 ----------
+function townIncome(t) { return Math.ceil(t.pop / 3) + 3 * S.buildings.filter(b => b.town === t.id && b.type === 'market').length; }
+
+function update(dt) {
+  S.time += dt;
+  const p = S.player;
+  // 이동
+  let mx = joy.x, my = joy.y;
+  if (keys['a'] || keys['arrowleft']) mx -= 1; if (keys['d'] || keys['arrowright']) mx += 1;
+  if (keys['w'] || keys['arrowup']) my -= 1; if (keys['s'] || keys['arrowdown']) my += 1;
+  const ml = Math.hypot(mx, my); if (ml > 1) { mx /= ml; my /= ml; }
+  if (ml > 0.08) {
+    const onForest = tileAt(p.x / T, p.y / T) === FOREST;
+    const sp = (p.mounted ? 250 : 130) * (onForest ? 0.7 : 1);
+    moveEnt(p, mx * sp * dt, my * sp * dt, 9);
+    p.dir = Math.atan2(my, mx); p.walk = (p.walk || 0) + dt * sp / 20;
+  }
+  if (p.mounted) { const h = S.horses.find(h => h.ridden); if (h) { h.x = p.x; h.y = p.y; } }
+  // 행동
+  actCd -= dt; swing = Math.max(0, swing - dt);
+  if (actHeld && actCd <= 0) { doAction(); actCd = 0.32; }
+  // 체력 회복 (영토 안)
+  const pt = playerTile(), inOwn = owner[pt.y * W + pt.x] >= 0;
+  p.regen = (p.regen || 0) + dt;
+  if (p.regen > 1.5) { p.regen = 0; if (inOwn && p.hp < p.maxHp) p.hp++; }
+  p.hurt = Math.max(0, (p.hurt || 0) - dt);
+
+  // 마을 성장/세금
+  let changed = false;
+  for (const t of S.towns) {
+    const cap = townCap(t), farms = S.buildings.filter(b => b.town === t.id && b.type === 'farm').length;
+    t.growT += dt;
+    const need = 4 / (1 + 0.6 * farms);
+    if (t.growT > need) { t.growT = 0; if (t.pop < cap) { const lv = townLevel(t); t.pop++; if (townLevel(t) !== lv) { changed = true; toast(`⬆️ ${t.name} Lv${townLevel(t)}! 영토가 넓어졌습니다`, 2.5); } } }
+    t.taxT += dt;
+    if (t.taxT > 5) { t.taxT = 0; const g = townIncome(t); S.gold += g; floatText((t.x + .5) * T, t.y * T - 10, `+${g}🪙`, '#ffe27a'); }
+  }
+  if (changed) recomputeOwner();
+
+  // 말
+  for (const h of S.horses) {
+    if (h.ridden) continue;
+    h.t -= dt;
+    if (h.t <= 0) { h.t = 2 + rand() * 3; const a = rand() * Math.PI * 2, s = rand() < 0.4 ? 0 : 25; h.vx = Math.cos(a) * s; h.vy = Math.sin(a) * s; }
+    if (!moveEnt(h, h.vx * dt, h.vy * dt, 8)) h.t = 0;
+  }
+
+  // 산적 소굴: 산적 생산
+  for (const c of S.camps) {
+    c.t += dt; c.hit = Math.max(0, (c.hit || 0) - dt);
+    const alive = bandits.filter(b => b.camp === c).length;
+    const interval = Math.max(9, 22 - S.towns.length * 2);
+    if (c.t > interval && alive < 3) { c.t = 0; const q = campPos(c); bandits.push({ x: q.x, y: q.y + 20, hp: 3, camp: c, state: 'wander', t: 0, vx: 0, vy: 0, atk: 0, loot: 0 }); }
+  }
+  // 새 소굴 생성 (영토가 넓어질수록)
+  S.spawnT += dt;
+  if (S.spawnT > 70 && S.camps.length < 4 + S.towns.length) { S.spawnT = 0; const pt2 = playerTile(); if (spawnCamp(pt2.x, pt2.y, 22)) toast('⚠️ 어딘가에 새 산적 소굴이 생겼습니다', 2.5); }
+
+  // 산적 AI
+  for (const b of bandits.slice()) {
+    b.hit = Math.max(0, (b.hit || 0) - dt); b.atk -= dt;
+    if (b.kx) { moveEnt(b, b.kx * dt, b.ky * dt, 8); b.kx *= 0.85; b.ky *= 0.85; if (Math.abs(b.kx) < 5) b.kx = b.ky = 0; }
+    const dp = Math.sqrt(dist2(b.x, b.y, p.x, p.y));
+    let tx = null, ty = null, sp = 85;
+    if (dp < T * 6) { tx = p.x; ty = p.y; sp = 100; b.state = 'chase'; }
+    else if (b.raided) { if (b.camp && S.camps.includes(b.camp)) { const q = campPos(b.camp); tx = q.x; ty = q.y; if (dist2(b.x, b.y, q.x, q.y) < 30 * 30) { b.raided = false; b.loot = 0; } } }
+    else {
+      const town = S.towns.length ? S.towns.reduce((a, t) => dist2(b.x, b.y, (t.x + .5) * T, (t.y + .5) * T) < dist2(b.x, b.y, (a.x + .5) * T, (a.y + .5) * T) ? t : a) : null;
+      if (town && dist2(b.x, b.y, (town.x + .5) * T, (town.y + .5) * T) < (T * 40) ** 2) {
+        tx = (town.x + .5) * T; ty = (town.y + .5) * T; b.state = 'raid';
+        if (dist2(b.x, b.y, tx, ty) < 26 * 26) {
+          const steal = Math.min(S.gold, 8 + ri(8)); S.gold -= steal; b.loot += steal; b.raided = true;
+          const lost = Math.min(2, town.pop - 1); town.pop -= lost;
+          toast(`🏴 산적이 ${town.name}을 습격! 🪙-${steal} 👥-${lost}`, 2.5);
+          floatText(tx, ty, `-${steal}🪙`, '#ff7a7a');
+          recomputeOwner();
+        }
+      }
+    }
+    if (tx === null) { b.t -= dt; if (b.t <= 0) { b.t = 2 + rand() * 2; const a = rand() * Math.PI * 2; b.vx = Math.cos(a) * 40; b.vy = Math.sin(a) * 40; } if (!moveEnt(b, b.vx * dt, b.vy * dt, 8)) b.t = 0; }
+    else {
+      const d = Math.hypot(tx - b.x, ty - b.y);
+      if (d > 18) {
+        let vx = (tx - b.x) / d * sp * dt, vy = (ty - b.y) / d * sp * dt;
+        if (!moveEnt(b, vx, vy, 8)) { const a = rand() * Math.PI * 2; moveEnt(b, Math.cos(a) * sp * dt * 2, Math.sin(a) * sp * dt * 2, 8); }
+      }
+    }
+    if (dp < 24 && b.atk <= 0) {
+      b.atk = 1;
+      if (p.mounted && rand() < 0.3) { /* 말 타면 가끔 회피 */ }
+      else { p.hp--; p.hurt = 0.25; if (p.hp <= 0) playerDie(); }
+    }
+  }
+
+  // 망루
+  for (const bd of S.buildings) {
+    if (bd.type !== 'tower') continue;
+    bd.t -= dt; if (bd.t > 0) continue;
+    const cx = (bd.x + .5) * T, cy = (bd.y + .5) * T;
+    const b = nearest(bandits, cx, cy, T * 5.5);
+    if (b) { bd.t = 1.1; arrows.push({ x: cx, y: cy - 16, tgt: b, sp: 420 }); }
+  }
+  for (const a of arrows.slice()) {
+    if (!bandits.includes(a.tgt)) { arrows.splice(arrows.indexOf(a), 1); continue; }
+    const d = Math.hypot(a.tgt.x - a.x, a.tgt.y - a.y);
+    if (d < 10) { a.tgt.hp--; a.tgt.hit = 0.15; if (a.tgt.hp <= 0) killBandit(a.tgt); arrows.splice(arrows.indexOf(a), 1); continue; }
+    a.x += (a.tgt.x - a.x) / d * a.sp * dt; a.y += (a.tgt.y - a.y) / d * a.sp * dt; a.ang = Math.atan2(a.tgt.y - a.y, a.tgt.x - a.x);
+  }
+  for (const f of floats.slice()) { f.t -= dt; f.y -= 28 * dt; if (f.t <= 0) floats.splice(floats.indexOf(f), 1); }
+
+  // 승리
+  if (!S.won && ownedCount >= GOAL_TILES) { S.won = true; toast(`👑 영토 ${GOAL_TILES}칸 달성! 당신은 개척왕입니다. 계속 플레이할 수 있어요.`, 6); save(); }
+
+  // 토스트/힌트
+  if (toastT > 0) { toastT -= dt; if (toastT <= 0) $('toast').classList.remove('show'); }
+}
+
+function playerDie() {
+  const p = S.player;
+  dismount();
+  S.wood = Math.floor(S.wood / 2); S.stone = Math.floor(S.stone / 2); S.gold = Math.floor(S.gold / 2);
+  p.hp = p.maxHp;
+  const home = S.towns[0];
+  if (home) { p.x = (home.x + .5) * T; p.y = (home.y + 1.5) * T; }
+  for (const b of bandits.slice()) if (dist2(b.x, b.y, p.x, p.y) < (T * 8) ** 2) bandits.splice(bandits.indexOf(b), 1);
+  toast('💀 쓰러졌습니다. 자원 절반을 잃고 첫 마을에서 깨어났어요.', 3.5);
+}
+
+// ---------- 그리기 ----------
+const TILE_COL = ['#2c6ea6', '#d8c48a', '#3f7f37', '#5e9e48', '#7b7d86', '#7b7d86'];
+function hashTile(x, y) { let h = x * 374761393 + y * 668265263; h = (h ^ (h >>> 13)) * 1274126177; return ((h ^ (h >>> 16)) >>> 0) / 4294967296; }
+function shade(hex, k) { const n = parseInt(hex.slice(1), 16); let r = n >> 16, g = n >> 8 & 255, b = n & 255; r = clamp(r * k | 0, 0, 255); g = clamp(g * k | 0, 0, 255); b = clamp(b * k | 0, 0, 255); return `rgb(${r},${g},${b})`; }
+
+function draw() {
+  const p = S.player;
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  ctx.fillStyle = '#1f5b8c'; ctx.fillRect(0, 0, VW, VH);
+  const camX = p.x - VW / 2 / ZOOM, camY = p.y - VH / 2 / ZOOM;
+  ctx.setTransform(DPR * ZOOM, 0, 0, DPR * ZOOM, -camX * DPR * ZOOM, -camY * DPR * ZOOM);
+  const x0 = Math.max(0, Math.floor(camX / T)), y0 = Math.max(0, Math.floor(camY / T));
+  const x1 = Math.min(W - 1, Math.floor((camX + VW / ZOOM) / T)), y1 = Math.min(H - 1, Math.floor((camY + VH / ZOOM) / T));
+  const tm = S.time;
+  // 지형
+  for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
+    const t = S.tiles[y * W + x], h = hashTile(x, y), px = x * T, py = y * T;
+    let col = TILE_COL[t];
+    if (t === WATER) col = shade(col, 0.92 + 0.12 * Math.sin(tm * 1.5 + x * 0.7 + y * 0.5) * 0.5 + h * 0.06);
+    else col = shade(col, 0.93 + h * 0.12);
+    ctx.fillStyle = col; ctx.fillRect(px, py, T + 0.5, T + 0.5);
+    if (t === FOREST) {
+      const hp = S.hp[y * W + x], s = 0.55 + hp * 0.11;
+      ctx.fillStyle = '#5a3d22'; ctx.fillRect(px + 14, py + 18, 4, 10);
+      ctx.fillStyle = shade('#2b6a26', 0.9 + h * 0.2);
+      ctx.beginPath(); ctx.arc(px + 16 + (h - .5) * 6, py + 15, 11 * s, 0, 7); ctx.fill();
+      ctx.fillStyle = 'rgba(255,255,255,.08)'; ctx.beginPath(); ctx.arc(px + 13, py + 12, 5 * s, 0, 7); ctx.fill();
+    } else if (t === MOUNTAIN || t === GOLD) {
+      ctx.fillStyle = shade('#5d5f68', 0.9 + h * 0.2);
+      ctx.beginPath(); ctx.moveTo(px + 2, py + 30); ctx.lineTo(px + 16 + (h - .5) * 8, py + 3); ctx.lineTo(px + 30, py + 30); ctx.fill();
+      ctx.fillStyle = '#e8e8ee'; ctx.beginPath(); ctx.moveTo(px + 11 + (h - .5) * 5, py + 12); ctx.lineTo(px + 16 + (h - .5) * 8, py + 3); ctx.lineTo(px + 21 + (h - .5) * 5, py + 12); ctx.fill();
+      if (t === GOLD) { ctx.fillStyle = '#ffd34d'; for (let k = 0; k < 4; k++) { ctx.fillRect(px + 8 + k * 5, py + 18 + (k % 2) * 5, 4, 4); } }
+    } else if (t === GRASS && h > 0.85) {
+      ctx.fillStyle = 'rgba(255,255,255,.12)'; ctx.fillRect(px + h * 20, py + 8 + h * 10, 2, 5); ctx.fillRect(px + 6 + h * 18, py + 4 + h * 12, 2, 4);
+    }
+  }
+  // 영토
+  for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
+    const o = owner[y * W + x]; if (o < 0) continue;
+    const col = TOWN_COLORS[o % TOWN_COLORS.length], px = x * T, py = y * T;
+    ctx.fillStyle = col; ctx.globalAlpha = 0.13; ctx.fillRect(px, py, T, T); ctx.globalAlpha = 0.9;
+    const ow = (xx, yy) => (xx < 0 || yy < 0 || xx >= W || yy >= H) ? -1 : owner[yy * W + xx];
+    ctx.fillStyle = col;
+    if (ow(x - 1, y) !== o) ctx.fillRect(px, py, 2.5, T);
+    if (ow(x + 1, y) !== o) ctx.fillRect(px + T - 2.5, py, 2.5, T);
+    if (ow(x, y - 1) !== o) ctx.fillRect(px, py, T, 2.5);
+    if (ow(x, y + 1) !== o) ctx.fillRect(px, py + T - 2.5, T, 2.5);
+    ctx.globalAlpha = 1;
+  }
+  const vis = (x, y, m) => x > camX - m && x < camX + VW / ZOOM + m && y > camY - m && y < camY + VH / ZOOM + m;
+  // 건물
+  for (const b of S.buildings) {
+    const px = b.x * T, py = b.y * T; if (!vis(px, py, T)) continue;
+    drawBuilding(b.type, px, py);
+  }
+  // 마을 중심
+  for (const t of S.towns) {
+    const px = t.x * T, py = t.y * T; if (!vis(px, py, T * 2)) continue;
+    drawTown(t, px, py);
+  }
+  // 소굴
+  for (const c of S.camps) {
+    const { x, y } = campPos(c); if (!vis(x, y, T * 2)) continue;
+    const sh = c.hit ? (Math.random() - .5) * 4 : 0;
+    ctx.fillStyle = '#5a1f1f'; ctx.beginPath(); ctx.moveTo(x - 20 + sh, y + 12); ctx.lineTo(x + sh, y - 18); ctx.lineTo(x + 20 + sh, y + 12); ctx.fill();
+    ctx.fillStyle = '#2a0e0e'; ctx.beginPath(); ctx.moveTo(x - 5 + sh, y + 12); ctx.lineTo(x + sh, y - 2); ctx.lineTo(x + 5 + sh, y + 12); ctx.fill();
+    const fl = 4 + Math.sin(tm * 12) * 1.5;
+    ctx.fillStyle = '#ff8a2a'; ctx.beginPath(); ctx.arc(x + 26, y + 10, fl, 0, 7); ctx.fill();
+    ctx.fillStyle = '#ffe07a'; ctx.beginPath(); ctx.arc(x + 26, y + 11, fl * .5, 0, 7); ctx.fill();
+    ctx.fillStyle = '#222'; ctx.fillRect(x - 3, y - 30, 2, 14); ctx.fillStyle = '#c22'; ctx.fillRect(x - 1, y - 30, 10, 6);
+    bar(x, y - 36, c.hp / c.maxHp, '#e44');
+  }
+  // 말
+  for (const h of S.horses) { if (h.ridden || !vis(h.x, h.y, T)) continue; drawHorse(h.x, h.y, h.vx < 0 ? -1 : 1, 0); }
+  // 산적
+  for (const b of bandits) {
+    if (!vis(b.x, b.y, T)) continue;
+    ctx.fillStyle = 'rgba(0,0,0,.25)'; ctx.beginPath(); ctx.ellipse(b.x, b.y + 9, 9, 4, 0, 0, 7); ctx.fill();
+    ctx.fillStyle = b.hit ? '#fff' : '#a52a2a'; ctx.beginPath(); ctx.arc(b.x, b.y, 9, 0, 7); ctx.fill();
+    ctx.fillStyle = '#1b1b1b'; ctx.fillRect(b.x - 7, b.y - 4, 14, 4);
+    ctx.fillStyle = '#fff'; ctx.fillRect(b.x - 4, b.y - 3, 2, 2); ctx.fillRect(b.x + 2, b.y - 3, 2, 2);
+    if (b.loot) { ctx.fillStyle = '#ffd34d'; ctx.beginPath(); ctx.arc(b.x + 8, b.y + 6, 4, 0, 7); ctx.fill(); }
+    bar(b.x, b.y - 15, b.hp / 3, '#e44');
+  }
+  // 플레이어
+  drawPlayer(p);
+  // 화살
+  ctx.strokeStyle = '#3a2a1a'; ctx.lineWidth = 2;
+  for (const a of arrows) { ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(a.x - Math.cos(a.ang || 0) * 10, a.y - Math.sin(a.ang || 0) * 10); ctx.stroke(); }
+  // 행동 대상 표시
+  const act = contextAction();
+  if (act) {
+    let tx, ty;
+    if (act.kind === 'harvest') { tx = (act.target.x + .5) * T; ty = (act.target.y + .5) * T; }
+    else if (act.kind === 'camp') { const q = campPos(act.target); tx = q.x; ty = q.y; }
+    else { tx = act.target.x; ty = act.target.y; }
+    ctx.strokeStyle = 'rgba(255,255,255,.75)'; ctx.lineWidth = 2; ctx.setLineDash([4, 4]);
+    ctx.beginPath(); ctx.arc(tx, ty, 17 + Math.sin(tm * 6) * 1.5, 0, 7); ctx.stroke(); ctx.setLineDash([]);
+  }
+  // 떠오르는 글자
+  ctx.textAlign = 'center'; ctx.font = 'bold 13px system-ui, sans-serif';
+  for (const f of floats) { ctx.globalAlpha = clamp(f.t * 1.5, 0, 1); ctx.fillStyle = '#000'; ctx.fillText(f.s, f.x + 1, f.y + 1); ctx.fillStyle = f.c; ctx.fillText(f.s, f.x, f.y); }
+  ctx.globalAlpha = 1;
+
+  // 화면 고정 UI: 조이스틱, 피격
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  if (joy.active && joy.id !== null) {
+    ctx.fillStyle = 'rgba(255,255,255,.12)'; ctx.beginPath(); ctx.arc(joy.ox, joy.oy, 55, 0, 7); ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,.4)'; ctx.beginPath(); ctx.arc(joy.ox + joy.x * 55, joy.oy + joy.y * 55, 24, 0, 7); ctx.fill();
+  }
+  if (p.hurt > 0) { ctx.fillStyle = `rgba(200,0,0,${p.hurt})`; ctx.fillRect(0, 0, VW, VH); }
+  // 힌트
+  $('hint').textContent = act ? `행동: ${act.label}` : '';
+  $('hint').style.display = act ? 'block' : 'none';
+}
+function bar(x, y, f, col) { ctx.fillStyle = 'rgba(0,0,0,.6)'; ctx.fillRect(x - 13, y, 26, 4); ctx.fillStyle = col; ctx.fillRect(x - 13, y, 26 * clamp(f, 0, 1), 4); }
+function drawHorse(x, y, flip, bob) {
+  ctx.save(); ctx.translate(x, y + bob); ctx.scale(flip, 1);
+  ctx.fillStyle = 'rgba(0,0,0,.25)'; ctx.beginPath(); ctx.ellipse(0, 10, 14, 4, 0, 0, 7); ctx.fill();
+  ctx.fillStyle = '#7a4b25'; ctx.fillRect(-10, 2, 3, 8); ctx.fillRect(7, 2, 3, 8);
+  ctx.fillStyle = '#8b5a2b'; ctx.beginPath(); ctx.ellipse(0, 0, 13, 7, 0, 0, 7); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(13, -7, 5, 4, -0.6, 0, 7); ctx.fill();
+  ctx.fillStyle = '#3a2412'; ctx.fillRect(9, -12, 3, 7); ctx.fillRect(-15, -3, 4, 8);
+  ctx.restore();
+}
+function drawPlayer(p) {
+  const bob = Math.sin((p.walk || 0)) * 1.2;
+  if (p.mounted) drawHorse(p.x, p.y + 4, Math.cos(p.dir) < 0 ? -1 : 1, bob);
+  const y = p.y - (p.mounted ? 8 : 0);
+  if (!p.mounted) { ctx.fillStyle = 'rgba(0,0,0,.25)'; ctx.beginPath(); ctx.ellipse(p.x, p.y + 9, 9, 4, 0, 0, 7); ctx.fill(); }
+  ctx.fillStyle = '#2b5fb8'; ctx.beginPath(); ctx.arc(p.x, y + bob * .5, 9, 0, 7); ctx.fill();
+  ctx.fillStyle = '#f2c99b'; ctx.beginPath(); ctx.arc(p.x, y - 9 + bob * .5, 6, 0, 7); ctx.fill();
+  ctx.fillStyle = '#f2c14e'; ctx.fillRect(p.x - 5, y - 16 + bob * .5, 10, 3); ctx.fillRect(p.x - 5, y - 19 + bob * .5, 2, 3); ctx.fillRect(p.x - 1, y - 20 + bob * .5, 2, 4); ctx.fillRect(p.x + 3, y - 19 + bob * .5, 2, 3);
+  // 무기
+  const sw = swing > 0 ? (1 - swing / 0.18) * 2 - 1 : 0;
+  const a = p.dir + sw * 1.2;
+  ctx.strokeStyle = '#ddd'; ctx.lineWidth = 3; ctx.beginPath();
+  ctx.moveTo(p.x + Math.cos(a) * 8, y + Math.sin(a) * 8); ctx.lineTo(p.x + Math.cos(a) * (swing > 0 ? 24 : 16), y + Math.sin(a) * (swing > 0 ? 24 : 16)); ctx.stroke();
+  bar(p.x, y - 28, p.hp / p.maxHp, '#4c4');
+}
+function drawTown(t, px, py) {
+  const lv = townLevel(t), col = TOWN_COLORS[t.id % TOWN_COLORS.length];
+  const cx = px + T / 2, base = py + T - 2, w = 22 + lv * 4, h = 14 + lv * 3;
+  ctx.fillStyle = 'rgba(0,0,0,.25)'; ctx.fillRect(cx - w / 2 + 3, base - 3, w, 6);
+  ctx.fillStyle = '#d9cfb8'; ctx.fillRect(cx - w / 2, base - h, w, h);
+  ctx.fillStyle = '#a99c80'; for (let k = 0; k < w; k += 6) ctx.fillRect(cx - w / 2 + k, base - h - 4, 4, 4);
+  ctx.fillStyle = '#4a3a2a'; ctx.fillRect(cx - 4, base - 9, 8, 9);
+  ctx.fillStyle = '#333'; ctx.fillRect(cx, base - h - 18, 2, 14);
+  ctx.fillStyle = col; ctx.fillRect(cx + 2, base - h - 18, 11, 7);
+  ctx.textAlign = 'center'; ctx.font = 'bold 12px system-ui, sans-serif';
+  const label = `${t.name} Lv${lv}`;
+  ctx.fillStyle = 'rgba(0,0,0,.55)'; const tw = ctx.measureText(label).width + 8; ctx.fillRect(cx - tw / 2, base - h - 34, tw, 15);
+  ctx.fillStyle = '#fff'; ctx.fillText(label, cx, base - h - 22);
+}
+function drawBuilding(type, px, py) {
+  const cx = px + T / 2, cy = py + T / 2;
+  ctx.fillStyle = 'rgba(0,0,0,.22)'; ctx.fillRect(px + 5, py + 24, 24, 5);
+  if (type === 'house') {
+    ctx.fillStyle = '#e6d3ad'; ctx.fillRect(px + 7, py + 13, 18, 14);
+    ctx.fillStyle = '#b4472c'; ctx.beginPath(); ctx.moveTo(px + 4, py + 14); ctx.lineTo(cx, py + 3); ctx.lineTo(px + 28, py + 14); ctx.fill();
+    ctx.fillStyle = '#5b3a20'; ctx.fillRect(cx - 3, py + 19, 6, 8);
+  } else if (type === 'farm') {
+    ctx.fillStyle = '#8a6a3a'; ctx.fillRect(px + 3, py + 4, 26, 24);
+    ctx.fillStyle = '#e8c547'; for (let k = 0; k < 4; k++) ctx.fillRect(px + 5, py + 7 + k * 6, 22, 3);
+  } else if (type === 'tower') {
+    ctx.fillStyle = '#8a8a90'; ctx.fillRect(cx - 6, py - 6, 12, 32);
+    ctx.fillStyle = '#6a6a70'; ctx.fillRect(cx - 9, py - 10, 18, 6);
+    ctx.fillStyle = '#222'; ctx.fillRect(cx - 2, py + 4, 4, 6);
+  } else if (type === 'market') {
+    ctx.fillStyle = '#8b5a2b'; ctx.fillRect(px + 6, py + 16, 20, 11);
+    for (let k = 0; k < 5; k++) { ctx.fillStyle = k % 2 ? '#fff' : '#d33'; ctx.fillRect(px + 4 + k * 5, py + 8, 5, 8); }
+    ctx.fillStyle = '#ffd34d'; ctx.beginPath(); ctx.arc(cx, py + 21, 3, 0, 7); ctx.fill();
+  }
+}
+
+// ---------- 미니맵 ----------
+let minimapDirty = true, mmT = 0;
+const mmCtx = mm.getContext('2d');
+const mmImg = mmCtx.createImageData(W, H);
+mm.width = W; mm.height = H;
+const MM_COL = [[44, 110, 166], [216, 196, 138], [55, 112, 48], [94, 158, 72], [120, 122, 130], [220, 190, 60]];
+function drawMinimap(dt) {
+  mmT -= dt;
+  if (minimapDirty || mmT <= 0) {
+    minimapDirty = false; mmT = 0.5;
+    const d = mmImg.data;
+    for (let i = 0; i < W * H; i++) {
+      let c = MM_COL[S.tiles[i]];
+      const o = owner[i];
+      let r = c[0], g = c[1], b = c[2];
+      if (o >= 0) { const tc = parseInt(TOWN_COLORS[o % TOWN_COLORS.length].slice(1), 16); r = (r + (tc >> 16)) / 2; g = (g + (tc >> 8 & 255)) / 2; b = (b + (tc & 255)) / 2; }
+      d[i * 4] = r; d[i * 4 + 1] = g; d[i * 4 + 2] = b; d[i * 4 + 3] = 255;
+    }
+  }
+  mmCtx.putImageData(mmImg, 0, 0);
+  const p = playerTile();
+  mmCtx.fillStyle = '#c00'; for (const c of S.camps) mmCtx.fillRect(c.x - 1, c.y - 1, 3, 3);
+  mmCtx.fillStyle = '#fff'; for (const t of S.towns) mmCtx.fillRect(t.x - 1, t.y - 1, 3, 3);
+  mmCtx.fillStyle = (S.time * 3 | 0) % 2 ? '#fff' : '#ff0'; mmCtx.fillRect(p.x - 1, p.y - 1, 3, 3);
+}
+
+// ---------- 저장 ----------
+function b64(arr) { let s = ''; for (let i = 0; i < arr.length; i++) s += String.fromCharCode(arr[i]); return btoa(s); }
+function unb64(str) { const s = atob(str), a = new Uint8Array(s.length); for (let i = 0; i < s.length; i++) a[i] = s.charCodeAt(i); return a; }
+function save() {
+  try {
+    const o = { ...S, tiles: b64(S.tiles), hp: b64(S.hp), horses: S.horses.map(h => ({ x: h.x, y: h.y })),
+      player: { ...S.player, mounted: false }, camps: S.camps.map(c => ({ x: c.x, y: c.y, hp: c.hp, maxHp: c.maxHp, t: 0 })) };
+    localStorage.setItem(SAVE_KEY, JSON.stringify(o));
+  } catch (e) {}
+}
+function load() {
+  try {
+    const raw = localStorage.getItem(SAVE_KEY); if (!raw) return false;
+    const o = JSON.parse(raw);
+    o.tiles = unb64(o.tiles); o.hp = unb64(o.hp);
+    if (o.tiles.length !== W * H) return false;
+    o.horses = o.horses.map(h => ({ ...h, vx: 0, vy: 0, t: 0, ridden: false }));
+    S = o; bandits.length = 0; recomputeOwner();
+    toast('이어서 플레이합니다', 1.5);
+    return true;
+  } catch (e) { return false; }
+}
+let saveT = 0;
+
+// ---------- HUD ----------
+function hud() {
+  $('rWood').textContent = S.wood; $('rStone').textContent = S.stone; $('rGold').textContent = S.gold;
+  $('rHp').textContent = S.player.hp; $('rTowns').textContent = S.towns.length;
+  $('rPop').textContent = S.towns.reduce((a, t) => a + t.pop, 0);
+  $('goal').textContent = S.towns.length === 0 ? '목표: 마을 세우기 (건설 버튼)' : `영토 ${ownedCount}/${GOAL_TILES}칸 · 소굴 ${S.camps.length}`;
+}
+
+// ---------- 루프 ----------
+if (!load()) newGame();
+let last = performance.now();
+function frame(now) {
+  const dt = Math.min(0.05, (now - last) / 1000); last = now;
+  if (!paused) {
+    update(dt);
+    saveT += dt; if (saveT > 10) { saveT = 0; save(); }
+  }
+  draw(); hud(); drawMinimap(dt);
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+addEventListener('visibilitychange', () => { if (document.hidden) save(); });
+window.__game = { get S() { return S; }, get owned() { return ownedCount; }, bandits };
+})();
+</script>
+</body>
+</html>
