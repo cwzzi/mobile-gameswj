@@ -11,6 +11,22 @@ const rr = (a, b) => a + rand() * (b - a);
 const $ = id => document.getElementById(id);
 function hash2(x, y) { let h = x * 374761393 + y * 668265263; h = (h ^ (h >>> 13)) * 1274126177; return ((h ^ (h >>> 16)) >>> 0) / 4294967296; }
 function angDiff(a, b) { let d = a - b; while (d > Math.PI) d -= Math.PI * 2; while (d < -Math.PI) d += Math.PI * 2; return d; }
+// 한국어 조사: josa('마을', '이가') → '마을이'. 마지막 글자의 받침(종성)으로 고른다. 숫자는 한자음 기준 받침 (0영 1일 3삼 6육 7칠 8팔)
+const JOSA_PAIR = { '이가': ['이', '가'], '을를': ['을', '를'], '은는': ['은', '는'], '과와': ['과', '와'], '으로로': ['으로', '로'] };
+const DIGIT_BATCHIM = [1, 1, 0, 1, 0, 0, 1, 1, 1, 0]; // 0~9
+const DIGIT_RIEUL = [0, 1, 0, 0, 0, 0, 0, 1, 1, 0];
+function josa(word, pair) {
+  const [withB, noB] = JOSA_PAIR[pair];
+  const c = String(word).replace(/\s+$/, '').slice(-1);
+  const code = c.charCodeAt(0);
+  let batchim = false, rieul = false;
+  if (code >= 0xAC00 && code <= 0xD7A3) { const k = (code - 0xAC00) % 28; batchim = k > 0; rieul = k === 8; }
+  else if (c >= '0' && c <= '9') { const d = code - 48; batchim = !!DIGIT_BATCHIM[d]; rieul = !!DIGIT_RIEUL[d]; }
+  const p = batchim ? (pair === '으로로' && rieul ? noB : withB) : noB;
+  return String(word) + p;
+}
+// 조사만 필요할 때 (이름을 <b>로 감쌀 때): josaP('마을', '이가') → '이'
+const josaP = (word, pair) => josa(word, pair).slice(String(word).length);
 
 let MODE = 'world'; // 'world' | 'battle'
 let paused = false;

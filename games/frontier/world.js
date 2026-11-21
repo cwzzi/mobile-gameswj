@@ -367,7 +367,7 @@ function askWar() {
   paused = true; actHeld = false; auto = null;
   const w = S.war, f = warFaction(w), t = townById(w.town);
   $('warPanel').innerHTML = `<h2>⚔️ ${f.name} 침공!</h2>
-    <div class="sub">${f.name}이(가) <b>${t ? t.name : '마을'}</b>(으)로 진군하고 있습니다. 적 위협도 ${'★'.repeat(Math.min(5, Math.max(1, Math.round(w.diff))))}</div>
+    <div class="sub">${josa(f.name, '이가')} <b>${t ? t.name : '마을'}</b>${josaP(t ? t.name : '마을', '으로로')} 진군하고 있습니다. 적 위협도 ${'★'.repeat(Math.min(5, Math.max(1, Math.round(w.diff))))}</div>
     <div style="font-size:17px;font-weight:800;margin:4px 0 12px;text-align:center">대규모 전투로 전환하시겠습니까?</div>
     <button class="opt primary" data-a="go"><span class="ic">⚔️</span><span>네<small>전장으로 이동해 아군 ${allyCount()}명과 함께 수많은 적을 직접 쓸어버립니다. 적장을 쓰러뜨리면 승리</small></span></button>
     <button class="opt" data-a="field"><span class="ic">🛡️</span><span>아니오<small>지금 화면에서 마을로 다가오는 적 군단(${warbandSize(w)}명)을 직접·망루로 막아냅니다</small></span></button>`;
@@ -599,7 +599,7 @@ function updateWorld(dt) {
         if (dist2(b.x, b.y, tx, ty) < 26 * 26) {
           const steal = Math.min(S.gold, 8 + ri(8)); S.gold -= steal; b.loot += steal; b.raided = true;
           const lost = Math.min(2, town.pop - 1); town.pop -= lost;
-          toast(`🏴 ${eraCur().bandit}이(가) ${town.name}을 습격! 🪙-${steal} 👥-${lost}`, 2.5);
+          toast(`🏴 ${josa(eraCur().bandit, '이가')} ${josa(town.name, '을를')} 습격! 🪙-${steal} 👥-${lost}`, 2.5);
           floatText(tx, ty - 30, `-${steal}🪙`, '#ff7a7a');
           recomputeOwner();
         }

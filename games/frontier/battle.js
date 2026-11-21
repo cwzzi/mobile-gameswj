@@ -302,7 +302,7 @@ function updateBattle(dt) {
         B.boss = addUnit('boss', 1, hq.x - 40, hq.y, hq); B.boss.name = B.f.boss;
         for (let k = 0; k < 6; k++) addUnit('grunt', 1, hq.x + rr(-80, 80), hq.y + rr(-80, 80), hq);
         B.phase = 'boss';
-        setTimeout(() => banner('적장 등장!', `${B.f.boss}을(를) 쓰러뜨려라`, 2.4), 1900);
+        setTimeout(() => banner('적장 등장!', `${josa(B.f.boss, "을를")} 쓰러뜨려라`, 2.4), 1900);
       }
     }
   }
@@ -402,7 +402,7 @@ function allyAI(u, dt, enemies) {
 function endBattle(win) {
   if (B.over) return;
   B.over = true; B.result = win; B.overT = 0;
-  banner(win ? '승리!' : '패배…', win ? `${B.f.boss} 격파` : (B.hero.hp <= 0 ? `${rulerName()}이(가) 쓰러졌습니다` : '시간 초과'), 2.5);
+  banner(win ? '승리!' : '패배…', win ? `${B.f.boss} 격파` : (B.hero.hp <= 0 ? `${josa(rulerName(), "이가")} 쓰러졌습니다` : '시간 초과'), 2.5);
 }
 function showResult() {
   const win = B.result, t = Math.floor(B.t);

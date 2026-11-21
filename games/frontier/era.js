@@ -152,7 +152,7 @@ function eraTick(dt) {
   if (N) {
     S.dev = Math.min(N.need.dev, (S.dev || 0) + devRate() * dt);
     const ready = eraReady();
-    if (ready && !eraReadyShown) { eraReadyShown = true; toast(`🏛️ <b>${N.name}</b>(으)로 나아갈 준비가 되었습니다!<br>왼쪽 위 <b>시대 전환</b> 버튼을 누르세요`, 4.5); }
+    if (ready && !eraReadyShown) { eraReadyShown = true; toast(`🏛️ <b>${N.name}</b>${josaP(N.name, '으로로')} 나아갈 준비가 되었습니다!<br>왼쪽 위 <b>시대 전환</b> 버튼을 누르세요`, 4.5); }
     if (!ready) eraReadyShown = false;
   }
   // 달력
@@ -162,7 +162,7 @@ function eraTick(dt) {
   const R = S.ruler, age = rulerAge();
   if (!R.heir && age >= R.heirAt) {
     R.heir = { name: pickName(RULER_NAMES, R.name), born: S.year };
-    toast(`👶 ${rulerName()}에게 후계자 <b>${R.heir.name}</b>이(가) 태어났습니다`, 3.5);
+    toast(`👶 ${rulerName()}에게 후계자 <b>${R.heir.name}</b>${josaP(R.heir.name, '이가')} 태어났습니다`, 3.5);
   }
   if (!R.warned && age >= R.life - 4) {
     R.warned = true;
@@ -190,7 +190,7 @@ function succession() {
     <div class="stats"><span>치세</span><b>${sum.to - sum.from}년 (건국 ${sum.from}~${sum.to}년)</b>
       <span>세운 마을</span><b>${sum.towns}곳</b><span>전쟁 승리</span><b>${sum.wars}회</b>
       <span>시대</span><b>${sum.eraFrom === sum.eraTo ? sum.eraTo : sum.eraFrom + ' → ' + sum.eraTo}</b></div>
-    <div class="sub" style="text-align:center">${rel} <b>${heir.name}</b>(${hAge}세)이(가) 뒤를 잇습니다.${hAge < 16 ? '<br>어린 군주를 원로들이 섭정으로 돕습니다.' : ''}<br>왕국의 자원과 영토는 그대로 이어지고,<br>군주 레벨은 ${S.hero.lv} → <b>${newLv}</b>(으)로 새로 시작합니다.</div>
+    <div class="sub" style="text-align:center">${rel} <b>${heir.name}</b>(${hAge}세)${josaP(heir.name, '이가')} 뒤를 잇습니다.${hAge < 16 ? '<br>어린 군주를 원로들이 섭정으로 돕습니다.' : ''}<br>왕국의 자원과 영토는 그대로 이어지고,<br>군주 레벨은 ${S.hero.lv} → <b>${newLv}</b>${josaP(String(newLv), '으로로')} 새로 시작합니다.</div>
     <button class="opt primary" id="succGo"><span class="ic">👑</span><span>${S.dynasty} 왕조 ${R.gen + 1}대 ${eraTitle()} ${heir.name} 즉위<small>계속 플레이</small></span></button>`;
   p.classList.add('show');
   $('succGo').onclick = () => {
@@ -250,7 +250,7 @@ function openEraPanel() {
     h += `<div class="era-next">다음 시대: <b>${N.icon} ${N.name}</b> <small>(칭호 ${N.title})</small></div>`;
     for (const r of R) h += `<div class="req"><span>${r.f >= 1 ? '✅' : '⬜'} ${r.label}</span><b>${r.cur}/${r.need}</b><div class="barw"><i style="width:${r.f * 100}%"></i></div></div>`;
     h += `<div class="sub" style="margin-top:8px">발전도는 인구·마을·시장, 특히 <b>📜 학당</b>에서 쌓입니다 (지금 초당 +${devRate().toFixed(1)})<br>해금: ${[...N.perks.slice(0, 1), ...eraUnlockList(S.era + 1)].join(' · ')}</div>`;
-    h += `<button class="opt primary" data-a="adv" ${eraReady() ? '' : 'disabled'}><span class="ic">${N.icon}</span><span>${N.name}(으)로 나아가기<small>${eraReady() ? '준비 완료!' : `진행도 ${Math.floor(eraProgress() * 100)}%`}</small></span></button>`;
+    h += `<button class="opt primary" data-a="adv" ${eraReady() ? '' : 'disabled'}><span class="ic">${N.icon}</span><span>${josa(N.name, '으로로')} 나아가기<small>${eraReady() ? '준비 완료!' : `진행도 ${Math.floor(eraProgress() * 100)}%`}</small></span></button>`;
   } else h += `<div class="era-next">마지막 시대에 도달했습니다. 제국을 넓혀 영토 ${GOAL_TILES}칸을 채우세요!</div>`;
   h += `<button class="close" data-a="close">닫기</button>`;
   const p = $('eraPanel'); p.innerHTML = h; p.classList.add('show');
@@ -289,8 +289,7 @@ function showStart(fromMenu) {
   }
   h += `<div class="lbl">왕조 이름</div><div class="inrow"><input id="dynIn" maxlength="8" value="${dy}"><span>왕조</span><button class="dice" data-r="dyn">🎲</button></div>
     <div class="lbl">군주 이름</div><div class="inrow"><span id="startTitle">${ERAS[0].title}</span><input id="nameIn" maxlength="6" value="${nm}"><button class="dice" data-r="name">🎲</button></div>
-    <button class="opt primary" id="startGo"><span class="ic">👑</span><span>이 왕조로 시작</span></button>
-    ${fromMenu ? '<button class="close" id="startCancel">취소</button>' : ''}`;
+    <div class="startActs"><button class="opt primary" id="startGo"><span class="ic">👑</span><span>이 왕조로 시작</span></button>${fromMenu ? '<button class="close" id="startCancel">취소</button>' : ''}</div>`;
   p.innerHTML = h; p.classList.add('show');
   p.onclick = e => {
     const b = e.target.closest('button'); if (!b) return;
