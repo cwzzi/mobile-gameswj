@@ -26,8 +26,13 @@
 //   R3D.human.key(look)          외형 키(풀링용)
 //   R3D.horse(col)               말 모델 → { group, pose({walk, moving, ridden, yaw}) }  등 높이 R3D.SADDLE_Y
 //   R3D.autoRes                  true면 느릴 때 해상도(픽셀비)를 자동으로 낮춤
+//   R3D.blobs(scene, max)        발밑 둥근 그림자(InstancedMesh 1개) → { begin(), add(x, z, r, a), end() }
+//   R3D.ctex(canvas)             캔버스 텍스처(sRGB)
+//   색 관리: sRGB 출력 + ACES 톤매핑, 색 값('#hex')은 sRGB로 해석되어 선형으로 계산된다.
+//   assets3d.js(A3D)가 CC0 glTF 캐릭터를 불러오면 R3D.human 이 자동으로 그 모델을 돌려준다(키도 바뀜).
 const R3D = (() => {
   if (typeof THREE === 'undefined') return { ok: false, available: () => false, init: () => false, show() {}, tick() {} };
+  if (THREE.ColorManagement) THREE.ColorManagement.legacyMode = false;
   const R = { ok: false, autoRes: true, SADDLE_Y: 0.5 };
   let renderer = null, canvas = null, lastCam = null, shown = true;
 
@@ -53,6 +58,9 @@ const R3D = (() => {
       renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
       renderer.shadowMap.enabled = true;
       renderer.shadowMap.type = THREE.PCFShadowMap;
+      renderer.outputEncoding = THREE.sRGBEncoding;
+      renderer.toneMapping = THREE.ACESFilmicToneMapping;
+      renderer.toneMappingExposure = 1.12;
       R.pr = Math.min(2, window.devicePixelRatio || 1);
       renderer.setPixelRatio(R.pr);
       renderer.setSize(VW, VH, false);
@@ -268,7 +276,35 @@ const R3D = (() => {
     };
   }
   human.key = look => { const o = Object.assign({}, DEF, look || {}); return hkey(o) + '|' + (o.scale || 1); };
-  R.human = human;
+  // CC0 캐릭터가 준비됐으면 그걸, 아니면 절차적 모델
+  const useA = () => typeof A3D !== 'undefined' && A3D.chars;
+  R.human = look => (useA() && A3D.human(look || {})) || human(look);
+  R.human.key = look => useA() ? A3D.humanKey(look || {}) : human.key(look);
+  R.human.proc = human;
+
+  // ---------- 발밑 그림자 (부드러운 원, 인스턴스 1개) ----------
+  let blobTex = null;
+  R.blobs = (scene, max) => {
+    if (!blobTex) {
+      const c = document.createElement('canvas'); c.width = c.height = 64;
+      const g = c.getContext('2d'), gr = g.createRadialGradient(32, 32, 0, 32, 32, 31);
+      gr.addColorStop(0, 'rgba(0,0,0,0.9)'); gr.addColorStop(0.45, 'rgba(0,0,0,0.6)'); gr.addColorStop(1, 'rgba(0,0,0,0)');
+      g.fillStyle = gr; g.fillRect(0, 0, 64, 64); blobTex = new THREE.CanvasTexture(c);
+    }
+    const m = new THREE.InstancedMesh(new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2),
+      new THREE.MeshBasicMaterial({ map: blobTex, transparent: true, depthWrite: false, color: 0x0a1408, opacity: 0.42, polygonOffset: true, polygonOffsetFactor: -2 }), max);
+    m.instanceMatrix.setUsage(THREE.DynamicDrawUsage); m.frustumCulled = false; m.renderOrder = 1; m.count = 0;
+    scene.add(m);
+    const mm = new THREE.Matrix4();
+    let n = 0;
+    return {
+      mesh: m,
+      begin() { n = 0; },
+      add(x, z, r, y) { if (n >= max) return; mm.makeScale(r * 2, 1, r * 2); mm.setPosition(x, (y || 0) + 0.025, z); m.setMatrixAt(n++, mm); },
+      end() { m.count = n; m.instanceMatrix.needsUpdate = true; },
+    };
+  };
+  R.ctex = c => { const t = new THREE.CanvasTexture(c); t.encoding = THREE.sRGBEncoding; return t; };
 
   // ---------- 말 ----------
   const horseBody = col => R.cached('horse|' + col, () => {

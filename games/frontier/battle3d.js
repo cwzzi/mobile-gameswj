@@ -25,8 +25,8 @@ function b3Init() {
   const cam = new THREE.PerspectiveCamera(42, VW / VH, 1, 200);
   scene.background = new THREE.Color(0x3a4a34);
   scene.fog = new THREE.Fog(0xc99a6e, 40, 100);
-  const hemi = new THREE.HemisphereLight(0xffcfa0, 0x34402c, 0.66); scene.add(hemi);
-  const sun = new THREE.DirectionalLight(0xffc88c, 1.0);
+  const hemi = new THREE.HemisphereLight(0xffe6c8, 0x3a4a30, 0.66); scene.add(hemi);
+  const sun = new THREE.DirectionalLight(0xffe0b0, 1.0);
   sun.castShadow = true; sun.shadow.mapSize.set(1024, 1024);
   const sc = sun.shadow.camera; sc.left = -24; sc.right = 24; sc.top = 24; sc.bottom = -24; sc.near = 1; sc.far = 100;
   sun.shadow.bias = -0.0008; sun.shadow.normalBias = 0.03;
@@ -34,7 +34,7 @@ function b3Init() {
 
   const skirt = new THREE.Mesh(new THREE.PlaneGeometry(500, 500).rotateX(-Math.PI / 2), new THREE.MeshLambertMaterial({ color: 0x35502f }));
   skirt.position.set(BW / T / 2, -0.03, BH / T / 2); scene.add(skirt);
-  const ground = new THREE.Mesh(new THREE.PlaneGeometry(BW / T, BH / T).rotateX(-Math.PI / 2), new THREE.MeshLambertMaterial({ color: 0x6a9a48 }));
+  const ground = new THREE.Mesh(new THREE.PlaneGeometry(BW / T, BH / T).rotateX(-Math.PI / 2), w3dGroundMat(null, BW / T));
   ground.position.set(BW / T / 2, 0, BH / T / 2); ground.receiveShadow = true; scene.add(ground);
 
   const glowTex = b3Glow();
@@ -124,7 +124,8 @@ function b3Init() {
   };
   hero.glow.position.y = 0.05; hero.mglow.position.y = 0.06; hero.full.position.y = 0.07;
 
-  B3 = { scene, cam, hemi, sun, ground, skirt, M, G, root, fx, hero, B: null, own: [], pool: new Map(), act: new Map(), frame: 0, lastT: performance.now(),
+  const blobs = R3D.blobs(scene, 200);
+  B3 = { scene, cam, hemi, sun, ground, skirt, M, G, root, fx, hero, blobs, B: null, own: [], pool: new Map(), act: new Map(), frame: 0, lastT: performance.now(),
     tx: 0, tz: 0, dist: 30, frustum: new THREE.Frustum(), pm: new THREE.Matrix4(), sph: new THREE.Sphere(new THREE.Vector3(), 1), bases: [], stakes: null, glows: [], tele: { officer: [], boss: [], charge: [] },
     dummy: new THREE.Object3D(), heroRec: null, pr: {}, pa: {}, tex: null };
   // 공용 텔레그래프 풀
@@ -167,28 +168,35 @@ function b3Reset() {
   const { G, M, root, own } = B3;
   B3.B = B;
   // 지면 텍스처
-  const tex = new THREE.CanvasTexture(bGround); tex.anisotropy = Math.min(4, R3D.maxAniso || 1); own.push(tex); B3.tex = tex;
+  const tex = R3D.ctex(bGround); tex.anisotropy = Math.min(4, R3D.maxAniso || 1); own.push(tex); B3.tex = tex;
   B3.ground.material.map = tex; B3.ground.material.color.set(0xffffff); B3.ground.material.needsUpdate = true;
   B3.tx = B.hero.x / T; B3.tz = B.hero.y / T;
   const D = B3.dummy;
   // 장애물 (인스턴스)
   const rocks = [], trees = [], pines = [];
   for (const o of B.obs) (o.kind === 'rock' ? rocks : o.v % 3 === 0 ? pines : trees).push(o);
-  const inst = (geo, list, scl, cast) => {
+  // CC0 모델이 있으면 나무/바위를 그걸로 (높이를 절차적 모델과 비슷하게 맞춤)
+  const AP = typeof A3D !== 'undefined' && A3D.ready;
+  const aGeo = (k, h) => { const g = AP && A3D.prop(k); if (!g) return null; g.computeBoundingBox(); return { g, k: h / (g.boundingBox.max.y || 1) }; };
+  const aRock = aGeo('rock', 0.62), aTree = aGeo('round', 2.0), aPine = aGeo('pine', 2.3);
+  const inst = (geo, list, scl, cast, ag) => {
     if (!list.length) return;
-    const im = new THREE.InstancedMesh(geo, R3D.mats.vc, list.length);
+    if (ag) { geo = ag.g; scl *= ag.k; }
+    const im = new THREE.InstancedMesh(geo, ag ? A3D.mat : R3D.mats.vc, list.length);
     im.frustumCulled = false; im.castShadow = cast; im.receiveShadow = true;
     const col = new THREE.Color();
     list.forEach((o, i) => {
       const s = scl * (0.85 + (o.v % 5) * 0.09);
       D.position.set(o.x / T, 0, o.y / T); D.rotation.set(0, o.v * 1.7, 0); D.scale.set(s, s * (0.9 + (o.v % 3) * 0.12), s); D.updateMatrix();
       im.setMatrixAt(i, D.matrix);
-      const k = 0.88 + (o.v % 4) * 0.06; im.setColorAt(i, col.setRGB(k, k, k));
+      const k = 0.88 + (o.v % 4) * 0.06; col.setRGB(k, k, k);
+      if (ag && geo !== aRock.g) col.multiply(W3_TREE_TINT[geo === aPine.g ? 'pine' : 'round']);
+      im.setColorAt(i, col);
     });
     im.instanceMatrix.needsUpdate = true; if (im.instanceColor) im.instanceColor.needsUpdate = true;
     root.add(im); own.push(im);
   };
-  inst(G.rock, rocks, 0.9, true); inst(G.tree, trees, 1.15, true); inst(G.pine, pines, 1.1, true);
+  inst(G.rock, rocks, 0.9, true, aRock); inst(G.tree, trees, 1.15, true, aTree); inst(G.pine, pines, 1.1, true, aPine);
   // 거점
   const all = [B.allyBase, ...B.bases], slots = [];
   all.forEach((b, bi) => { for (let i = 0; i < 18; i++) { const a = i / 18 * Math.PI * 2; if (Math.abs(angDiff(a, Math.PI)) < 0.4 || Math.abs(angDiff(a, 0)) < 0.4) continue; slots.push([b.x / T + Math.cos(a) * 2.7, b.y / T + Math.sin(a) * 2.7, a + bi]); } });
@@ -226,6 +234,7 @@ function b3Release(u, r) {
 }
 function b3Use(key, look, obj) {
   let r = B3.act.get(obj);
+  if (r && r.pk !== key) { b3Release(obj, r); r = null; } // 모델이 바뀜(에셋 로딩 완료 등)
   if (!r) {
     const pool = B3.pool.get(key);
     let m = pool && pool.length ? pool.pop() : null;
@@ -282,10 +291,16 @@ function drawBattle3D() {
   // 유닛
   let gi = 0, ti = { officer: 0, boss: 0, charge: 0 };
   const pose = { walk: 0, moving: false, swing: 0, yaw: 0 };
+  const AV = typeof A3D !== 'undefined' ? A3D.ver : 0, BL = S3.blobs; BL.begin();
   for (const u of B.units) {
     const x = u.x / T, z = u.y / T;
     if (!b3View(x, z, 2.2)) continue;
-    if (!u._l3) { const lk = Object.assign({}, enemyLook(u)); lk.scale = (lk.scale || 1) * B3_MULT; u._l3 = lk; u._k3 = R3D.human.key(lk); }
+    if (!u._l3 || u._v3 !== AV) {
+      // 졸병/아군은 가벼운 모델 + 그림자맵 대신 발밑 그림자(군중이 많아서)
+      const lk = Object.assign({}, enemyLook(u)); lk.scale = (lk.scale || 1) * B3_MULT;
+      if (u.kind === 'grunt' || u.kind === 'ally') lk.lod = 1;
+      u._l3 = lk; u._k3 = R3D.human.key(lk) + (lk.lod ? '|lo' : ''); u._v3 = AV;
+    }
     const r = b3Use(u._k3, u._l3, u), g = r.m.group;
     const mv = Math.abs(u.walk - r.lw) > 1e-4; r.lw = u.walk;
     let sw = 0, fy;
@@ -305,6 +320,7 @@ function drawBattle3D() {
       y += 0.12 * k;
     } else g.rotation.x = 0;
     g.scale.setScalar(s); g.position.set(x, y, z);
+    if (!u.dead || u.deadT > 0.4) BL.add(x, z, (u.kind === 'boss' ? 0.5 : u.kind === 'officer' ? 0.4 : 0.32) * (u.dead ? u.deadT : 1) * (1 - Math.min(0.5, u.z / T * 0.4)));
     // 지휘관 지면 광채 + 공격 예고
     if ((u.kind === 'boss' || u.kind === 'officer') && !u.dead && gi < S3.glows.length) {
       const gm = S3.glows[gi++]; gm.visible = true; gm.material = u.kind === 'boss' ? S3.M.glowRed : S3.M.glowGold;
@@ -327,6 +343,7 @@ function drawBattle3D() {
   for (const k in S3.tele) for (let i = ti[k]; i < S3.tele[k].length; i++) S3.tele[k][i].visible = false;
   // 영웅
   b3Hero(H, tm, dt, hx, hz, pose);
+  BL.add(hx, hz, 0.45); BL.end();
   for (const [o, r] of S3.act) if (r.seen !== S3.frame) b3Release(o, r);
 
   R3D.render(S3.scene, cam);
@@ -380,7 +397,7 @@ function drawBattle3D() {
   }
   g.globalAlpha = 1;
   ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
-  ctx.fillStyle = 'rgba(255,130,50,.09)'; ctx.fillRect(0, 0, VW, VH);
+  ctx.fillStyle = 'rgba(255,140,60,.05)'; ctx.fillRect(0, 0, VW, VH);
   if (H.musouT > 0) { ctx.fillStyle = 'rgba(255,210,90,.10)'; ctx.fillRect(0, 0, VW, VH); }
   drawVignette(0.4);
   if (H.hurt > 0) { ctx.fillStyle = `rgba(200,0,0,${H.hurt * 0.7})`; ctx.fillRect(0, 0, VW, VH); }

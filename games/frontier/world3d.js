@@ -13,6 +13,116 @@ function w3dNotify(kind, i) {
   if (kind === 'tile') w3dDirtyTiles.push(i); else if (kind === 'owner') w3dOwnerDirty = true;
 }
 
+// ---------- 공용 재질: 지면 디테일 / 수면 ----------
+// 타일 반복되는 잔잔한 노이즈(밝기 0.8~1.15)를 지면 색에 곱해 넓은 면이 밋밋하지 않게
+let w3dDetail = null;
+function w3dDetailTex() {
+  if (w3dDetail) return w3dDetail;
+  const N = 128, c = document.createElement('canvas'); c.width = c.height = N;
+  const g = c.getContext('2d'), img = g.createImageData(N, N), r = mulberry(91);
+  const oct = (cell, amp, out) => {
+    const n = N / cell, grid = []; for (let i = 0; i < n * n; i++) grid.push(r());
+    const at = (x, y) => grid[((y + n) % n) * n + ((x + n) % n)];
+    const sm = t => t * t * (3 - 2 * t);
+    for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+      const fx = x / cell, fy = y / cell, ix = Math.floor(fx), iy = Math.floor(fy), tx = sm(fx - ix), ty = sm(fy - iy);
+      const v = lerp(lerp(at(ix, iy), at(ix + 1, iy), tx), lerp(at(ix, iy + 1), at(ix + 1, iy + 1), tx), ty);
+      out[y * N + x] += (v - 0.5) * amp;
+    }
+  };
+  const v = new Float32Array(N * N); oct(32, 0.5, v); oct(16, 0.35, v); oct(8, 0.25, v); oct(4, 0.18, v);
+  for (let i = 0; i < N * N; i++) { const k = Math.round(clamp(0.5 + v[i] * 0.9 + (r() - 0.5) * 0.08, 0, 1) * 255); img.data[i * 4] = img.data[i * 4 + 1] = img.data[i * 4 + 2] = k; img.data[i * 4 + 3] = 255; }
+  g.putImageData(img, 0, 0);
+  const t = new THREE.CanvasTexture(c); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = Math.min(4, R3D.maxAniso || 1);
+  return (w3dDetail = t);
+}
+// 지면 재질: 칠한 텍스처 × 디테일 노이즈(2단계 크기). rep = 텍스처 한 장이 덮는 타일 수
+function w3dGroundMat(tex, rep) {
+  const m = new THREE.MeshLambertMaterial({ map: tex });
+  const det = w3dDetailTex();
+  m.onBeforeCompile = sh => {
+    sh.uniforms.uDetail = { value: det }; sh.uniforms.uRep = { value: rep };
+    sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nuniform sampler2D uDetail;\nuniform float uRep;')
+      .replace('#include <map_fragment>', `#include <map_fragment>
+#ifdef USE_MAP
+  float dA = texture2D(uDetail, vUv * uRep * 0.5).r, dB = texture2D(uDetail, vUv * uRep * 0.093 + 0.37).r;
+  diffuseColor.rgb *= (0.8 + 0.34 * dA) * (0.9 + 0.2 * dB);
+  { float l = dot(diffuseColor.rgb, vec3(0.3, 0.59, 0.11)); diffuseColor.rgb = max(mix(vec3(l), diffuseColor.rgb, 1.22), 0.0); } // ACES로 빠지는 채도 보정
+#endif`);
+  };
+  m.customProgramCacheKey = () => 'w3ground';
+  return m;
+}
+function w3dWaterMat(mask) {
+  return new THREE.ShaderMaterial({
+    uniforms: THREE.UniformsUtils.merge([THREE.UniformsLib.fog, {
+      uTime: { value: 0 }, uMask: { value: null }, uSize: { value: new THREE.Vector2(W, H) }, uNight: { value: 0 },
+      uDeep: { value: new THREE.Color('#1b5d8c') }, uShal: { value: new THREE.Color('#46c2cf') }, uSky: { value: new THREE.Color('#d7ecff') },
+    }]),
+    vertexShader: `#include <common>
+#include <fog_pars_vertex>
+varying vec3 vW;
+void main() {
+  vec4 wp = modelMatrix * vec4(position, 1.0); vW = wp.xyz;
+  vec4 mvPosition = viewMatrix * wp; gl_Position = projectionMatrix * mvPosition;
+  #include <fog_vertex>
+}`,
+    fragmentShader: `#include <common>
+#include <fog_pars_fragment>
+uniform float uTime, uNight; uniform sampler2D uMask; uniform vec2 uSize; uniform vec3 uDeep, uShal, uSky;
+varying vec3 vW;
+void main() {
+  vec2 uv = vW.xz / uSize;
+  float d = (uv.x < 0.0 || uv.y < 0.0 || uv.x > 1.0 || uv.y > 1.0) ? 1.0 : texture2D(uMask, uv).r;
+  vec2 p = vW.xz;
+  float w1 = sin(p.x * 1.9 + uTime * 1.3 + sin(p.y * 0.8 + uTime * 0.6) * 1.6);
+  float w2 = sin(p.y * 2.4 - uTime * 1.1 + sin(p.x * 1.1 - uTime * 0.45) * 1.3);
+  float w3 = sin((p.x + p.y) * 4.1 + uTime * 2.1);
+  vec3 n = normalize(vec3(w1 * 0.1 + w3 * 0.04, 1.0, w2 * 0.1 - w3 * 0.03));
+  vec3 V = normalize(cameraPosition - vW), L = normalize(vec3(0.4, 1.0, 0.55));
+  float spec = pow(max(dot(reflect(-L, n), V), 0.0), 80.0);
+  float fres = pow(1.0 - max(dot(n, V), 0.0), 4.0);
+  vec3 col = mix(uShal, uDeep, smoothstep(0.02, 0.75, d));
+  col = mix(col, uSky, clamp(fres * 0.6 + 0.04, 0.0, 0.5));
+  float band = smoothstep(0.2, 0.04, d);
+  float foam = band * smoothstep(0.35, 0.9, 0.5 + 0.5 * sin(d * 70.0 - uTime * 2.2 + w1 * 1.2 + w2)) + smoothstep(0.075, 0.03, d) * 0.8;
+  col = mix(col, vec3(0.95, 0.98, 1.0), clamp(foam, 0.0, 1.0) * 0.75);
+  col += spec * vec3(1.0, 0.97, 0.9) * (1.0 - uNight * 0.8) * 0.9;
+  col *= 1.0 - uNight * 0.55;
+  float a = mix(0.5, 0.88, smoothstep(0.0, 0.6, d)) + foam * 0.25;
+  gl_FragColor = vec4(col, clamp(a, 0.0, 1.0));
+  #include <tonemapping_fragment>
+  #include <encodings_fragment>
+  #include <fog_fragment>
+}`,
+    transparent: true, depthWrite: false, fog: true,
+  });
+}
+// 물 깊이 마스크(256²): 타일 단위 깊이를 키워 부드럽게 흐린 것
+function w3dBuildMask() {
+  const N = 256, src = new Float32Array(W * H);
+  for (let i = 0; i < W * H; i++) src[i] = S.tiles[i] === WATER ? Math.min(6, waterDepth[i] || 6) / 6 : 0;
+  let a = new Float32Array(N * N);
+  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+    const fx = clamp((x + 0.5) / N * W - 0.5, 0, W - 1), fy = clamp((y + 0.5) / N * H - 0.5, 0, H - 1);
+    const ix = Math.min(W - 2, fx | 0), iy = Math.min(H - 2, fy | 0), tx = fx - ix, ty = fy - iy;
+    a[y * N + x] = lerp(lerp(src[iy * W + ix], src[iy * W + ix + 1], tx), lerp(src[(iy + 1) * W + ix], src[(iy + 1) * W + ix + 1], tx), ty);
+  }
+  for (let pass = 0; pass < 2; pass++) {
+    const b = new Float32Array(N * N);
+    for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+      let s = 0, c = 0;
+      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) { const xx = x + dx, yy = y + dy; if (xx < 0 || yy < 0 || xx >= N || yy >= N) continue; s += a[yy * N + xx]; c++; }
+      b[y * N + x] = s / c;
+    }
+    a = b;
+  }
+  const d = W3.mask.image.data;
+  for (let i = 0; i < N * N; i++) { const v = Math.round(a[i] * 255); d[i * 4] = v; d[i * 4 + 1] = v; d[i * 4 + 2] = v; d[i * 4 + 3] = 255; }
+  W3.mask.needsUpdate = true;
+  W3.water.material.uniforms.uMask.value = W3.mask;
+}
+
 // ---------- 초기화 ----------
 function w3dInit() {
   const scene = new THREE.Scene();
@@ -31,21 +141,15 @@ function w3dInit() {
   // 바다: 깊은 바닥 + 반투명 수면 + 물결 반짝임
   const ocean = new THREE.Mesh(new THREE.PlaneGeometry(700, 700).rotateX(-Math.PI / 2), new THREE.MeshLambertMaterial({ color: 0x1f4a6c }));
   ocean.position.set(W / 2, -0.72, H / 2); scene.add(ocean);
-  const water = new THREE.Mesh(new THREE.PlaneGeometry(700, 700).rotateX(-Math.PI / 2),
-    new THREE.MeshPhongMaterial({ color: 0x3a92c8, transparent: true, opacity: 0.52, shininess: 70, specular: 0x9fd8ff, depthWrite: false }));
+  // 수면: 깊이 마스크(물가=0 … 깊은 바다=1)로 얕은 물 색 · 물거품 · 물결 반짝임을 셰이더에서
+  const maskData = new Uint8Array(256 * 256 * 4);
+  const mask = new THREE.DataTexture(maskData, 256, 256, THREE.RGBAFormat);
+  mask.magFilter = mask.minFilter = THREE.LinearFilter; mask.wrapS = mask.wrapT = THREE.ClampToEdgeWrapping;
+  const water = new THREE.Mesh(new THREE.PlaneGeometry(700, 700).rotateX(-Math.PI / 2), w3dWaterMat(mask));
   water.position.set(W / 2, -0.1, H / 2); water.renderOrder = 1; scene.add(water);
-  const wc = document.createElement('canvas'); wc.width = wc.height = 128;
-  const wg = wc.getContext('2d'); wg.fillStyle = '#000'; wg.fillRect(0, 0, 128, 128);
-  const wr = mulberry(77);
-  wg.strokeStyle = 'rgba(255,255,255,.55)'; wg.lineWidth = 2; wg.lineCap = 'round';
-  for (let k = 0; k < 14; k++) {
-    const x = wr() * 128, y = wr() * 128, l = 8 + wr() * 12;
-    for (const ox of [0, -128, 128]) for (const oy of [0, -128, 128]) { wg.beginPath(); wg.moveTo(x + ox, y + oy); wg.quadraticCurveTo(x + ox + l / 2, y + oy - 4, x + ox + l, y + oy); wg.stroke(); }
-  }
-  const wtex = new THREE.CanvasTexture(wc); wtex.wrapS = wtex.wrapT = THREE.RepeatWrapping; wtex.repeat.set(700 / 5, 700 / 5);
-  const waves = new THREE.Mesh(new THREE.PlaneGeometry(700, 700).rotateX(-Math.PI / 2),
-    new THREE.MeshBasicMaterial({ map: wtex, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, opacity: 0.22, fog: false }));
-  waves.position.set(W / 2, -0.085, H / 2); waves.renderOrder = 2; scene.add(waves);
+  const waves = null, wtex = null;
+  const detail = w3dDetailTex();
+  const blobs = R3D.blobs(scene, 160);
 
   // 숲 재질: 바람에 흔들림 + 벌목 중인 칸은 크게 흔들림
   const uTime = { value: 0 }, uChop = { value: new THREE.Vector3(-99, -99, 0) };
@@ -74,7 +178,9 @@ function w3dInit() {
     new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.8, depthWrite: false, side: THREE.DoubleSide, blending: THREE.AdditiveBlending }));
   slash.renderOrder = 4; scene.add(slash);
 
-  W3 = { scene, cam, hemi, sun, pts, water, waves, wtex, treeMat, goldMat, uTime, uChop, ring, slash,
+  const treeMatA = new THREE.MeshLambertMaterial({ map: null });
+  treeMatA.onBeforeCompile = treeMat.onBeforeCompile; treeMatA.customProgramCacheKey = () => 'w3treeA';
+  W3 = { scene, cam, hemi, sun, pts, water, waves, wtex, mask, detail, blobs, treeMat, treeMatA, goldMat, uTime, uChop, ring, slash, aver: -1,
     frustum: new THREE.Frustum(), pm: new THREE.Matrix4(), chunks: [], dyn: new Map(), pool: new Map(), frame: 0,
     arrows: [], S: null, tx: 0, tz: 0, lastT: performance.now(), dist: 30, look: new WeakMap() };
   R3D.onResize.push(w3dResize); w3dResize();
@@ -104,6 +210,7 @@ function w3dReset() {
     }
     ch[vz * (W + 1) + vx] = allW ? -(0.2 + 0.075 * Math.min(md, 6)) : 0;
   }
+  w3dBuildMask();
   W3.prevHp = S.hp.slice(); W3.ownSnap = owner.slice();
   for (const [o, r] of W3.dyn) w3dDrop(o, r);
   w3dDirtyTiles.length = 0; w3dOwnerDirty = false;
@@ -133,8 +240,8 @@ function w3dMakeGround(c) {
   }
   geo.computeVertexNormals();
   const can = document.createElement('canvas'); can.width = can.height = CK * TPX;
-  const tex = new THREE.CanvasTexture(can); tex.anisotropy = Math.min(4, R3D.maxAniso || 1);
-  const mesh = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ map: tex }));
+  const tex = R3D.ctex(can); tex.anisotropy = Math.min(4, R3D.maxAniso || 1);
+  const mesh = new THREE.Mesh(geo, w3dGroundMat(tex, CK));
   mesh.position.set(c.cx * CK + CK / 2, 0, c.cz * CK + CK / 2); mesh.receiveShadow = true;
   c.ground = mesh; c.can = can; c.g = can.getContext('2d'); c.tex = tex; c.gDirty = true;
   W3.scene.add(mesh);
@@ -228,11 +335,13 @@ function w3dPropGeo(k) {
       { g: cone(0.18, 0.34, 7), c: '#347a45', p: [0, 0.98, 0] },
     ]);
     if (k === 'mA') return R3D.merge([
+      { g: cone(1.0, 0.5, 7), c: '#7c7d72', p: [0, 0.25, 0] },
       { g: cone(0.8, 1.55, 6), c: '#8d8f99', p: [0, 0.775, 0] },
       { g: cone(0.8 * 0.33, 1.55 * 0.33, 6), c: '#f4f6fb', p: [0, 1.55 - 1.55 * 0.33 / 2 + 0.01, 0], s: 1.05 },
       { g: ico(0.2, 0), c: '#7a7c84', p: [0.45, 0.1, 0.35] },
     ]);
     if (k === 'mB') return R3D.merge([
+      { g: cone(0.95, 0.45, 7), c: '#7a7b70', p: [0, 0.225, 0] },
       { g: cone(0.62, 1.25, 5), c: '#8a8c96', p: [-0.18, 0.625, 0.08] },
       { g: cone(0.62 * 0.3, 1.25 * 0.3, 5), c: '#f4f6fb', p: [-0.18, 1.25 - 1.25 * 0.3 / 2 + 0.01, 0.08], s: 1.06 },
       { g: cone(0.55, 0.95, 5), c: '#9a9ca6', p: [0.3, 0.475, -0.18] },
@@ -262,6 +371,7 @@ const w3dM4 = new THREE.Matrix4(), w3dQ = new THREE.Quaternion(), w3dV = new THR
 function w3dBuildProps(c) {
   w3dFreeProps(c);
   const L = { round: [], fruit: [], pine: [], mA: [], mB: [], nug: [], tuft: [], rock: [] };
+  const AP = typeof A3D !== 'undefined' && A3D.ready;
   const x0 = c.cx * CK, y0 = c.cz * CK;
   for (let y = y0; y < y0 + CK; y++) for (let x = x0; x < x0 + CK; x++) {
     const i = y * W + x, t = S.tiles[i], h = hash2(x, y);
@@ -269,6 +379,11 @@ function w3dBuildProps(c) {
       const n = Math.min(4, S.hp[i]), pine = hash2(x, y + 99) > 0.62;
       for (let k = 0; k < n; k++) {
         const sp = W3_SPOTS[(k + (h * 4 | 0)) % 4], r = hash2(x + k * 13, y + 5);
+        if (AP) { // CC0 나무: 종류를 섞고 크기·위치를 더 흩뜨려 숲이 덜 균일하게
+          const hk = hash2(x + k * 7, y + 3), kind = hk < (pine ? 0.75 : 0.3) ? 'pine' : hk > 0.93 ? 'fruit' : 'round';
+          L[kind].push([x + sp[0] + (r - 0.5) * 0.3, y + sp[1] + (hash2(x, y + k * 11) - 0.5) * 0.28, r * 6.28, 0.78 + hash2(x * 3 + k, y) * 0.5, 0.9 + hash2(x, y * 3 + k) * 0.35, r]);
+          continue;
+        }
         const kind = pine ? 'pine' : (hash2(x + k * 7, y + 3) > 0.85 ? 'fruit' : 'round');
         L[kind].push([x + sp[0] + (r - 0.5) * 0.14, y + sp[1] + (hash2(x, y + k * 11) - 0.5) * 0.12, r * 6.28, 1.0 + hash2(x * 3 + k, y) * 0.35, 1.4, r]);
       }
@@ -288,17 +403,25 @@ function w3dBuildProps(c) {
   for (const k in L) {
     const list = L[k]; if (!list.length) continue;
     const tree = k === 'round' || k === 'fruit' || k === 'pine' || k === 'tuft';
-    const m = new THREE.InstancedMesh(w3dPropGeo(k), tree ? W3.treeMat : k === 'nug' ? W3.goldMat : R3D.mats.vc, list.length);
+    const ag = AP ? A3D.prop(k) : null; // 숲·바위만 CC0 모델 (산은 육각 기둥이 네모 타일과 안 어울려 절차적 봉우리 유지)
+    if (ag && tree && !W3.treeMatA.map) { W3.treeMatA.map = A3D.atlas; W3.treeMatA.needsUpdate = true; }
+    const geo = ag || w3dPropGeo(k);
+    const m = new THREE.InstancedMesh(geo, ag ? (tree ? W3.treeMatA : A3D.mat) : tree ? W3.treeMat : k === 'nug' ? W3.goldMat : R3D.mats.vc, list.length);
     list.forEach((e, n) => {
       w3dV.set(e[0], 0, e[1]); w3dQ.setFromAxisAngle(w3dUp, e[2]); w3dSc.set(e[3], e[3] * e[4], e[3]);
       w3dM4.compose(w3dV, w3dQ, w3dSc); m.setMatrixAt(n, w3dM4);
-      if (k !== 'nug') { const v = e[5]; w3dCol.setRGB(0.9 + v * 0.2, 0.9 + ((v * 7) % 1) * 0.2, 0.88 + ((v * 13) % 1) * 0.15); m.setColorAt(n, w3dCol); }
+      if (k !== 'nug') {
+        const v = e[5]; w3dCol.setRGB(0.9 + v * 0.2, 0.9 + ((v * 7) % 1) * 0.2, 0.88 + ((v * 13) % 1) * 0.15);
+        if (ag && tree) w3dCol.multiply(W3_TREE_TINT[k]).multiplyScalar(0.92 + ((v * 5) % 1) * 0.16); // 민트빛 나무를 들판 색에 맞춤
+        m.setColorAt(n, w3dCol);
+      }
     });
     m.castShadow = k !== 'tuft'; m.receiveShadow = !tree; m.frustumCulled = false;
     grp.add(m);
   }
   c.props = grp; c.pDirty = false; W3.scene.add(grp);
 }
+const W3_TREE_TINT = { pine: new THREE.Color(0.55, 0.78, 0.5), round: new THREE.Color(0.8, 0.95, 0.5), fruit: new THREE.Color(1.0, 0.85, 0.5) };
 function w3dFreeProps(c) {
   if (!c.props) return;
   W3.scene.remove(c.props); for (const m of c.props.children) m.dispose(); c.props = null;
@@ -490,12 +613,12 @@ const W3_HS = 1.4; // 말 크기
 const W3_BSCALE = { house: [1.25, 1.4, 1.25], tower: [1.15, 1.45, 1.15], market: [1.2, 1.35, 1.2], farm: [1, 1.3, 1] };
 const W3_LOOK = {
   player: { body: '#2b5fb8', trim: '#f2c14e', cape: '#c0392b', hat: 'crown', weapon: 'sword', armor: true, scale: 1.45 * 1.1 },
-  bandit: { body: '#7a2a22', trim: '#2a1a12', legs: '#2a2420', hat: 'hood', helm: '#3a2a22', weapon: 'club', scale: 1.45 },
+  bandit: { body: '#7a2a22', trim: '#2a1a12', legs: '#2a2420', hat: 'hood', helm: '#3a2a22', weapon: 'club', scale: 1.45, tint: '#8a2a20', lod: 1 },
 };
 function w3dWarLook(cmd) {
   const f = FACTIONS[S.war ? S.war.faction : 0];
   return cmd ? { body: f.color, trim: '#c9a040', legs: '#2a2420', hat: 'horned', helm: '#8a7a50', weapon: 'axe', armor: true, cape: '#5a1a1a', scale: 1.45 * 1.3 }
-    : { body: f.color, trim: '#2a2218', legs: '#2a2420', hat: 'helm', helm: '#6a6a70', plume: f.plume, weapon: 'spear', scale: 1.45 };
+    : { body: f.color, trim: '#2a2218', legs: '#2a2420', hat: 'helm', helm: '#6a6a70', plume: f.plume, weapon: 'spear', scale: 1.45, lod: 1 };
 }
 function w3dHuman(obj, look) { const key = R3D.human.key(look); return w3dUse(obj, 'h|' + key, () => R3D.human(look)); }
 
@@ -513,8 +636,7 @@ function w3dLighting(lightSrc) {
   W3.hemi.color.set('#d8ecff').lerp(w3dC1.set('#4a5a9a'), night);
   W3.hemi.groundColor.set('#5a6a40').lerp(w3dC1.set('#1a1c34'), night);
   R3D.mats.glow.emissiveIntensity = clamp((night - 0.05) * 1.6 + dusk * 0.35, 0, 1.3);
-  W3.waves.material.opacity = lerp(0.22, 0.08, night);
-  W3.water.material.color.set('#3a92c8').lerp(w3dC1.set('#1a3a68'), night * 0.6);
+  W3.water.material.uniforms.uNight.value = night;
   // 밤: 가까운 불빛 3개 + 영주 주변 은은한 빛 (빛 개수는 고정 → 셰이더 재컴파일 없음)
   const p = S.player, px = p.x / T, pz = p.y / T;
   lightSrc.sort((a, b) => ((a.x - px) ** 2 + (a.z - pz) ** 2) - ((b.x - px) ** 2 + (b.z - pz) ** 2));
@@ -573,6 +695,14 @@ function drawWorld3D() {
     for (let i = 0; i < W * H; i++) if (owner[i] !== snap[i]) { const x = i % W, y = (i / W) | 0; markG(x, y); markG(x + 1, y); markG(x - 1, y); markG(x, y + 1); markG(x, y - 1); W3.chunks[((y / CK) | 0) * NCK + ((x / CK) | 0)].pDirty = true; }
     snap.set(owner);
   }
+  // CC0 모델이 막 준비됐으면: 숲/산 다시 만들고, 건물·사람은 새 모델로 바꿔 끼운다
+  const AV = typeof A3D !== 'undefined' ? A3D.ver : 0;
+  if (W3.aver !== AV) {
+    W3.aver = AV;
+    for (const c of W3.chunks) c.pDirty = true;
+    for (const [o, r] of W3.dyn) w3dDrop(o, r);
+    W3.pool.clear();
+  }
   // 청크: 보이는 것만 만들고 그린다
   let budget = 3;
   for (const c of W3.chunks) {
@@ -580,7 +710,7 @@ function drawWorld3D() {
     if (vis) {
       if (!c.ground) w3dMakeGround(c);
       if (c.gDirty && (!c.painted || budget-- > 0)) { w3dPaint(c); c.gDirty = false; c.painted = true; }
-      if (!c.props || c.pDirty) w3dBuildProps(c);
+      if (!c.props || (c.pDirty && (!c.propsAV || c.propsAV === AV || budget-- > 0))) { w3dBuildProps(c); c.propsAV = AV; }
     }
     if (c.ground) c.ground.visible = vis;
     if (c.props) c.props.visible = vis;
@@ -589,47 +719,65 @@ function drawWorld3D() {
   let chopI = -1, chopV = 0;
   for (const [i, v] of chopFx) if (S.tiles[i] === FOREST && v > chopV) { chopV = v; chopI = i; }
   if (chopI >= 0) W3.uChop.value.set(chopI % W + 0.5, ((chopI / W) | 0) + 0.5, chopV * 4); else W3.uChop.value.z = 0;
-  W3.wtex.offset.set((tm * 0.01) % 1, (tm * 0.006) % 1);
+  W3.water.material.uniforms.uTime.value = tm;
 
   // 동적 오브젝트
   const bars = [], labels = [], lights = [], coins = [];
+  const BL = W3.blobs; BL.begin();
   for (const t of S.towns) {
     const x = t.x + 0.5, z = t.y + 0.5;
     if (!w3dInView(x, z, 3)) continue;
     const col = TOWN_COLORS[t.id % TOWN_COLORS.length];
-    const r = w3dUse(t, 'town|' + col, () => {
+    const r = w3dUse(t, 'town|' + col + '|' + AV, () => {
       const group = new THREE.Group(), main = new THREE.Mesh(undefined, R3D.mats.vc), glow = new THREE.Mesh(undefined, R3D.mats.glow), flag = w3dFlag(col);
       main.castShadow = main.receiveShadow = true; group.add(main, glow, flag.mesh);
       return { group, main, glow, flag, lv: 0 };
     });
     const m = r.m, lv = townLevel(t);
-    if (m.lv !== lv) { const cg = w3dCastle(lv); m.main.geometry = cg.main; m.glow.geometry = cg.glow; m.flag.mesh.position.set(...cg.flag); m.lv = lv; m.top = cg.top; }
-    m.group.position.set(x, 0, z); m.group.scale.set(1.08, 1.4, 1.08); w3dWave(m.flag, tm);
-    labels.push({ x, y: m.top * 1.4 + 0.35, z, s: `${t.name} Lv${lv}`, war: S.war && S.war.town === t.id });
+    if (m.lv !== lv) {
+      const ac = typeof A3D !== 'undefined' ? A3D.castle(lv) : null;
+      if (ac) { m.main.geometry = ac.geo; m.main.material = A3D.mat; m.glow.visible = false; m.flag.mesh.position.set(...ac.flag); m.top = ac.top; m.sy = 1; m.sxz = 1; }
+      else { const cg = w3dCastle(lv); m.main.geometry = cg.main; m.main.material = R3D.mats.vc; m.glow.geometry = cg.glow; m.glow.visible = true; m.flag.mesh.position.set(...cg.flag); m.top = cg.top; m.sy = 1.4; m.sxz = 1.08; }
+      m.lv = lv;
+    }
+    m.group.position.set(x, 0, z); m.group.scale.set(m.sxz, m.sy, m.sxz); w3dWave(m.flag, tm);
+    labels.push({ x, y: m.top * m.sy + 0.35, z, s: `${t.name} Lv${lv}`, war: S.war && S.war.town === t.id });
     lights.push({ x, y: 1.4, z: z + 0.9, col: '#ffbb66', r: 6 + lv, k: 1.3 });
   }
   for (const b of S.buildings) {
     const x = b.x + 0.5, z = b.y + 0.5;
     if (!w3dInView(x, z, 1.5)) continue;
     const col = TOWN_COLORS[b.town % TOWN_COLORS.length];
-    const r = w3dUse(b, 'b|' + b.type + (b.type === 'tower' ? col : ''), () => {
-      const bg = w3dBuildingGeo(b.type), group = new THREE.Group(), main = new THREE.Mesh(bg.main, R3D.mats.vc);
+    // CC0 모델이 있으면 그걸(집은 두 가지 모양), 없거나 모르는 종류면 절차적 모델
+    const btype = b.type === 'house' && hash2(b.x, b.y) > 0.5 ? 'house2' : b.type;
+    const ab = typeof A3D !== 'undefined' ? A3D.building(btype) : null;
+    const r = w3dUse(b, 'b|' + btype + (ab ? '|a' : b.type === 'tower' ? col : ''), () => {
+      const group = new THREE.Group();
+      if (ab) {
+        const main = new THREE.Mesh(ab.geo, A3D.mat); main.castShadow = main.receiveShadow = true; group.add(main);
+        let flag = null; if (b.type === 'tower') { flag = w3dFlag(col, 0.3, 0.19); flag.mesh.position.set(0.02, ab.top + 0.25, 0); group.add(flag.mesh); const pole = new THREE.Mesh(R3D.cached('w3pole', () => R3D.merge([{ g: R3D.prim.cyl(0.015, 0.015, 0.36, 4), c: '#3a2a1a', p: [0, 0.18, 0] }])), R3D.mats.vc); pole.position.y = ab.top - 0.08; group.add(pole); }
+        return { group, flag, sc: [1, 1, 1] };
+      }
+      const bg = w3dBuildingGeo(b.type), main = new THREE.Mesh(bg.main, R3D.mats.vc);
       main.castShadow = main.receiveShadow = true; group.add(main);
       if (bg.glow) group.add(new THREE.Mesh(bg.glow, R3D.mats.glow));
       let flag = null; if (bg.flag) { flag = w3dFlag(col, 0.3, 0.19); flag.mesh.position.set(...bg.flag); group.add(flag.mesh); }
-      return { group, flag };
+      return { group, flag, sc: W3_BSCALE[b.type] || [1, 1, 1] };
     });
-    r.m.group.position.set(x, 0, z); r.m.group.scale.set(...(W3_BSCALE[b.type] || [1, 1, 1]));
+    r.m.group.position.set(x, 0, z); r.m.group.scale.set(...r.m.sc);
     if (r.m.flag) w3dWave(r.m.flag, tm);
     if (b.type === 'tower') lights.push({ x, y: 1.6, z: z + 0.5, col: '#ffbb66', r: 5, k: 0.9 });
   }
   for (const c of S.camps) {
     const x = c.x + 0.5, z = c.y + 0.5;
     if (!w3dInView(x, z, 2)) continue;
-    const r = w3dUse(c, 'camp', () => {
+    const r = w3dUse(c, 'camp|' + AV, () => {
       const group = new THREE.Group(); group.scale.set(1.3, 1.45, 1.3); const main = new THREE.Mesh(w3dCampGeo(), R3D.mats.vc), flame = new THREE.Mesh(w3dFlameGeo(), R3D.mats.fire), flag = w3dFlag('#2a1a1a', 0.3, 0.2);
       main.castShadow = main.receiveShadow = true; flame.position.set(0.45, 0.04, 0.38); flag.mesh.position.set(-0.13, 1.22, -0.15);
-      group.add(main, flame, flag.mesh); return { group, flame, flag };
+      group.add(main, flame, flag.mesh);
+      const ap = typeof A3D !== 'undefined' ? A3D.campProps() : null;
+      if (ap) { const pm = new THREE.Mesh(ap, A3D.mat); pm.castShadow = pm.receiveShadow = true; pm.scale.set(1 / 1.3 * 0.62, 1 / 1.45 * 0.62, 1 / 1.3 * 0.62); pm.position.set(0.05, 0, 0.05); group.add(pm); }
+      return { group, flame, flag };
     });
     const m = r.m;
     m.group.position.set(x + (c.hit ? rr(-0.06, 0.06) : 0), 0, z);
@@ -646,16 +794,16 @@ function drawWorld3D() {
     const r = w3dUse(h, 'horse|' + h.col, () => { const m = R3D.horse(h.col); m.group.scale.setScalar(W3_HS); return m; });
     const mv = !!(h.vx || h.vy);
     r.m.pose({ walk: h.walk, moving: mv, ridden: false, yaw: w3dFaceMove(r, x, z, dt, mv ? Math.atan2(h.vx, h.vy) : undefined) });
-    r.m.group.position.set(x, 0, z);
+    r.m.group.position.set(x, 0, z); BL.add(x, z, 0.62);
   }
   for (const v of villagers) {
     const x = v.x / T, z = v.y / T; if (!w3dInView(x, z, 1)) continue;
     let lk = W3.look.get(v);
-    if (!lk) { lk = { body: v.body, legs: '#4a3a2a', hat: rand() > 0.5 ? 'band' : null, helm: '#e8d8b0', hair: ['#3a2414', '#6a4a2a', '#222'][ri(3)], scale: 1.1 }; W3.look.set(v, lk); }
+    if (!lk) { lk = { body: v.body, legs: '#4a3a2a', hat: rand() > 0.5 ? 'band' : null, helm: '#e8d8b0', hair: ['#3a2414', '#6a4a2a', '#222'][ri(3)], scale: 1.1, lod: 1 }; W3.look.set(v, lk); }
     const r = w3dHuman(v, lk);
     const moved = r.lx !== null && (Math.abs(x - r.lx) + Math.abs(z - r.lz)) > 1e-4;
     r.m.pose({ walk: v.walk, moving: moved, yaw: w3dFaceMove(r, x, z, dt) });
-    r.m.group.position.set(x, 0, z);
+    r.m.group.position.set(x, 0, z); BL.add(x, z, 0.3);
   }
   for (const b of bandits) {
     const x = b.x / T, z = b.y / T; if (!w3dInView(x, z, 1.5)) continue;
@@ -666,7 +814,7 @@ function drawWorld3D() {
     r.m.pose({ walk: b.walk, moving: moved, swing: (b.swing || 0) / 0.25, yaw: w3dFaceMove(r, x, z, dt, near ? Math.atan2(dpx, dpy) : undefined) });
     r.m.flash(b.hit > 0);
     r.m.group.position.set(x, 0, z);
-    const sc = look.scale || 1;
+    const sc = look.scale || 1; BL.add(x, z, 0.26 * sc);
     bars.push({ x, y: 1.12 * sc + 0.1, z, f: b.hp / (b.maxHp || 3), col: '#e44' });
     if (b.loot) coins.push({ x, y: 0.5, z });
   }
@@ -677,10 +825,10 @@ function drawWorld3D() {
     if (p.mounted) {
       const h = S.horses.find(h => h.ridden);
       const hr = w3dUse(h || 'riderHorse', 'horse|' + (h ? h.col : '#8b5a2b'), () => { const m = R3D.horse(h ? h.col : '#8b5a2b'); m.group.scale.setScalar(W3_HS); return m; });
-      hr.m.pose({ walk: (p.walk || 0) * 0.6, moving: p.moving, ridden: true, yaw }); hr.m.group.position.set(px, 0, pz);
+      hr.m.pose({ walk: (p.walk || 0) * 0.6, moving: p.moving, ridden: true, yaw }); hr.m.group.position.set(px, 0, pz); BL.add(px, pz, 0.62);
       r.m.pose({ sit: true, swing: sw, yaw }); r.m.group.position.set(px, R3D.SADDLE_Y * W3_HS, pz);
     } else {
-      r.m.pose({ walk: p.walk, moving: p.moving, swing: sw, yaw }); r.m.group.position.set(px, 0, pz);
+      r.m.pose({ walk: p.walk, moving: p.moving, swing: sw, yaw }); r.m.group.position.set(px, 0, pz); BL.add(px, pz, 0.42);
     }
     r.m.flash(p.hurt > 0.15);
     bars.push({ x: px, y: p.mounted ? 2.7 : 2.05, z: pz, f: p.hp / heroMaxHp(), col: '#4c4' });
@@ -719,6 +867,7 @@ function drawWorld3D() {
     W3.ring.scale.setScalar(rs * (1 + Math.sin(tm * 6) * 0.05));
   } else W3.ring.visible = false;
 
+  BL.end();
   const L = w3dLighting(lights);
   R3D.render(W3.scene, W3.cam);
 
