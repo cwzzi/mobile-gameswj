@@ -142,6 +142,35 @@ function buildSprites() {
     g.fillStyle = '#ffd34d'; for (const [x, y, r] of [[32, 28, 2.4], [29, 31, 1.8], [6, 29, 1.8]]) { g.beginPath(); g.arc(x, y, r, 0, 7); g.fill(); }
     g.fillStyle = '#fff6c0'; g.fillRect(33, 27, 1.2, 1.2);
   });
+  // 군사 건물 (병영 · 궁술장 · 마구간)
+  SPR.barracks = sprite(40, 38, 20, 34, g => {
+    g.fillStyle = 'rgba(0,0,0,.22)'; g.beginPath(); g.ellipse(20, 34, 18, 4, 0, 0, 7); g.fill();
+    g.fillStyle = vgrad(g, 14, 32, '#c09a68', '#8a6a40'); g.fillRect(4, 15, 26, 17);
+    g.fillStyle = vgrad(g, 5, 16, '#a8432f', '#6e2a1c'); g.beginPath(); g.moveTo(2, 16); g.lineTo(17, 5); g.lineTo(32, 16); g.closePath(); g.fill();
+    g.fillStyle = '#3a2412'; g.fillRect(13, 22, 8, 10); g.fillStyle = '#ffe9a0'; g.fillRect(24, 19, 4, 4); g.fillRect(6, 19, 4, 4);
+    for (let k = 0; k < 3; k++) { g.fillStyle = '#6b4a2e'; g.fillRect(31 + k * 2.6, 12, 1.4, 20); g.fillStyle = '#d8dde2'; g.beginPath(); g.moveTo(30.4 + k * 2.6, 12); g.lineTo(31.7 + k * 2.6, 8); g.lineTo(33 + k * 2.6, 12); g.fill(); }
+    g.fillStyle = '#c9a040'; g.beginPath(); g.arc(17, 10.5, 2.4, 0, 7); g.fill();
+  });
+  SPR.range = sprite(40, 34, 20, 30, g => {
+    g.fillStyle = 'rgba(0,0,0,.2)'; g.beginPath(); g.ellipse(20, 30, 18, 4, 0, 0, 7); g.fill();
+    g.fillStyle = '#b8a878'; g.fillRect(3, 22, 34, 8);
+    for (const [x, y] of [[9, 14], [20, 11], [31, 14]]) {
+      g.fillStyle = '#6b4a2e'; g.fillRect(x - 1, y, 2, 14);
+      g.fillStyle = '#f0ead8'; g.beginPath(); g.arc(x, y, 5.5, 0, 7); g.fill();
+      g.fillStyle = '#d9483b'; g.beginPath(); g.arc(x, y, 3.6, 0, 7); g.fill();
+      g.fillStyle = '#f2c14e'; g.beginPath(); g.arc(x, y, 1.5, 0, 7); g.fill();
+    }
+    g.strokeStyle = '#5a3a20'; g.lineWidth = 1; g.beginPath(); g.moveTo(26, 12); g.lineTo(21, 11.5); g.stroke();
+  });
+  SPR.stable = sprite(42, 36, 21, 32, g => {
+    g.fillStyle = 'rgba(0,0,0,.22)'; g.beginPath(); g.ellipse(21, 32, 19, 4, 0, 0, 7); g.fill();
+    g.fillStyle = vgrad(g, 14, 30, '#b07a44', '#7a5230'); g.fillRect(4, 14, 30, 16);
+    g.fillStyle = vgrad(g, 6, 15, '#7a5a34', '#4a3220'); g.beginPath(); g.moveTo(2, 15); g.lineTo(19, 6); g.lineTo(36, 15); g.closePath(); g.fill();
+    g.fillStyle = '#2a1a0e'; g.fillRect(8, 19, 8, 11); g.fillRect(21, 19, 8, 11);
+    g.fillStyle = '#8b5a2b'; g.beginPath(); g.ellipse(12, 21, 2.6, 3.2, 0, 0, 7); g.fill(); g.fillStyle = '#e8e0d0'; g.beginPath(); g.ellipse(25, 21, 2.6, 3.2, 0, 0, 7); g.fill();
+    g.fillStyle = '#e0c060'; g.fillRect(34, 24, 7, 7); g.fillStyle = '#c8a848'; g.fillRect(35, 21, 5, 4);
+    g.strokeStyle = '#a07a4a'; g.lineWidth = 1.2; g.beginPath(); g.moveTo(1, 26); g.lineTo(5, 26); g.moveTo(1, 30); g.lineTo(5, 30); g.stroke();
+  });
   SPR.castle = [1, 2, 3, 4, 5].map(lv => {
     const w = 44 + lv * 8, h = 40 + lv * 8;
     return sprite(w + 8, h + 10, (w + 8) / 2, h + 4, g => {
@@ -250,6 +279,22 @@ function drawHuman(g, x, y, o) {
       g.fillStyle = C('#c9ced4'); g.beginPath(); g.moveTo(12, -1); g.quadraticCurveTo(15, -8, 19, -7); g.lineTo(18, 5); g.quadraticCurveTo(15, 5, 12, 1); g.closePath(); g.fill();
     } else if (o.weapon === 'club') {
       g.fillStyle = C('#7a5230'); g.beginPath(); g.moveTo(-2, -1.2); g.lineTo(14, -3); g.lineTo(15, 3); g.lineTo(-2, 1.2); g.fill();
+    } else if (o.weapon === 'bow') { // 활: 손에 든 활대 + 시위
+      g.strokeStyle = C('#6b4a2a'); g.lineWidth = 2; g.beginPath(); g.arc(-2, 0, 11, -1.2, 1.2); g.stroke();
+      g.strokeStyle = C('#e8e0c8'); g.lineWidth = 0.7; g.beginPath(); g.moveTo(-2 + Math.cos(-1.2) * 11, Math.sin(-1.2) * 11); g.lineTo(-2 + Math.cos(1.2) * 11, Math.sin(1.2) * 11); g.stroke();
+    } else if (o.weapon === 'sling') { // 투석끈: 늘어진 끈 + 돌
+      g.strokeStyle = C('#8a6a40'); g.lineWidth = 1.2; g.beginPath(); g.moveTo(0, 0); g.quadraticCurveTo(6, 6, 10, 3); g.stroke();
+      g.fillStyle = C('#9a9a90'); g.beginPath(); g.arc(10, 3, 2.4, 0, 7); g.fill();
+    } else if (o.weapon === 'xbow') { // 석궁: 개머리 + 가로 활
+      g.fillStyle = C('#6b4a2a'); g.fillRect(-4, -1.5, 18, 3);
+      g.strokeStyle = C('#4a4a50'); g.lineWidth = 2; g.beginPath(); g.moveTo(12, -8); g.quadraticCurveTo(16, 0, 12, 8); g.stroke();
+    } else if (o.weapon === 'musket') { // 머스킷: 긴 총열
+      g.fillStyle = C('#6b4a2a'); g.fillRect(-6, -1.8, 12, 3.6);
+      g.fillStyle = C('#3a3a40'); g.fillRect(4, -1.1, 22, 2.2);
+      g.fillStyle = C('#c9a040'); g.fillRect(2, -2, 2, 4);
+    } else if (o.weapon === 'pike') { // 장창: 아주 긴 창
+      g.fillStyle = C('#7a5230'); g.fillRect(-16, -1, 52, 2);
+      g.fillStyle = C('#dfe5ea'); g.beginPath(); g.moveTo(36, -2.4); g.lineTo(43, 0); g.lineTo(36, 2.4); g.closePath(); g.fill();
     }
     g.restore();
     // 팔

@@ -8,15 +8,18 @@ const DAY_LEN = 240;
 const TOWN_NAMES = ['새벽골','솔내','한빛','바람재','달무리','푸른들','돌샘','별터','노을촌','은빛내','소나무골','들꽃마을','큰나루','해오름','가람','미르골'];
 const TOWN_COLORS = ['#4fa3ff','#ffb347','#c77dff','#5be0b0','#ff6b9d','#f2e863','#7dd3fc','#fb923c','#a3e635','#f472b6'];
 const BUILD = {
-  // era: 해금되는 시대 번호 (era.js ERAS)
-  house:  { name: '집',   icon: '🏠', cost: { wood: 12 },                  desc: '인구 한도 +5', era: 0 },
-  farm:   { name: '농장', icon: '🌾', cost: { wood: 10, stone: 4 },        desc: '인구 증가 속도 ↑', era: 0 },
-  school: { name: '학당', icon: '📜', cost: { wood: 16, gold: 4 },        desc: '발전도 +0.5/초 · 다음 시대로 나아가는 힘', era: 0 },
-  tower:  { name: '망루', icon: '🗼', cost: { wood: 10, stone: 15 },       desc: '근처 산적에게 화살 발사', era: 1 },
-  market: { name: '시장', icon: '🏪', cost: { wood: 20, stone: 10, gold: 15 }, desc: '마을 금 수입 +3 · 발전도 ↑', era: 1 },
-  lumber: { name: '벌목소', icon: '🪓', cost: { wood: 15, stone: 5 },   desc: '근처(3칸) 영토 안 숲에서 나무를 자동 수확 · 숲이 점점 줄어요', place: '숲 가까이에 지어요', era: 0 },
-  quarry: { name: '채석장', icon: '⛏️', cost: { wood: 20 },              desc: '근처(2칸) 산에서 돌을 자동 채석 · 바닥나지 않음', place: '산 가까이에 지어요', era: 1 },
-  mine:   { name: '금광',   icon: '💰', cost: { wood: 20, stone: 15 },   desc: '근처(2칸) 금맥에서 금을 자동 채굴 · 금맥은 점점 줄어요', place: '금맥 가까이에 지어요', era: 2 },
+  // tech: 해금하는 기술 (tech.js TECHS) · 없으면 처음부터 · mil: 병사 훈련 건물
+  house:  { name: '집',   icon: '🏠', cost: { wood: 12 },                  desc: '인구 한도 +5' },
+  farm:   { name: '농장', icon: '🌾', cost: { wood: 10, stone: 4 },        desc: '인구 증가 속도 ↑', tech: 'agri' },
+  school: { name: '학당', icon: '📜', cost: { wood: 16, gold: 4 },        desc: '연구 점수 +0.6/초 · 기술과 시대 발전의 힘' },
+  tower:  { name: '망루', icon: '🗼', cost: { wood: 10, stone: 15 },       desc: '근처 산적에게 화살 발사', tech: 'masonry' },
+  market: { name: '시장', icon: '🏪', cost: { wood: 20, stone: 10, gold: 15 }, desc: '마을 금 수입 +3 · 연구 점수 ↑', tech: 'currency' },
+  lumber: { name: '벌목소', icon: '🪓', cost: { wood: 15, stone: 5 },   desc: '근처(3칸) 영토 안 숲에서 나무를 자동 수확 · 숲이 점점 줄어요', place: '숲 가까이에 지어요' },
+  quarry: { name: '채석장', icon: '⛏️', cost: { wood: 20 },              desc: '근처(2칸) 산에서 돌을 자동 채석 · 바닥나지 않음', place: '산 가까이에 지어요', tech: 'masonry' },
+  mine:   { name: '금광',   icon: '💰', cost: { wood: 20, stone: 15 },   desc: '근처(2칸) 금맥에서 금을 자동 채굴 · 금맥은 점점 줄어요', place: '금맥 가까이에 지어요', tech: 'mining' },
+  barracks: { name: '병영', icon: '⚔️', cost: { wood: 20, stone: 6 },   desc: '보병 훈련 (곤봉 전사·창병·철갑 검사·장창병) · 군대 정원 +3', tech: 'tools', mil: true },
+  range:  { name: '궁술장', icon: '🎯', cost: { wood: 18, gold: 6 },    desc: '원거리병 훈련 (투석병·궁수·석궁병·머스킷병) · 정원 +3', tech: 'sling', mil: true },
+  stable: { name: '마구간', icon: '🐴', cost: { wood: 22, gold: 10 },   desc: '기병 훈련 (기마 전사·기사) · 정원 +3', tech: 'husbandry', mil: true },
 };
 // 자원 생산 건물: 근처 타일 종류, 반경, 산출 자원, 1회 산출량, 분당 생산량 공식(n = 근처 자원 타일 수)
 const RES_DEF = {
@@ -157,7 +160,7 @@ function newGame(opts) {
   eraNewGame(opts, best); // 시대·군주 (늦은 시대면 마을도 미리 세운다)
   recomputeOwner();
   for (let k = 0; k < 6; k++) spawnCamp(best.x, best.y, 26);
-  bandits.length = 0; arrows.length = 0; floats.length = 0; villagers.length = 0;
+  bandits.length = 0; arrows.length = 0; floats.length = 0; villagers.length = 0; soldiers.length = 0; shots.length = 0;
   recomputeOwner(); applyEraTheme();
   if (!S.towns.length) toast('마을을 세울 곳을 찾아 <b>건설</b>을 누르세요. 첫 마을은 무료!', 5);
 }
@@ -184,7 +187,7 @@ function spawnCamp(avoidX, avoidY, minD) {
 function townLevel(t) { return Math.min(eraCur().maxLv, 5, 1 + Math.floor(t.pop / 10)); }
 function townRadius(t) { return 3 + townLevel(t) + (eraCur().radius || 0); }
 function townCap(t) { return 6 + 5 * S.buildings.filter(b => b.town === t.id && b.type === 'house').length; }
-function townIncome(t) { return Math.round((Math.ceil(t.pop / 3) + 3 * S.buildings.filter(b => b.town === t.id && b.type === 'market').length) * eraCur().income); }
+function townIncome(t) { return Math.round((Math.ceil(t.pop / 3) + 3 * S.buildings.filter(b => b.town === t.id && b.type === 'market').length) * (eraCur().income + techBonus('income'))); }
 function recomputeOwner() {
   owner.fill(-1); ownedCount = 0;
   for (const t of S.towns) {
@@ -326,7 +329,7 @@ function performAction(a) {
     p.dir = Math.atan2(cy - p.y, cx - p.x);
     chopFx.set(i, 0.25);
     if (t === FOREST) {
-      S.wood++; floatText(cx, y * T, '+1🪵', '#c9f29b');
+      const hw = 1 + techBonus('harvest'); S.wood += hw; floatText(cx, y * T, `+${hw}🪵`, '#c9f29b');
       emit(cx, cy - 8, 6, { color: ['#c8a060', '#8a6030', '#5aa040'], smin: 40, smax: 120, lmin: .3, lmax: .6, grav: 300, up: 50, zmin: 1.5, zmax: 2.5 });
       if (--S.hp[i] <= 0) { setTile(i, GRASS); emit(cx, cy, 14, { color: ['#3b8a35', '#5aa040'], smin: 30, smax: 100, lmin: .4, lmax: .9, grav: 150, up: 40 }); }
     } else if (t === GOLD) {
@@ -334,7 +337,7 @@ function performAction(a) {
       emit(cx, cy - 6, 7, { color: ['#ffd34d', '#fff6c0'], kind: 'spark', smin: 60, smax: 160, lmin: .2, lmax: .4 });
       if (--S.hp[i] <= 0) setTile(i, MOUNTAIN);
     } else {
-      S.stone++; floatText(cx, y * T, '+1🪨', '#ddd');
+      const hs = 1 + techBonus('harvest'); S.stone += hs; floatText(cx, y * T, `+${hs}🪨`, '#ddd');
       emit(cx, cy - 6, 6, { color: ['#aaa', '#777', '#ddd'], smin: 40, smax: 130, lmin: .3, lmax: .6, grav: 350, up: 60, zmin: 1.5, zmax: 2.5 });
     }
   }
@@ -356,9 +359,10 @@ function killBandit(b) {
 function startWarEvent() {
   if (!S.towns.length) return;
   const town = S.towns.reduce((a, t) => t.pop > a.pop ? t : a);
-  const f = ri(eraCur().factions.length);
-  const diff = (1 + S.warsWon * 0.35 + S.towns.length * 0.1) * eraCur().diff;
-  S.war = { town: town.id, diff, faction: f, field: false, era: S.era };
+  const fe = foeEraRoll(), FE = ERAS[fe]; // 적 세력의 문명 수준 (플레이어 시대 근처)
+  const f = ri(FE.factions.length);
+  const diff = (1 + S.warsWon * 0.35 + S.towns.length * 0.1) * FE.diff;
+  S.war = { town: town.id, diff, faction: f, field: false, era: fe };
   askWar();
 }
 // 전쟁이 나면 "대규모 전투로 전환?"을 묻는다. 네 → 전장 액션, 아니오 → 지금 화면에서 적 군단 방어
@@ -366,11 +370,14 @@ function askWar() {
   if (!S.war) return;
   paused = true; actHeld = false; auto = null;
   const w = S.war, f = warFaction(w), t = townById(w.town);
+  const we = w.era !== undefined ? w.era : S.era, FE = ERAS[we], rel = we > S.era ? '<b style="color:#ff8a7a">우리보다 앞선 문명!</b>' : we < S.era ? '우리보다 뒤처진 문명' : '우리와 같은 시대';
+  const army = armyTotal(), deploy = Math.min(30, army);
   $('warPanel').innerHTML = `<h2>⚔️ ${f.name} 침공!</h2>
     <div class="sub">${josa(f.name, '이가')} <b>${t ? t.name : '마을'}</b>${josaP(t ? t.name : '마을', '으로로')} 진군하고 있습니다. 적 위협도 ${'★'.repeat(Math.min(5, Math.max(1, Math.round(w.diff))))}</div>
+    <div class="foeciv">적 문명 <b>${FE.icon} ${FE.name}</b> · ${rel}<br><small>주력: ${mixNames(we)}</small></div>
     <div style="font-size:17px;font-weight:800;margin:4px 0 12px;text-align:center">대규모 전투로 전환하시겠습니까?</div>
-    <button class="opt primary" data-a="go"><span class="ic">⚔️</span><span>네<small>전장으로 이동해 아군 ${allyCount()}명과 함께 수많은 적을 직접 쓸어버립니다. 적장을 쓰러뜨리면 승리</small></span></button>
-    <button class="opt" data-a="field"><span class="ic">🛡️</span><span>아니오<small>지금 화면에서 마을로 다가오는 적 군단(${warbandSize(w)}명)을 직접·망루로 막아냅니다</small></span></button>`;
+    <button class="opt primary" data-a="go"><span class="ic">⚔️</span><span>네<small>전장으로 이동해 민병 ${allyCount()}명${deploy ? ` + 훈련병 ${deploy}명` : ''}과 함께 수많은 적을 직접 쓸어버립니다. 적장을 쓰러뜨리면 승리${deploy ? ' · 쓰러진 병사는 군대에서 빠집니다' : ''}</small></span></button>
+    <button class="opt" data-a="field"><span class="ic">🛡️</span><span>아니오<small>지금 화면에서 마을로 다가오는 적 군단(${warbandSize(w)}명)을 ${army ? `병사 ${army}명·` : '직접·'}망루로 막아냅니다</small></span></button>`;
   $('warPanel').classList.add('show');
 }
 $('warPanel').addEventListener('click', e => {
@@ -395,21 +402,24 @@ function spawnWarband() {
     if (neighborsLand(x, y) && owner[y * W + x] < 0) { sx = x; sy = y; }
   }
   if (sx === null) { sx = t.x + townRadius(t) + 2; sy = t.y; }
-  const n = warbandSize(w) - 1, hp = 3 + Math.round(w.diff);
-  const mk = cmd => ({ war: true, cmd, x: (sx + .5) * T + rr(-40, 40), y: (sy + .5) * T + rr(-40, 40), hp: cmd ? Math.round(14 * w.diff) : hp, maxHp: cmd ? Math.round(14 * w.diff) : hp,
-    t: 0, vx: 0, vy: 0, atk: rr(0, 1), walk: rand() * 6, loot: 0, raidT: 0, prog: 0, bestD: 1e9 });
+  const n = warbandSize(w) - 1, hp = 3 + Math.round(w.diff), we = w.era !== undefined ? w.era : S.era;
+  const mk = cmd => { const ut = cmd ? null : pickMix(ENEMY_MIX[we]), mh = cmd ? Math.round(14 * w.diff) : Math.max(2, Math.round(hp * UNITS[ut].hp));
+    return { war: true, cmd, ut, x: (sx + .5) * T + rr(-40, 40), y: (sy + .5) * T + rr(-40, 40), hp: mh, maxHp: mh,
+    t: 0, vx: 0, vy: 0, atk: rr(0, 1), walk: rand() * 6, loot: 0, raidT: 0, prog: 0, bestD: 1e9 }; };
   for (let i = 0; i < n; i++) bandits.push(mk(false));
   bandits.push(mk(true));
 }
 function warUnitAI(b, dt) {
   const p = S.player, t = S.war && townById(S.war.town);
   const dp = Math.hypot(p.x - b.x, p.y - b.y);
-  let tx, ty;
-  const chase = dp < T * 7;
-  if (chase) { tx = p.x; ty = p.y; } else if (t) { tx = (t.x + .5) * T; ty = (t.y + 1.3) * T; } else return;
+  let tx, ty, foe = null;
+  const sol = dp < T * 7 ? null : nearestSoldier(b.x, b.y, T * 5);
+  const chase = dp < T * 7 || !!sol;
+  if (dp < T * 7) { tx = p.x; ty = p.y; foe = p; } else if (sol) { tx = sol.x; ty = sol.y; foe = sol; } else if (t) { tx = (t.x + .5) * T; ty = (t.y + 1.3) * T; } else return;
   const d = Math.hypot(tx - b.x, ty - b.y), ox = b.x;
-  if (d > 20) {
-    const sp = (b.cmd ? 78 : 90) * dt;
+  const approach = foe ? foeStrike(b, foe, d) : true;
+  if (d > 20 && approach) {
+    const sp = (b.cmd ? 78 : 90) * foeSpeed(b) * dt;
     if (!moveEnt(b, (tx - b.x) / d * sp, (ty - b.y) / d * sp, 8)) { const a = rand() * Math.PI * 2; moveEnt(b, Math.cos(a) * sp * 2, Math.sin(a) * sp * 2, 8); }
     if (d < b.bestD - 4) { b.bestD = d; b.prog = 0; } else b.prog += dt;
     if (b.prog > 3) { // 물·산에 막히면 목표 쪽 땅으로 건너뛴다
@@ -428,10 +438,7 @@ function warUnitAI(b, dt) {
     }
   }
   b.walk += dt * 9; if (Math.abs(b.x - ox) > 0.1) b.face = b.x > ox ? 1 : -1;
-  if (dp < 26 && b.atk <= 0) {
-    b.atk = 1; b.swing = 0.25;
-    if (!(p.mounted && rand() < 0.3)) { p.hp -= b.cmd ? 2 : 1; p.hurt = 0.25; shake(4); if (p.hp <= 0) playerDie(); }
-  }
+  if (foe && Math.abs(foe.x - b.x) > 2) b.face = foe.x > b.x ? 1 : -1;
   b.swing = Math.max(0, (b.swing || 0) - dt);
 }
 function fieldWarWin() {
@@ -442,9 +449,11 @@ function fieldWarWin() {
   banner('방어 성공!', `${warFaction(w).name} 격퇴 · 🪙+${gold} · 경험치 +40`, 3);
   save();
 }
+// 대규모 전투 민병 수 (훈련된 군대는 따로 S.army)
 function allyCount() { return Math.min(24, 4 + Math.floor(S.towns.reduce((a, t) => a + t.pop, 0) / 4)); }
 function onBattleEnd(win, st) {
   const w = S.war; const t = w && townById(w.town);
+  if (st.lost) for (const k in st.lost) S.army[k] = Math.max(0, (S.army[k] | 0) - st.lost[k]); // 전사한 훈련병
   S.war = null; S.warT = 0; S.nextWar = 150 + ri(80);
   if (win) {
     const gold = 40 + st.kos + Math.round(w.diff * 30);
@@ -479,7 +488,7 @@ function openBuild() {
     const cnt = k => S.buildings.filter(b => b.town === t.id && b.type === k).length;
     const E = eraCur(), lvCap = townLevel(t) >= E.maxLv && t.pop >= E.maxLv * 10;
     html += `<h2>${t.name} ${E.town} <span style="font-size:13px;color:#b8c2b0">Lv${townLevel(t)}/${E.maxLv}</span></h2>`;
-    html += `<div class="sub">인구 ${t.pop}/${cap} · 영토 반경 ${townRadius(t)} · 수입 ${townIncome(t)}🪙/5초<br>집 ${cnt('house')} · 농장 ${cnt('farm')} · 학당 ${cnt('school')} · 망루 ${cnt('tower')} · 시장 ${cnt('market')}${resStatus(t.id) ? '<br>' + resStatus(t.id) : ''}<br>${lvCap ? `<b style="color:var(--accent)">${E.name}의 한계 Lv${E.maxLv}</b> — 시대가 발전하면 더 커집니다` : '인구가 10 늘 때마다 레벨업 → 영토 확장'}</div>`;
+    html += `<div class="sub">인구 ${t.pop}/${cap} · 영토 반경 ${townRadius(t)} · 수입 ${townIncome(t)}🪙/5초<br>집 ${cnt('house')} · 농장 ${cnt('farm')} · 학당 ${cnt('school')} · 망루 ${cnt('tower')} · 시장 ${cnt('market')}${cnt('barracks') + cnt('range') + cnt('stable') ? ` · 군사 ${cnt('barracks') + cnt('range') + cnt('stable')}` : ''}${resStatus(t.id) ? '<br>' + resStatus(t.id) : ''}<br>${lvCap ? `<b style="color:var(--accent)">${E.name}의 한계 Lv${E.maxLv}</b> — 시대가 발전하면 더 커집니다` : '인구가 10 늘 때마다 레벨업 → 영토 확장'}</div>`;
     const locked = [];
     for (const k in BUILD) {
       const B = BUILD[k];
@@ -487,10 +496,11 @@ function openBuild() {
       const err = buildCheck(k), ok = !err && canAfford(B.cost);
       html += `<button class="opt" data-a="${k}" ${ok ? '' : 'disabled'}><span class="ic">${B.icon}</span><span>${B.name} — ${B.desc}<small>${costText(B.cost)}${err ? ' · ' + err : !canAfford(B.cost) ? ' · 자원 부족' : B.place ? ' · ' + B.place : ''}</small></span></button>`;
     }
-    if (locked.length) { // 아직 잠긴 건물: 시대별 한 줄씩
-      const by = {}; for (const k of locked) (by[BUILD[k].era] = by[BUILD[k].era] || []).push(`${BUILD[k].icon}${BUILD[k].name}`);
-      html += `<div class="lockbox">🔒 ${Object.keys(by).map(e => `<b>${ERAS[e].icon} ${ERAS[e].name}</b>: ${by[e].join(' · ')}`).join('<br>🔒 ')}</div>`;
+    if (locked.length) { // 아직 잠긴 건물: 필요한 기술별 한 줄씩
+      const by = {}; for (const k of locked) (by[BUILD[k].tech] = by[BUILD[k].tech] || []).push(`${BUILD[k].icon}${BUILD[k].name}`);
+      html += `<div class="lockbox">🔒 ${Object.keys(by).map(t => `<b>🔬 ${TECH[t].name}</b> <small>(${ERAS[TECH[t].era].name})</small>: ${by[t].join(' · ')}`).join('<br>🔒 ')}</div>`;
     }
+    if (S.buildings.some(b => BUILD[b.type] && BUILD[b.type].mil)) html += `<button class="opt" data-a="army"><span class="ic">🪖</span><span>군대 훈련<small>병사 ${armyTotal()}/${armyCap()}</small></span></button>`;
   }
   html += `<button class="close" data-a="close">닫기</button>`;
   bp.innerHTML = html; bp.classList.add('show');
@@ -499,6 +509,7 @@ function closePanels() { bp.classList.remove('show'); $('menuPanel').classList.r
 bp.addEventListener('click', e => {
   const btn = e.target.closest('button'); if (!btn || btn.disabled) return;
   const a = btn.dataset.a;
+  if (a === 'army') { bp.classList.remove('show'); openArmyPanel(); return; }
   if (a === 'town') { pay(newTownCost()); foundTown(); }
   else if (BUILD[a] && buildUnlocked(a)) build(a);
   closePanels();
@@ -526,7 +537,7 @@ function updateWorld(dt) {
   p.moving = mv.l > 0.08;
   if (p.moving) {
     const onForest = tileAt(p.x / T, p.y / T) === FOREST;
-    const sp = (p.mounted ? 250 : 130) * (onForest ? 0.7 : 1) * Math.max(0.4, mv.l);
+    const sp = (p.mounted ? 250 * (1 + techBonus('horse')) : 130) * (onForest ? 0.7 : 1) * Math.max(0.4, mv.l);
     moveEnt(p, mv.x * sp * dt, mv.y * sp * dt, 9);
     p.dir = Math.atan2(mv.y, mv.x); p.walk = (p.walk || 0) + dt * sp / 9;
     p.dustT = (p.dustT || 0) - dt;
@@ -547,7 +558,7 @@ function updateWorld(dt) {
   for (const t of S.towns) {
     const cap = townCap(t), farms = S.buildings.filter(b => b.town === t.id && b.type === 'farm').length;
     t.growT += dt;
-    if (t.growT > 4 / (1 + 0.6 * farms)) { t.growT = 0; if (t.pop < cap) { const lv = townLevel(t); t.pop++; if (townLevel(t) !== lv) { changed = true; banner(`${t.name} Lv${townLevel(t)}`, '영토가 넓어졌습니다', 2); } } }
+    if (t.growT > 4 / ((1 + 0.6 * farms) * (1 + techBonus('grow')))) { t.growT = 0; if (t.pop < cap) { const lv = townLevel(t); t.pop++; if (townLevel(t) !== lv) { changed = true; banner(`${t.name} Lv${townLevel(t)}`, '영토가 넓어졌습니다', 2); } } }
     t.taxT += dt;
     if (t.taxT > 5) { t.taxT = 0; const g = townIncome(t); S.gold += g; floatText((t.x + .5) * T, t.y * T - 30, `+${g}🪙`, '#ffe27a'); }
     // 마을 사람
@@ -580,7 +591,10 @@ function updateWorld(dt) {
     c.t += dt; c.hit = Math.max(0, (c.hit || 0) - dt);
     const alive = bandits.filter(b => b.camp === c).length;
     const interval = Math.max(9, 22 - S.towns.length * 2);
-    if (c.t > interval && alive < 3) { c.t = 0; const q = campPos(c); const bhp = eraCur().banditHp; bandits.push({ x: q.x, y: q.y + 20, hp: bhp, maxHp: bhp, camp: c, t: 0, vx: 0, vy: 0, atk: 0, loot: 0, walk: 0 }); }
+    if (c.t > interval && alive < 3) {
+      c.t = 0; const q = campPos(c), fe = foeEra(), ut = pickMix(BANDIT_MIX[fe]), bhp = Math.max(2, Math.round(ERAS[fe].banditHp * UNITS[ut].hp));
+      bandits.push({ x: q.x, y: q.y + 20, hp: bhp, maxHp: bhp, camp: c, ut, era: fe, t: 0, vx: 0, vy: 0, atk: 0, loot: 0, walk: 0 });
+    }
   }
   S.spawnT += dt;
   if (S.spawnT > 70 && S.camps.length < 4 + S.towns.length) { S.spawnT = 0; const pt2 = playerTile(); if (spawnCamp(pt2.x, pt2.y, 22)) toast('⚠️ 어딘가에 새 산적 소굴이 생겼습니다', 2.5); }
@@ -589,8 +603,10 @@ function updateWorld(dt) {
     if (b.kx) { moveEnt(b, b.kx * dt, b.ky * dt, 8); b.kx *= 0.85; b.ky *= 0.85; if (Math.abs(b.kx) < 5) b.kx = b.ky = 0; }
     if (b.war) { warUnitAI(b, dt); continue; }
     const dp = Math.sqrt(dist2(b.x, b.y, p.x, p.y));
-    let tx = null, ty = null, sp = 85;
-    if (dp < T * 6) { tx = p.x; ty = p.y; sp = 100; }
+    let tx = null, ty = null, sp = 85 * foeSpeed(b), foe = null;
+    const sol = dp < T * 6 ? null : nearestSoldier(b.x, b.y, T * 4);
+    if (dp < T * 6) { tx = p.x; ty = p.y; sp = 100 * foeSpeed(b); foe = p; }
+    else if (sol) { tx = sol.x; ty = sol.y; sp = 100 * foeSpeed(b); foe = sol; }
     else if (b.raided) { if (b.camp && S.camps.includes(b.camp)) { const q = campPos(b.camp); tx = q.x; ty = q.y; if (dist2(b.x, b.y, q.x, q.y) < 30 * 30) { b.raided = false; b.loot = 0; } } }
     else {
       const town = S.towns.length ? S.towns.reduce((a, t) => dist2(b.x, b.y, (t.x + .5) * T, (t.y + .5) * T) < dist2(b.x, b.y, (a.x + .5) * T, (a.y + .5) * T) ? t : a) : null;
@@ -606,18 +622,16 @@ function updateWorld(dt) {
       }
     }
     const ox = b.x;
-    if (tx === null) { b.t -= dt; if (b.t <= 0) { b.t = 2 + rand() * 2; const a = rand() * Math.PI * 2; b.vx = Math.cos(a) * 40; b.vy = Math.sin(a) * 40; } if (!moveEnt(b, b.vx * dt, b.vy * dt, 8)) b.t = 0; }
+    if (foe && !foeStrike(b, foe, Math.hypot(foe.x - b.x, foe.y - b.y))) { tx = null; b.vx = b.vy = 0; b.t = 1; b.face = foe.x > b.x ? 1 : -1; }
+    else if (tx === null) { b.t -= dt; if (b.t <= 0) { b.t = 2 + rand() * 2; const a = rand() * Math.PI * 2; b.vx = Math.cos(a) * 40; b.vy = Math.sin(a) * 40; } if (!moveEnt(b, b.vx * dt, b.vy * dt, 8)) b.t = 0; }
     else {
       const d = Math.hypot(tx - b.x, ty - b.y);
       if (d > 18) { const vx = (tx - b.x) / d * sp * dt, vy = (ty - b.y) / d * sp * dt; if (!moveEnt(b, vx, vy, 8)) { const a = rand() * Math.PI * 2; moveEnt(b, Math.cos(a) * sp * dt * 2, Math.sin(a) * sp * dt * 2, 8); } }
     }
-    b.walk += dt * 9; if (Math.abs(b.x - ox) > 0.1) b.face = b.x > ox ? 1 : -1;
-    if (dp < 24 && b.atk <= 0) {
-      b.atk = 1; b.swing = 0.25;
-      if (!(p.mounted && rand() < 0.3)) { p.hp--; p.hurt = 0.25; shake(4); if (p.hp <= 0) playerDie(); }
-    }
+    if (Math.abs(b.x - ox) > 0.1) { b.walk += dt * 9; b.face = b.x > ox ? 1 : -1; }
     b.swing = Math.max(0, (b.swing || 0) - dt);
   }
+  updateArmyWorld(dt); // 병영 훈련 · 병사 · 투사체
   // 망루
   for (const bd of S.buildings) {
     if (bd.type !== 'tower') continue;
@@ -629,7 +643,7 @@ function updateWorld(dt) {
   for (const a of arrows.slice()) {
     if (!bandits.includes(a.tgt)) { arrows.splice(arrows.indexOf(a), 1); continue; }
     const d = Math.hypot(a.tgt.x - a.x, a.tgt.y - 12 - a.y);
-    if (d < 10) { a.tgt.hp -= eraCur().arrow || 1; a.tgt.hit = 0.15; if (a.tgt.hp <= 0) killBandit(a.tgt); arrows.splice(arrows.indexOf(a), 1); continue; }
+    if (d < 10) { a.tgt.hp -= (eraCur().arrow || 1) + techBonus('arrow'); a.tgt.hit = 0.15; if (a.tgt.hp <= 0) killBandit(a.tgt); arrows.splice(arrows.indexOf(a), 1); continue; }
     a.ang = Math.atan2(a.tgt.y - 12 - a.y, a.tgt.x - a.x);
     a.x += Math.cos(a.ang) * a.sp * dt; a.y += Math.sin(a.ang) * a.sp * dt;
   }
@@ -793,6 +807,7 @@ function drawWorld() {
   for (const h of S.horses) if (!h.ridden && vis(h.x, h.y, 40)) L.push({ y: h.y, k: 'horse', o: h });
   for (const v of villagers) if (vis(v.x, v.y, 30)) L.push({ y: v.y, k: 'vil', o: v });
   for (const b of bandits) if (vis(b.x, b.y, 40)) L.push({ y: b.y, k: 'bandit', o: b });
+  for (const s of soldiers) if (vis(s.x, s.y, 40)) L.push({ y: s.y, k: 'sol', o: s });
   L.push({ y: p.y, k: 'player' });
   L.sort((a, b) => a.y - b.y);
   const lights = [];
@@ -841,15 +856,16 @@ function drawWorld() {
       case 'vil': { const v = e.o; drawHuman(ctx, v.x, v.y, { scale: 0.75, face: v.face || 1, walk: v.walk, body: v.body, legs: v.legs || '#4a3a2a', hat: v.hat === undefined ? (hash2(v.x | 0, 1) > 0.5 ? 'band' : null) : v.hat, helm: '#e8d8b0' }); break; }
       case 'bandit': {
         const b = e.o, swingAim = sw => (b.face || 1) > 0 ? (sw ? -0.6 + (0.25 - sw) * 8 : 0.4) : (sw ? Math.PI + 0.6 - (0.25 - sw) * 8 : Math.PI - 0.4);
-        if (b.war) {
-          const lk = warUnitLook(b.cmd);
-          drawHuman(ctx, b.x, b.y, Object.assign(lk, { face: b.face || 1, walk: b.walk, scale: b.cmd ? 1.25 : 1, aim: swingAim(b.swing), flash: b.hit > 0 }));
-          bar(b.x, b.y - (b.cmd ? 54 : 44), b.hp / b.maxHp, '#e44');
-        } else {
-          drawHuman(ctx, b.x, b.y, Object.assign(eraLook('bandit'), { face: b.face || 1, walk: b.walk, aim: swingAim(b.swing), flash: b.hit > 0 }));
-          bar(b.x, b.y - 44, b.hp / (b.maxHp || 3), '#e44');
-        }
+        const lk = banditLook(b), up = lk.mount ? 12 : 0;
+        drawUnit2D(ctx, b.x, b.y, lk, { face: b.face || 1, walk: b.walk, scale: b.cmd ? 1.25 : 1, aim: swingAim(b.swing), flash: b.hit > 0 });
+        bar(b.x, b.y - (b.cmd ? 54 : 44) - up, b.hp / (b.maxHp || 3), '#e44');
         if (b.loot) { ctx.fillStyle = '#ffd34d'; ctx.beginPath(); ctx.arc(b.x + 9, b.y - 8, 3.5, 0, 7); ctx.fill(); }
+        break;
+      }
+      case 'sol': {
+        const s = e.o, lk = unitLook(s.ut, 'ally', S.era), f = s.face || 1;
+        drawUnit2D(ctx, s.x, s.y, lk, { face: f, walk: s.walk, aim: s.swing > 0 ? (f > 0 ? -0.6 + (0.25 - s.swing) * 8 : Math.PI + 0.6 - (0.25 - s.swing) * 8) : (f > 0 ? 0.4 : Math.PI - 0.4), flash: s.hit > 0 });
+        if (s.hp < s.maxHp) bar(s.x, s.y - 44 - (lk.mount ? 12 : 0), s.hp / s.maxHp, '#4fa3ff');
         break;
       }
       case 'player': drawPlayerW(p); lights.push({ wx: p.x, wy: p.y - 16, r: 150 }); break;
@@ -858,6 +874,7 @@ function drawWorld() {
   // 화살
   ctx.strokeStyle = '#3a2a1a'; ctx.lineWidth = 1.6;
   for (const a of arrows) { ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(a.x - Math.cos(a.ang || 0) * 11, a.y - Math.sin(a.ang || 0) * 11); ctx.stroke(); }
+  drawShots2D(ctx);
   drawParts(ctx);
   drawFloats(ctx);
   // 낮밤
@@ -883,6 +900,17 @@ function drawPalisade(g, x, y, lv, front) {
   }
 }
 function warUnitLook(cmd) { const w = S.war, f = warFaction(w); return eraLook(cmd ? 'officer' : 'grunt', f, w && w.era !== undefined ? w.era : S.era); }
+// 산적·적 군단 한 명의 외형 (병종별) — 같은 객체를 돌려준다(3D 모델 캐시용)
+const lookCache2 = new Map();
+function cachedEraLook(kind, f, era) { const k = kind + '|' + era + '|' + (f ? f.name : ''); let L = lookCache2.get(k); if (!L) lookCache2.set(k, L = eraLook(kind, f, era)); return L; }
+function banditLook(b) {
+  if (b.war) {
+    const w = S.war, we = w && w.era !== undefined ? w.era : S.era, f = warFaction(w);
+    return b.cmd || !b.ut ? cachedEraLook(b.cmd ? 'officer' : 'grunt', f, we) : unitLook(b.ut, 'foe', we, f);
+  }
+  const be = b.era !== undefined ? b.era : S.era;
+  return !b.ut || UNITS[b.ut].role === 'melee' && !UNITS[b.ut].armor ? cachedEraLook('bandit', null, be) : unitLook(b.ut, 'bandit', be);
+}
 function bar(x, y, f, col) { ctx.fillStyle = 'rgba(0,0,0,.6)'; rrect(ctx, x - 14, y, 28, 5, 2.5); ctx.fill(); ctx.fillStyle = col; rrect(ctx, x - 13, y + 1, 26 * clamp(f, 0, 1), 3, 1.5); ctx.fill(); }
 function drawPlayerW(p) {
   const face = Math.cos(p.dir) < 0 ? -1 : 1, up = Math.sin(p.dir) < -0.6;
@@ -921,6 +949,7 @@ function drawMinimap(dt) {
   mmCtx.putImageData(mmImg, 0, 0);
   const p = playerTile();
   mmCtx.fillStyle = '#e22'; for (const c of S.camps) mmCtx.fillRect(c.x - 1, c.y - 1, 3, 3);
+  mmCtx.fillStyle = '#8cf'; for (const s of soldiers) mmCtx.fillRect(Math.floor(s.x / T), Math.floor(s.y / T), 1, 1);
   mmCtx.fillStyle = '#fff'; for (const t of S.towns) mmCtx.fillRect(t.x - 1, t.y - 1, 3, 3);
   if (S.war) { const t = townById(S.war.town); if (t && (S.time * 4 | 0) % 2) { mmCtx.strokeStyle = '#f33'; mmCtx.strokeRect(t.x - 3, t.y - 3, 7, 7); } }
   mmCtx.fillStyle = (S.time * 3 | 0) % 2 ? '#fff' : '#ff0'; mmCtx.fillRect(p.x - 1, p.y - 1, 3, 3);
@@ -946,7 +975,7 @@ function load() {
     o.horses = o.horses.map(h => ({ ...h, vx: 0, vy: 0, t: 0, ridden: false, walk: 0, col: h.col || HORSE_COLS[ri(HORSE_COLS.length)] }));
     o.hero = o.hero || { lv: 1, exp: 0 }; o.warT = o.warT || 0; o.nextWar = o.nextWar || 80; o.warsWon = o.warsWon || 0; o.war = o.war || null;
     eraMigrate(o); // 옛 저장: 시대·군주·연대기 채워 넣기
-    S = o; bandits.length = 0; villagers.length = 0;
+    S = o; bandits.length = 0; villagers.length = 0; soldiers.length = 0; shots.length = 0;
     computeDerived(); recomputeOwner(); applyEraTheme();
     toast('이어서 플레이합니다', 1.5);
     if (S.war && !S.war.field) setTimeout(askWar, 600);
@@ -960,17 +989,20 @@ function hudWorld() {
   $('rPop').textContent = S.towns.reduce((a, t) => a + t.pop, 0); $('rLv').textContent = S.hero.lv;
   const R = S.ruler;
   if (R) { const s = `${rulerName()} · ${rulerAge()}세 · 치세 ${S.year - R.start}년`; if ($('rRuler').textContent !== s) $('rRuler').textContent = s; }
-  const N = eraNext(), pr = eraProgress();
-  const g1 = S.towns.length === 0 ? '목표: 마을 세우기 (건설 버튼)' : `영토 ${ownedCount}/${GOAL_TILES}칸 · 소굴 ${S.camps.length}`;
-  const g2 = N ? `${eraCur().icon} ${eraCur().name} → ${N.name} ${Math.floor(pr * 100)}%` : `${eraCur().icon} ${eraCur().name} (마지막 시대)`;
-  const gk = g1 + g2 + S.year;
-  if (hudWorld.gk !== gk) { hudWorld.gk = gk; $('goal').innerHTML = `${g1}<div class="eraline">${g2} · 건국 ${S.year}년</div><div class="ebar"><i style="width:${N ? pr * 100 : 100}%"></i></div>`; }
+  const N = eraNext(), rs = researchInfo();
+  const g1 = S.towns.length === 0 ? '목표: 마을 세우기 (건설 버튼)' : `영토 ${ownedCount}/${GOAL_TILES}칸 · 소굴 ${S.camps.length}${armyTotal() ? ` · 🪖${armyTotal()}` : ''}`;
+  const g2 = `${eraCur().icon} ${eraCur().name} · 건국 ${S.year}년`;
+  const g3 = rs ? `🔬 ${rs.t.name} ${Math.floor(rs.f * 100)}%` : S.towns.length && TECHS.some(t => !techAvail(t)) ? '🔬 연구할 기술을 고르세요' : N ? `🔬 ${N.name}까지 ${Math.floor(eraProgress() * 100)}%` : '🔬 모든 시대 도달';
+  const pr = rs ? rs.f : N ? eraProgress() : 1;
+  const gk = g1 + g2 + g3;
+  if (hudWorld.gk !== gk) { hudWorld.gk = gk; $('goal').innerHTML = `${g1}<div class="eraline">${g2}</div><div class="techline${rs ? '' : ' idle'}">${g3}</div><div class="ebar"><i style="width:${pr * 100}%"></i></div>`; }
+  $('techBtn').classList.toggle('nag', !rs && S.towns.length > 0 && TECHS.some(t => !techAvail(t)));
   const wb = $('warBtn');
   if (S.war && S.war.field) { wb.style.display = 'block'; wb.textContent = `⚔️ 적 군단 ${bandits.filter(b => b.war).length}명 · 위치`; }
   else wb.style.display = 'none';
   const eb = $('eraBtn'), rd = !!N && eraReady();
   eb.style.display = rd ? 'block' : 'none';
-  if (rd) { eb.textContent = `${N.icon} 시대 전환: ${N.name}`; eb.style.top = `calc(${wb.style.display === 'block' ? 192 : 148}px + env(safe-area-inset-top))`; }
+  if (rd) { eb.textContent = `${N.icon} 시대 전환: ${N.name}`; eb.style.top = `calc(${wb.style.display === 'block' ? 210 : 166}px + env(safe-area-inset-top))`; }
 }
 
 
@@ -1038,6 +1070,7 @@ function pickTarget(wx, wy) {
   for (const c of S.camps) { const q = campPos(c), d = dist2(wx, wy, q.x, q.y); if (d < bcd) { bcd = d; bc = c; } }
   if (bc) return { kind: 'camp', target: bc };
   for (const t of S.towns) if (Math.abs(wx / T - (t.x + .5)) <= 1.6 && Math.abs(wy / T - (t.y + .5)) <= 1.6) return { kind: 'town', target: t };
+  for (const b of S.buildings) if (BUILD[b.type] && BUILD[b.type].mil && Math.abs(wx / T - (b.x + .5)) <= 0.75 && Math.abs(wy / T - (b.y + .55)) <= 0.8) return { kind: 'mil', target: b };
   let best = null, bd = 1.25 * 1.25;
   const cx = Math.floor(wx / T), cy = Math.floor(wy / T);
   for (let y = cy - 2; y <= cy + 2; y++) for (let x = cx - 2; x <= cx + 2; x++) {
@@ -1075,6 +1108,7 @@ function worldTap(sx, sy) {
   if (MODE !== 'world' || paused || !S || !S.towns) return;
   const q = screenToWorldPx(sx, sy); if (!q) return;
   const a = pickTarget(q.x, q.y);
+  if (a && a.kind === 'mil') { openArmyPanel(); return; } // 병영·궁술장·마구간: 훈련 화면
   if (a) startAuto(a);
 }
 tapHooks.push(worldTap);

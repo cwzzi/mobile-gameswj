@@ -15,7 +15,8 @@ function startBattle(war) {
   const f = warFaction(war);
   const diff = war.diff;
   B = { war, f, era: war.era !== undefined ? war.era : S.era, diff, t: 0, limit: 360, kos: 0, officers: 0, captured: 0, units: [], bases: [], obs: [], boss: null,
-        phase: 'bases', over: false, result: null, hitstop: 0, dashId: 0, overT: 0, allyMax: allyCount() + 6, spawnT: 0, allyT: 0 };
+        phase: 'bases', over: false, result: null, hitstop: 0, dashId: 0, overT: 0, allyMax: allyCount() + 6 + Math.min(30, armyTotal()), spawnT: 0, allyT: 0,
+        shots: [], reserve: Object.assign({}, S.army || {}), lost: {}, rtok: 0 };
   const r = mulberry((Date.now() & 0xffff) + 7);
   B.allyBase = { x: 170, y: 640 };
   B.bases = [
@@ -36,6 +37,7 @@ function startBattle(war) {
              dashT: 0, dashCd: 0, musouT: 0, musouTick: 0, inv: 0, walk: 0, hurt: 0, moving: false };
   // 아군
   for (let i = 0; i < allyCount(); i++) addUnit('ally', 0, 200 + rr(-60, 60), 640 + rr(-120, 120));
+  deployArmy(Math.min(30, armyTotal()), B.allyBase); // 훈련된 군대 (병종 그대로)
   // 적
   B.bases.forEach((b, i) => {
     if (!b.hq) { b.officer = addUnit('officer', 1, b.x + 10, b.y, b); b.officer.name = `${f.name.split(' ')[0]} 부장`; }
@@ -46,7 +48,18 @@ function startBattle(war) {
   parts.length = 0; floats.length = 0;
   banner('출진!', '부장을 쓰러뜨리고 거점 안에 서 있으면 제압', 3);
 }
-function addUnit(kind, team, x, y, home) {
+// 예비 군대에서 n명을 꺼내 아군으로 (병종 비율대로)
+function deployArmy(n, at) {
+  for (let i = 0; i < n; i++) {
+    let best = null, bv = 0;
+    for (const k in B.reserve) if ((B.reserve[k] | 0) > bv) { bv = B.reserve[k]; best = k; }
+    if (!best) return;
+    B.reserve[best]--;
+    const u = addUnit('ally', 0, at.x + 30 + rr(-50, 50), at.y + rr(-110, 110), null, best); u.trained = true;
+  }
+}
+// ut: 병종 (tech.js UNITS). 졸병은 적 문명 구성에서, 민병은 그 시대 기본 보병
+function addUnit(kind, team, x, y, home, ut) {
   const d = B.diff;
   const st = {
     grunt: { hp: Math.round(3 + d * 1.5), sp: 72, r: 10 },
@@ -54,7 +67,12 @@ function addUnit(kind, team, x, y, home) {
     officer: { hp: Math.round(28 * d), sp: 82, r: 14 },
     boss: { hp: Math.round(110 * d), sp: 96, r: 18 },
   }[kind];
-  const u = { kind, team, x, y, home: home || null, hp: st.hp, maxHp: st.hp, sp: st.sp * rr(0.9, 1.1), r: st.r,
+  if (kind === 'grunt' && !ut) ut = pickMix(ENEMY_MIX[clamp(B.era, 0, ENEMY_MIX.length - 1)]);
+  if (kind === 'ally' && !ut) ut = ERA_BASIC[S.era];
+  const U = ut ? UNITS[ut] : null;
+  let hp = st.hp, sp = st.sp, r = st.r;
+  if (U) { hp = Math.max(2, Math.round(hp * U.hp * (kind === 'ally' && ut !== ERA_BASIC[S.era] ? 1.4 : 1))); sp *= U.sp; if (U.role === 'cav') r = 13; }
+  const u = { kind, team, x, y, home: home || null, hp, maxHp: hp, sp: sp * rr(0.9, 1.1), r, ut: ut || null, role: U ? U.role : 'melee', armor: !!(U && U.armor),
     kx: 0, ky: 0, z: 0, vz: 0, stun: 0, atkT: rr(0.5, 1.5), windup: 0, wkind: null, face: team ? -1 : 1, walk: rand() * 6, hit: 0,
     dead: false, deadT: 0, tgt: null, tgtT: 0, swing: 0, wx: 0, wy: 0, wanderT: 0, dashHit: -1, chargeT: 0 };
   B.units.push(u);
@@ -147,9 +165,9 @@ function damageUnit(u, dmg, fx, fy, kb, launch, fromAlly) {
   dmg = Math.round(dmg * rr(0.9, 1.1) * 10) / 10;
   u.hp -= dmg; u.hit = 0.12;
   const a = Math.atan2(u.y - fy, u.x - fx);
-  const armor = u.kind === 'boss' ? 0.15 : u.kind === 'officer' ? 0.35 : 1;
+  const armor = u.kind === 'boss' ? 0.15 : u.kind === 'officer' ? 0.35 : u.armor ? 0.5 : 1;
   u.kx = Math.cos(a) * kb * armor; u.ky = Math.sin(a) * kb * armor;
-  if (u.kind === 'grunt' || u.kind === 'ally') { u.stun = 0.35; if (u.windup > 0) { u.windup = 0; } }
+  if (u.kind === 'grunt' || u.kind === 'ally') { u.stun = u.armor ? 0.18 : 0.35; if (u.windup > 0) { u.windup = 0; u.chargeT = 0; } }
   else if (launch) { u.stun = 0.4; u.windup = 0; u.chargeT = 0; }
   if (launch && u.kind !== 'boss') u.vz = launch * armor;
   if (!fromAlly) {
@@ -246,7 +264,8 @@ function updateBattle(dt) {
 
   // 유닛
   B.tokens = 0;
-  for (const u of B.units) if (!u.dead && u.team === 1 && u.windup > 0 && u.tgt === H) B.tokens++;
+  B.rtok = 0;
+  for (const u of B.units) if (!u.dead && u.team === 1 && u.windup > 0 && u.tgt === H) { if (u.wkind === 'aim') B.rtok++; else B.tokens++; }
   const enemies = B.units.filter(u => u.team === 1 && !u.dead), allies = B.units.filter(u => u.team === 0 && !u.dead);
   for (const u of B.units) {
     u.hit = Math.max(0, u.hit - dt); u.swing = Math.max(0, u.swing - dt);
@@ -258,6 +277,7 @@ function updateBattle(dt) {
     u.atkT -= dt; u.tgtT -= dt;
     if (u.team === 1) enemyAI(u, dt, H, allies); else allyAI(u, dt, enemies);
   }
+  updateShots(dt, H);
   // 겹침 밀어내기
   const live = B.units.filter(u => !u.dead && u.z <= 0);
   for (let i = 0; i < live.length; i++) {
@@ -284,6 +304,7 @@ function updateBattle(dt) {
   if (B.allyT <= 0) {
     B.allyT = 5;
     if (allies.length < B.allyMax) for (const b of [B.allyBase, ...B.bases.filter(b => b.owner === 0)]) addUnit('ally', 0, b.x + rr(-30, 30), b.y + rr(-30, 30), b);
+    if (allies.filter(a => a.trained).length < 30) deployArmy(2, B.allyBase); // 예비대 투입
   }
   // 거점 제압
   for (const b of B.bases) {
@@ -326,18 +347,22 @@ function enemyAI(u, dt, H, allies) {
   // 공격 준비 중
   if (u.windup > 0) {
     u.windup -= dt;
-    if (u.wkind === 'charge' && u.windup <= 0) { u.chargeT = 0.55; }
+    if (u.wkind === 'charge' && u.windup <= 0) { u.chargeT = u.kind === 'boss' ? 0.55 : 0.45; }
+    else if (u.wkind === 'aim') { if (u.windup <= 0) fireBattleShot(u); }
     else if (u.windup <= 0) resolveEnemyAttack(u, H);
     return;
   }
   if (u.chargeT > 0) {
     u.chargeT -= dt;
     bMove(u, Math.cos(u.wdir) * 430 * dt, Math.sin(u.wdir) * 430 * dt, u.r);
-    if (dist2(u.x, u.y, H.x, H.y) < (u.r + 16) ** 2) { hurtHero(7 * Math.sqrt(B.diff), u.x, u.y); u.chargeT = 0; }
+    if (dist2(u.x, u.y, H.x, H.y) < (u.r + 16) ** 2) { hurtHero((u.kind === 'boss' ? 7 : 2.5) * Math.sqrt(B.diff), u.x, u.y); u.chargeT = 0; if (u.kind !== 'boss') u.atkT = rr(2.5, 4); }
+    for (const a of B.units) if (a.team === 0 && !a.dead && dist2(u.x, u.y, a.x, a.y) < (u.r + a.r + 4) ** 2) { hurtAlly(a, 2); a.kx = Math.cos(u.wdir) * 260; a.ky = Math.sin(u.wdir) * 260; }
     emit(u.x, u.y, 1, { color: '#d8c8a0', kind: 'smoke', smin: 10, smax: 30, lmin: .3, lmax: .5, zmin: 3, zmax: 5, grow: 10 });
+    if (u.chargeT <= 0 && u.kind !== 'boss') u.atkT = Math.max(u.atkT, rr(2, 3.5));
     return;
   }
   const t = u.tgt;
+  if (u.kind === 'grunt' && u.role !== 'melee' && specialAI(u, dt, t, H)) return;
   let tx, ty, stopD;
   if (t) { tx = t.x; ty = t.y; stopD = u.r + 22 + (u.kind === 'grunt' && t === H ? rr(0, 18) : 0); }
   else {
@@ -362,10 +387,60 @@ function enemyAI(u, dt, H, allies) {
       if (d < 85) { u.windup = 0.65; u.wkind = 'sweep'; u.wdir = Math.atan2(H.y - u.y, H.x - u.x); }
       else if (d < 380 && rand() < 0.02) { u.windup = 0.8; u.wkind = 'charge'; u.wdir = Math.atan2(H.y - u.y, H.x - u.x); }
     }
-  } else if (d < u.r + 26) {
-    u.atkT = rr(1, 1.6); u.swing = 0.25;
-    t.hp -= u.kind === 'grunt' ? 1 : 3; t.hit = 0.1;
-    if (t.hp <= 0) { t.dead = true; t.deadT = 1; t.vz = 160; }
+  } else if (d < u.r + t.r + 16) {
+    u.atkT = rr(1, 1.6) * (u.role === 'cav' ? 0.8 : 1); u.swing = 0.25;
+    hurtAlly(t, u.kind === 'grunt' ? (u.ut ? UNITS[u.ut].atk : 1) : 3);
+  }
+}
+function hurtAlly(t, dmg) {
+  if (t.dead) return;
+  t.hp -= dmg; t.hit = 0.1;
+  if (t.hp <= 0) { t.dead = true; t.deadT = 1; t.vz = 160; if (t.trained && t.ut) B.lost[t.ut] = (B.lost[t.ut] || 0) + 1; }
+}
+// 원거리·기병 졸병/아군의 공통 행동. true 를 돌려주면 이번 프레임 처리를 끝낸다
+function specialAI(u, dt, t, H) {
+  const U = UNITS[u.ut]; if (!U || !t) return false;
+  const d = Math.hypot(t.x - u.x, t.y - u.y);
+  if (u.role === 'ranged') {
+    const R = U.range;
+    let mx = 0, my = 0;
+    if (d > R * 0.92) { mx = (t.x - u.x) / d; my = (t.y - u.y) / d; }
+    else if (d < R * 0.4) { mx = -(t.x - u.x) / d; my = -(t.y - u.y) / d; }
+    if (mx || my) { bMove(u, mx * u.sp * dt, my * u.sp * dt, u.r); u.walk += dt * 10; }
+    u.face = t.x > u.x ? 1 : -1;
+    if (u.atkT <= 0 && d <= R) {
+      if (u.team === 1 && t === H) { if (B.rtok >= 5) { u.atkT = rr(0.3, 0.8); return true; } B.rtok++; }
+      u.windup = 0.45; u.wkind = 'aim'; u.wdir = Math.atan2(t.y - u.y, t.x - u.x); u.aimT = t;
+    }
+    return true;
+  }
+  if (u.role === 'cav' && u.team === 1 && t === H && u.atkT <= 0 && d > 70 && d < 230 && rand() < 0.04) {
+    u.windup = 0.6; u.wkind = 'charge'; u.wdir = Math.atan2(H.y - u.y, H.x - u.x); return true;
+  }
+  return false;
+}
+// 조준 끝 → 투사체 발사
+function fireBattleShot(u) {
+  const U = UNITS[u.ut], t = u.aimT, P = PROJ[U.proj] || PROJ.arrow;
+  u.swing = 0.25; u.atkT = U.reload * rr(0.9, 1.3); u.windup = 0; u.aimT = null;
+  const tx = t && !t.dead ? t.x : u.x + Math.cos(u.wdir) * U.range, ty = t && !t.dead ? t.y : u.y + Math.sin(u.wdir) * U.range;
+  const a = Math.atan2(ty - u.y, tx - u.x);
+  const dmg = u.team === 1 ? U.atk * 0.8 * Math.sqrt(B.diff) : U.atk * (u.trained ? 1.5 : 1);
+  B.shots.push({ x: u.x + Math.cos(a) * 12, y: u.y + Math.sin(a) * 12, vx: Math.cos(a) * P.sp, vy: Math.sin(a) * P.sp, team: u.team, kind: U.proj, dmg, life: U.range / P.sp + 0.35 });
+  if (U.proj === 'ball') emit(u.x + Math.cos(a) * 16, u.y + Math.sin(a) * 16, 6, { color: ['#eee', '#bbb', '#ffd54a'], kind: 'smoke', smin: 10, smax: 50, lmin: .4, lmax: .8, zmin: 3, zmax: 6, grow: 12 });
+}
+function updateShots(dt, H) {
+  for (let i = B.shots.length - 1; i >= 0; i--) {
+    const q = B.shots[i]; q.life -= dt; q.x += q.vx * dt; q.y += q.vy * dt;
+    let hit = false;
+    if (q.team === 1) {
+      if (dist2(q.x, q.y, H.x, H.y) < 16 * 16) { if (H.inv <= 0) hurtHero(q.dmg, q.x - q.vx * 0.05, q.y - q.vy * 0.05); hit = true; }
+      else for (const a of B.units) { if (a.team !== 0 || a.dead || a.z > 0) continue; if (dist2(q.x, q.y, a.x, a.y) < (a.r + 4) ** 2) { hurtAlly(a, q.dmg); hit = true; break; } }
+    } else {
+      for (const e of B.units) { if (e.team !== 1 || e.dead) continue; if (dist2(q.x, q.y, e.x, e.y) < (e.r + 4) ** 2) { damageUnit(e, q.dmg, q.x - q.vx * 0.05, q.y - q.vy * 0.05, 50, 0, true); hit = true; break; } }
+    }
+    if (hit) emit(q.x, q.y - 12, 3, { color: ['#fff', '#ddd'], kind: 'spark', smin: 40, smax: 120, lmin: .1, lmax: .2 });
+    if (hit || q.life <= 0) B.shots.splice(i, 1);
   }
 }
 function resolveEnemyAttack(u, H) {
@@ -382,20 +457,23 @@ function resolveEnemyAttack(u, H) {
 }
 function allyAI(u, dt, enemies) {
   const H = B.hero;
+  if (u.windup > 0) { u.windup -= dt; if (u.windup <= 0 && u.wkind === 'aim') fireBattleShot(u); return; }
   if (u.tgtT <= 0 || (u.tgt && u.tgt.dead)) {
     u.tgtT = rr(0.5, 0.9);
-    let best = null, bd = 280 * 280;
+    let best = null, bd = (u.role === 'ranged' ? 320 : 280) ** 2;
     for (const e of enemies) { const d = dist2(e.x, e.y, u.x, u.y); if (d < bd) { bd = d; best = e; } }
     u.tgt = best;
   }
+  if (u.role === 'ranged' && u.tgt && specialAI(u, dt, u.tgt, H)) return;
   let tx, ty, stop;
   if (u.tgt) { tx = u.tgt.x; ty = u.tgt.y; stop = u.r + u.tgt.r + 6; }
   else { if (!u.fx || rand() < dt * 0.5) { u.fx = rr(-70, 70); u.fy = rr(-70, 70); } tx = H.x + u.fx; ty = H.y + u.fy; stop = 20; }
   const d = Math.hypot(tx - u.x, ty - u.y);
   if (d > stop) { const sp = u.sp * (u.tgt ? 1 : (d > 200 ? 1.6 : 0.9)); bMove(u, (tx - u.x) / d * sp * dt, (ty - u.y) / d * sp * dt, u.r); u.walk += dt * 10; u.face = tx > u.x ? 1 : -1; }
   else if (u.tgt && u.atkT <= 0) {
-    u.atkT = rr(0.9, 1.5); u.swing = 0.25; u.face = tx > u.x ? 1 : -1;
-    damageUnit(u.tgt, 1, u.x, u.y, 70, 0, true);
+    const U = u.ut && UNITS[u.ut], cav = u.role === 'cav';
+    u.atkT = rr(0.9, 1.5) * (cav ? 0.8 : 1); u.swing = 0.25; u.face = tx > u.x ? 1 : -1;
+    damageUnit(u.tgt, (U ? U.atk : 1) * (u.trained ? 1.5 : 1), u.x, u.y, cav ? 160 : 70, 0, true);
   }
 }
 
@@ -413,12 +491,13 @@ function showResult() {
   $('resultPanel').innerHTML = `<h2 style="text-align:center">${win ? '🏆 승리' : '패배'}</h2>
     <div class="rank">${rank}</div>
     <div class="stats"><span>격파 수</span><b>${B.kos} KO</b><span>부장 격파</span><b>${B.officers}</b><span>소요 시간</span><b>${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}</b>
-    <span>경험치</span><b>+${win ? exp : Math.floor(exp / 2)}</b>${win ? `<span>금</span><b>+${gold}🪙</b>` : ''}</div>
+    <span>경험치</span><b>+${win ? exp : Math.floor(exp / 2)}</b>${win ? `<span>금</span><b>+${gold}🪙</b>` : ''}
+    ${Object.keys(B.lost).length ? `<span>전사한 병사</span><b>${Object.keys(B.lost).map(k => `${UNITS[k].icon}${B.lost[k]}`).join(' ')}</b>` : ''}</div>
     <button class="opt primary" id="backBtn"><span class="ic">🏰</span><span>영지로 돌아가기</span></button>`;
   $('resultPanel').classList.add('show');
   $('backBtn').onclick = () => {
     $('resultPanel').classList.remove('show');
-    const st = { kos: B.kos, exp };
+    const st = { kos: B.kos, exp, lost: Object.assign({}, B.lost) };
     MODE = 'world'; document.body.classList.remove('battle');
     B = null; bGround = null; parts.length = 0; floats.length = 0; bAtkHeld = false;
     onBattleEnd(win, st);
@@ -427,10 +506,11 @@ function showResult() {
 
 // ---------- 그리기 ----------
 function enemyLook(u) {
-  // 시대별 무장 (era.js ERAS[].looks)
+  // 시대별 무장 (era.js ERAS[].looks) · 졸병/아군은 병종별 (tech.js unitLook)
   const f = B.f;
-  if (u.kind === 'grunt' || u.kind === 'officer' || u.kind === 'boss') return eraLook(u.kind, f, B.era);
-  return eraLook('ally', f, B.era);
+  if (u.kind === 'officer' || u.kind === 'boss') return eraLook(u.kind, f, B.era);
+  if (u.team === 1) return u.ut ? unitLook(u.ut, 'foe', B.era, f) : eraLook('grunt', f, B.era);
+  return u.ut ? unitLook(u.ut, 'ally', S.era) : eraLook('ally', f, S.era);
 }
 function drawBattle() {
   const H = B.hero, Z = ZOOM * 0.84, tm = B.t;
@@ -481,6 +561,7 @@ function drawBattle() {
     else if (e.k === 'unit') drawUnit(e.o, tm);
     else drawHero(H, tm);
   }
+  drawShots2D(ctx, B.shots);
   drawParts(ctx); drawFloats(ctx);
   ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
   ctx.fillStyle = 'rgba(255,140,60,.07)'; ctx.fillRect(0, 0, VW, VH);
@@ -505,7 +586,9 @@ function drawUnit(u, tm) {
     gr.addColorStop(0, u.kind === 'boss' ? 'rgba(255,40,30,.45)' : 'rgba(255,200,60,.35)'); gr.addColorStop(1, 'rgba(0,0,0,0)');
     ctx.fillStyle = gr; ctx.beginPath(); ctx.ellipse(u.x, u.y, 30 * (lk.scale || 1), 12 * (lk.scale || 1), 0, 0, 7); ctx.fill();
   }
-  drawHuman(ctx, u.x, u.y, { ...lk, face, walk: u.walk, aim, flash: u.hit > 0, z: u.z, rot: u.dead ? -face * Math.min(1.4, (1 - u.deadT) * 4) : 0 });
+  if (u.wkind === 'aim' && u.windup > 0) aim = u.wdir;
+  if (lk.mount && !u.dead) { drawHorse(ctx, u.x, u.y + 4 - u.z, face, u.walk, true, lk.mount); drawHuman(ctx, u.x - face * 2, u.y - 10, { ...lk, face, walk: 0, aim, flash: u.hit > 0, z: u.z, noShadow: true }); }
+  else drawHuman(ctx, u.x, u.y, { ...lk, face, walk: u.walk, aim, flash: u.hit > 0, z: u.z, rot: u.dead ? -face * Math.min(1.4, (1 - u.deadT) * 4) : 0 });
   ctx.globalAlpha = 1;
   if (u.dead) return;
   const s = lk.scale || 1;

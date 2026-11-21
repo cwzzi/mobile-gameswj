@@ -227,18 +227,18 @@ function b3Reset() {
 
 // ---------- 유닛 풀 ----------
 function b3Release(u, r) {
-  const g = r.m.group; B3.scene.remove(g); g.rotation.x = 0; g.scale.setScalar(r.base); r.m.flash(false);
+  const g = r.m.group; B3.scene.remove(g); g.rotation.x = 0; g.scale.setScalar(r.base); if (r.m.flash) r.m.flash(false);
   let p = B3.pool.get(r.pk); if (!p) B3.pool.set(r.pk, p = []);
   if (p.length < 40) p.push(r.m);
   B3.act.delete(u);
 }
-function b3Use(key, look, obj) {
+function b3Use(key, look, obj, make) {
   let r = B3.act.get(obj);
   if (r && r.pk !== key) { b3Release(obj, r); r = null; } // 모델이 바뀜(에셋 로딩 완료 등)
   if (!r) {
     const pool = B3.pool.get(key);
     let m = pool && pool.length ? pool.pop() : null;
-    if (!m) { m = R3D.human(look); m.group.rotation.order = 'YXZ'; }
+    if (!m) { m = make ? make() : R3D.human(look); m.group.rotation.order = 'YXZ'; }
     r = { m, pk: key, yaw: null, lx: null, lz: null, lw: obj.walk || 0, seen: 0, base: look.scale || 1 };
     B3.scene.add(m.group); B3.act.set(obj, r);
   }
@@ -309,10 +309,19 @@ function drawBattle3D() {
     else if (u.swing > 0) { sw = u.swing / 0.25; if (u.tgt) fy = R3D.yawTo(u.tgt.x - u.x, u.tgt.y - u.y); }
     else if (u.team === 1 && !u.dead && !mv) { const dx = H.x - u.x, dy = H.y - u.y; if (dx * dx + dy * dy < 90 * 90) fy = R3D.yawTo(dx, dy); }
     if (u.dead) fy = r.yaw === null ? 0 : r.yaw;
-    pose.walk = u.walk; pose.moving = mv || u.chargeT > 0; pose.swing = sw;
+    if (u.wkind === 'aim' && u.windup > 0) sw = 0.35; // 조준 자세
+    const mnt = u._l3.mount && !u.dead;
+    pose.walk = u.walk; pose.moving = mv || u.chargeT > 0; pose.swing = sw; pose.sit = !!mnt;
     pose.yaw = w3dFaceMove(r, x, z, dt, fy);
     r.m.pose(pose); r.m.flash(u.hit > 0);
     let y = u.z / T, s = r.base;
+    if (mnt) { // 기병: 말 + 안장 위 자세
+      const HS = W3_HS / 1.45 * B3_MULT, hr = b3Use('horse|' + u._l3.mount, { scale: HS }, u._h || (u._h = {}), () => R3D.horse(u._l3.mount));
+      hr.m.pose({ walk: u.walk * 0.7, moving: pose.moving, ridden: true, yaw: pose.yaw });
+      hr.m.group.scale.setScalar(HS); hr.m.group.position.set(x, y, z);
+      y += R3D.SADDLE_Y * HS;
+    }
+    pose.sit = false;
     if (u.dead) {
       const k = Math.min(1, (1 - u.deadT) * 4); g.rotation.x = -1.45 * k;
       if (u.deadT < 0.55) y -= (0.55 - u.deadT) * 0.9;
@@ -373,6 +382,7 @@ function drawBattle3D() {
       g.fillStyle = '#e44'; g.fillRect(pr.x - w / 2, pr.y, w * clamp(u.hp / u.maxHp, 0, 1), 3.5 * ks);
     }
   }
+  drawShots3D(g, B.shots, pr, ks, 0.75, 0);
   for (const o of S3.bases) if (o.hq && o.b.owner === 1) {
     R3D.project(o.b.x / T, 3.5, o.b.y / T, pr); if (!pr.vis) continue;
     g.font = `800 ${Math.round(13 * ks)}px system-ui, sans-serif`; g.lineWidth = 3.5; g.strokeStyle = 'rgba(0,0,0,.8)'; g.strokeText('적 본진', pr.x, pr.y); g.fillStyle = '#ff9a8a'; g.fillText('적 본진', pr.x, pr.y);

@@ -311,6 +311,10 @@ const A3D = (() => {
     const lo = !!o.lod;
     // 시대별 차림(kit): chief = 부족 족장, tribe = 부족 전사, knight = 중세 이후 기사 (era.js)
     const two = o.weapon === 'glaive';
+    // 병종 차림 (tech.js unitLook): ranged = 두건 궁수/투석병, spear = 창·장창병, gunner = 석궁/머스킷병. prop = 손에 붙일 절차적 무기
+    if (o.kit === 'ranged') return { ch: 'rogue_lo', body: 'rogue', extra: ['Rogue_Cape'], tint: o.body, mode: 'green', atk: 'atk', prop: o.weapon };
+    if (o.kit === 'spear') return { ch: lo ? 'knight_lo' : 'knight', body: 'knight', extra: ['Knight_Helmet', ...(o.weapon === 'pike' ? [] : ['Badge_Shield'])], tint: o.body, mode: 'armor', atk: 'atk', prop: o.weapon };
+    if (o.kit === 'gunner') return { ch: lo ? 'knight_lo' : 'knight', body: 'knight', extra: o.hat === 'helm' ? ['Knight_Helmet'] : [], tint: o.body, mode: 'armor', atk: 'atk', prop: o.weapon };
     if (o.kit === 'chief') return { ch: 'barbarian', body: 'barbarian', extra: ['Barbarian_Hat', 'Barbarian_Cape', '2H_Axe'], tint: o.tint || null, mode: 'armor', atk: 'atk2', k: 1.18 };
     if (o.kit === 'tribe') return { ch: lo ? 'barbarian_lo' : 'barbarian', body: 'barbarian', extra: two ? ['Barbarian_Hat', 'Barbarian_Cape', '2H_Axe'] : o.armor ? ['Barbarian_Hat', 'Barbarian_Cape', '1H_Axe', 'Barbarian_Round_Shield'] : ['1H_Axe'], tint: o.body, mode: 'armor', atk: two ? 'atk2' : 'atk' };
     if (o.kit === 'knight') return { ch: lo ? 'knight_lo' : 'knight', body: 'knight', extra: ['Knight_Helmet', ...(o.cape ? ['Knight_Cape'] : []), two ? '2H_Sword' : '1H_Sword', ...(two ? [] : ['Badge_Shield'])], tint: o.body, mode: 'armor', atk: two ? 'atk2' : 'atk' };
@@ -380,7 +384,7 @@ const A3D = (() => {
     if (g === undefined) { g = merge(list.map(n => C.parts[n] && C.parts[n].geo).filter(Boolean)); C.geoCache.set(key, g); }
     return g;
   }
-  A.humanKey = look => { const p = plan(look); return 'A|' + p.ch + '|' + p.extra.join(',') + '|' + (p.tint || '') + '|' + ((look && look.scale) || 1); };
+  A.humanKey = look => { const p = plan(look); return 'A|' + p.ch + '|' + p.extra.join(',') + '|' + (p.tint || '') + '|' + ((look && look.scale) || 1) + (p.prop ? '|' + p.prop : ''); };
   A.human = look => {
     if (!A.chars) return null;
     const pl = plan(look);
@@ -400,6 +404,15 @@ const A3D = (() => {
     mesh.frustumCulled = false; mesh.castShadow = !look.lod; mesh.receiveShadow = false;
     // 원래 스킨 메시가 붙어 있던 자리(보통 리그 루트 바로 아래)에 붙인다
     rig.add(mesh); mesh.bind(skel, C.bindMatrix);
+    if (pl.prop && R3D.weaponGeo) { // 손 뼈(handslot.r)에 절차적 무기 (활·석궁·머스킷·장창)
+      const pg = R3D.weaponGeo(pl.prop), hand = [...byName.values()].find(b => /^handslot\.?r$/i.test(b.name));
+      if (pg && hand) {
+        rig.updateMatrixWorld(true); const pm = new THREE.Mesh(pg, R3D.mats.vc); pm.castShadow = !look.lod;
+        pm.scale.setScalar(0.62 / C.norm / hand.getWorldScale(new THREE.Vector3()).x);
+        if (pl.prop === "spear" || pl.prop === "pike") pm.rotation.x = Math.PI; // 창끝이 위로
+        hand.add(pm);
+      }
+    }
     const inner = new THREE.Group(); inner.add(rig);
     const k = (pl.k || 1) * 1.2, y0 = C.baseY * C.norm * k; // 1.2: 둥근 절차 모델과 비슷한 화면 크기
     inner.scale.setScalar(C.norm * k); inner.position.y = y0;

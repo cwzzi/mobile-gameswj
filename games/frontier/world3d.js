@@ -653,6 +653,30 @@ function w3dEraLook(kind, extra) {
   }
   return lk;
 }
+// 병종별 외형 (tech.js unitLook) + 오픈월드 크기
+function w3dUnitLook(base) {
+  let lk = w3dLookCache.get(base);
+  if (!lk) { lk = Object.assign({}, base, { scale: 1.45, lod: 1 }); w3dLookCache.set(base, lk); }
+  return lk;
+}
+// 사람 하나 그리기 (말 탄 병종이면 말까지) → 사람 레코드
+function w3dRider(obj, look, x, z, dt, pose, BL) {
+  const r = w3dHuman(obj, look);
+  const moved = r.lx !== null && (Math.abs(x - r.lx) + Math.abs(z - r.lz)) > 1e-4;
+  const yaw = w3dFaceMove(r, x, z, dt, pose.face);
+  if (look.mount) {
+    const h = obj._h || (obj._h = {});
+    const hr = w3dUse(h, 'horse|' + look.mount, () => { const m = R3D.horse(look.mount); m.group.scale.setScalar(W3_HS); return m; });
+    hr.m.pose({ walk: (obj.walk || 0) * 0.7, moving: moved, ridden: true, yaw }); hr.m.group.position.set(x, 0, z);
+    r.m.pose({ sit: true, swing: pose.swing, yaw }); r.m.group.position.set(x, R3D.SADDLE_Y * W3_HS, z);
+    BL.add(x, z, 0.6);
+  } else {
+    r.m.pose({ walk: obj.walk, moving: moved, swing: pose.swing, yaw }); r.m.group.position.set(x, 0, z);
+    BL.add(x, z, 0.26 * (look.scale || 1));
+  }
+  r.m.flash(obj.hit > 0);
+  return r;
+}
 function w3dWarLook(cmd) { return cmd ? w3dEraLook('officer', { scale: 1.45 * 1.3 }) : w3dEraLook('grunt', { scale: 1.45, lod: 1 }); }
 function w3dHuman(obj, look) { const key = R3D.human.key(look); return w3dUse(obj, 'h|' + key, () => R3D.human(look)); }
 
@@ -848,16 +872,18 @@ function drawWorld3D() {
   }
   for (const b of bandits) {
     const x = b.x / T, z = b.y / T; if (!w3dInView(x, z, 1.5)) continue;
-    const look = b.war ? w3dWarLook(b.cmd) : w3dEraLook('bandit', { scale: 1.45, lod: 1 });
-    const r = w3dHuman(b, look);
+    const look = b.war && (b.cmd || !b.ut) ? w3dWarLook(b.cmd) : !b.ut && !b.war ? w3dEraLook('bandit', { scale: 1.45, lod: 1 }) : w3dUnitLook(banditLook(b));
     const dpx = p.x - b.x, dpy = p.y - b.y, near = dpx * dpx + dpy * dpy < 44 * 44;
-    const moved = r.lx !== null && (Math.abs(x - r.lx) + Math.abs(z - r.lz)) > 1e-4;
-    r.m.pose({ walk: b.walk, moving: moved, swing: (b.swing || 0) / 0.25, yaw: w3dFaceMove(r, x, z, dt, near ? Math.atan2(dpx, dpy) : undefined) });
-    r.m.flash(b.hit > 0);
-    r.m.group.position.set(x, 0, z);
-    const sc = look.scale || 1; BL.add(x, z, 0.26 * sc);
-    bars.push({ x, y: 1.12 * sc + 0.1, z, f: b.hp / (b.maxHp || 3), col: '#e44' });
+    w3dRider(b, look, x, z, dt, { swing: (b.swing || 0) / 0.25, face: near ? Math.atan2(dpx, dpy) : b.swing > 0 ? Math.atan2(b.face || 1, 0) : undefined }, BL);
+    const sc = look.scale || 1;
+    bars.push({ x, y: 1.12 * sc + 0.1 + (look.mount ? 0.7 : 0), z, f: b.hp / (b.maxHp || 3), col: '#e44' });
     if (b.loot) coins.push({ x, y: 0.5, z });
+  }
+  for (const s of soldiers) { // 훈련된 아군 병사
+    const x = s.x / T, z = s.y / T; if (!w3dInView(x, z, 1.5)) continue;
+    const look = w3dUnitLook(unitLook(s.ut, 'ally', S.era));
+    w3dRider(s, look, x, z, dt, { swing: (s.swing || 0) / 0.25, face: s.tgt && bandits.includes(s.tgt) && s.swing > 0 ? Math.atan2(s.tgt.x - s.x, s.tgt.y - s.y) : undefined }, BL);
+    if (s.hp < s.maxHp) bars.push({ x, y: 1.12 * 1.45 + 0.1 + (look.mount ? 0.7 : 0), z, f: s.hp / s.maxHp, col: '#4fa3ff' });
   }
   // 영주
   {
@@ -924,6 +950,7 @@ function drawWorld3D() {
     g.fillStyle = '#fff'; g.fillText(l.s, pr.x, pr.y - 4.5 * ks);
     if (l.war) { g.font = `${Math.round(20 * ks)}px system-ui`; g.fillText('⚔️', pr.x + tw / 2 + 12 * ks, pr.y - 2 + Math.sin(tm * 6) * 2); }
   }
+  drawShots3D(g, shots, pr, ks, 0.85, 14);
   for (const c of coins) { R3D.project(c.x + 0.25, c.y, c.z, pr); g.fillStyle = '#ffd34d'; g.strokeStyle = '#7a5200'; g.lineWidth = 1; g.beginPath(); g.arc(pr.x, pr.y, 3.5 * ks, 0, 7); g.fill(); g.stroke(); }
   for (const b of bars) {
     R3D.project(b.x, b.y, b.z, pr); if (!pr.vis) continue;
@@ -962,7 +989,7 @@ function drawWorld3D() {
 
 // --- tap-to-act / resource buildings ---
 // 벌목소·채석장·금광용 간단한 절차적 모델 (다른 모델이 없을 때 w3dBuildingGeo가 사용)
-Object.assign(W3_BSCALE, { lumber: [1.2, 1.35, 1.2], quarry: [1.2, 1.3, 1.2], mine: [1.2, 1.3, 1.2] });
+Object.assign(W3_BSCALE, { lumber: [1.2, 1.35, 1.2], quarry: [1.2, 1.3, 1.2], mine: [1.2, 1.3, 1.2], barracks: [1.2, 1.35, 1.2], range: [1.2, 1.3, 1.2], stable: [1.2, 1.3, 1.2] });
 function w3dResBldGeo(type) {
   const { box, cyl, cone, ico } = R3D.prim, P = [], G = [];
   if (type === 'lumber') {
@@ -982,6 +1009,36 @@ function w3dResBldGeo(type) {
     P.push({ g: box(0.18, 0.04, 0.04), c: '#8a8e94', p: [-0.37, 0.35, 0.2], r: [0, 0, 0.5] });
     P.push({ g: box(0.22, 0.12, 0.16), c: '#6b4a2a', p: [0.26, 0.1, 0.24] });
     P.push({ g: cyl(0.04, 0.04, 0.2, 5), c: '#2a2a2e', p: [0.26, 0.04, 0.34], r: [0, 0, Math.PI / 2] });
+  } else if (type === 'barracks') { // 병영: 긴 막사 + 무기 걸이 + 깃발
+    P.push({ g: box(0.86, 0.04, 0.66), c: '#8a7a5a', p: [0, 0.02, 0] });
+    P.push({ g: box(0.66, 0.3, 0.36), c: '#b08a5a', p: [0, 0.17, -0.1] });
+    P.push({ g: w3dPrism(0.42, 0.2, 0.72).rotateY(Math.PI / 2), c: '#8a3a2a', p: [0, 0.32, -0.1] });
+    P.push({ g: box(0.14, 0.2, 0.02), c: '#4a2a18', p: [0, 0.1, 0.085] });
+    for (let k = 0; k < 4; k++) P.push({ g: cyl(0.012, 0.012, 0.42, 4), c: '#6b4a2e', p: [-0.3 + k * 0.06, 0.21, 0.24], r: [0, 0, 0.12] });
+    for (let k = 0; k < 4; k++) P.push({ g: cone(0.025, 0.07, 4), c: '#cfd4d8', p: [-0.3 + k * 0.06 + 0.025, 0.45, 0.24] });
+    P.push({ g: box(0.3, 0.03, 0.03), c: '#5b3a20', p: [-0.21, 0.3, 0.24] });
+    P.push({ g: cyl(0.1, 0.1, 0.03, 8), c: '#c9a040', p: [0.28, 0.16, 0.24], r: [Math.PI / 2, 0, 0] });
+    G.push({ g: box(0.1, 0.08, 0.02), c: '#fff', p: [0.22, 0.2, 0.085] });
+  } else if (type === 'range') { // 궁술장: 과녁 셋 + 울타리
+    P.push({ g: box(0.86, 0.03, 0.66), c: '#a89a6a', p: [0, 0.015, 0] });
+    for (const [x, z] of [[-0.25, -0.18], [0.05, -0.24], [0.33, -0.16]]) {
+      P.push({ g: cyl(0.12, 0.12, 0.035, 10), c: '#f0ead8', p: [x, 0.22, z], r: [Math.PI / 2 - 0.2, 0, 0] });
+      P.push({ g: cyl(0.075, 0.075, 0.04, 10), c: '#d9483b', p: [x, 0.22, z + 0.004], r: [Math.PI / 2 - 0.2, 0, 0] });
+      P.push({ g: cyl(0.03, 0.03, 0.045, 8), c: '#f2c14e', p: [x, 0.22, z + 0.008], r: [Math.PI / 2 - 0.2, 0, 0] });
+      P.push({ g: box(0.03, 0.22, 0.03), c: '#6b4a2e', p: [x, 0.1, z - 0.04] });
+    }
+    for (const x of [-0.42, 0.42]) P.push({ g: box(0.03, 0.12, 0.6), c: '#8a6a40', p: [x, 0.07, 0] });
+    P.push({ g: box(0.26, 0.16, 0.14), c: '#7a5a34', p: [-0.22, 0.08, 0.22] });
+    for (let k = 0; k < 3; k++) P.push({ g: cyl(0.008, 0.008, 0.2, 4), c: '#d8c8a0', p: [-0.26 + k * 0.04, 0.22, 0.22], r: [0.2, 0, 0] });
+  } else if (type === 'stable') { // 마구간: 지붕 덮인 칸 + 울타리 + 건초
+    P.push({ g: box(0.86, 0.03, 0.66), c: '#9a8a5a', p: [0, 0.015, 0] });
+    for (const [x, z] of [[-0.36, -0.28], [0.36, -0.28], [-0.36, 0.02], [0.36, 0.02]]) P.push({ g: box(0.05, 0.36, 0.05), c: '#6b4a2e', p: [x, 0.18, z] });
+    P.push({ g: box(0.76, 0.22, 0.04), c: '#a0703e', p: [0, 0.11, -0.3] });
+    P.push({ g: w3dPrism(0.42, 0.18, 0.84).rotateY(Math.PI / 2), c: '#6a4a2a', p: [0, 0.36, -0.13] });
+    for (const z of [0.12, 0.3]) P.push({ g: box(0.8, 0.03, 0.025), c: '#a07a4a', p: [0, 0.1 + (z > 0.2 ? 0.06 : 0), 0.31] });
+    for (const x of [-0.4, 0, 0.4]) P.push({ g: box(0.04, 0.2, 0.04), c: '#7a5a30', p: [x, 0.1, 0.31] });
+    P.push({ g: box(0.18, 0.14, 0.14), c: '#e0c060', p: [0.24, 0.07, 0.12] });
+    P.push({ g: box(0.14, 0.12, 0.12), c: '#d8b450', p: [0.06, 0.06, 0.16] });
   } else { // mine
     P.push({ g: box(0.74, 0.04, 0.64), c: '#6e6a58', p: [0, 0.02, 0] });
     P.push({ g: ico(0.36, 0), c: '#7a7468', p: [0, 0.14, -0.14], s: [1.3, 0.8, 0.9] });

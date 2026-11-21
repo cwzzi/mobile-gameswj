@@ -35,4 +35,12 @@ window.__game = { get S() { return S; }, get B() { return B; }, get owned() { re
   // 시대·왕조
   ERAS, advanceEra, openEraPanel, openChronicle, showStart, eraReqs, eraProgress, devRate, succession, newGame,
   setAge(a) { S.ruler.born = S.year - a; S.ruler.warned = false; }, addYears(n) { for (let i = 0; i < n; i++) { S.yearT = YEAR_SEC; if (eraTick(0)) break; } },
-  addDev(n) { S.dev += n; }, get paused() { return paused; } };
+  addDev(n) { S.dev += n; }, get paused() { return paused; },
+  // 기술 · 군대 · 적 문명
+  TECHS, UNITS, ENEMY_MIX, soldiers, shots, openTechPanel, openArmyPanel, startResearch, trainUnit, armyTotal, armyCap, foeEra, unitLook,
+  finishResearch() { if (S.research) { S.research.p = TECH[S.research.id].cost; techTick(0); return true; } return false; },
+  research(id) { if (!techHas(id)) { completeTech(id); return true; } return false; }, // 즉시 완성 (핵심 기술이면 시대 전환)
+  researchEra() { for (const t of TECHS) if (t.era === S.era && !t.key && !techHas(t.id)) S.techs.push(t.id); save(); },
+  researchAll() { for (const t of TECHS) if (!techHas(t.id)) S.techs.push(t.id); S.research = null; while (eraNext()) { advanceEra(true); $('eraUpPanel').classList.remove('show'); paused = false; } save(); },
+  addArmy(ut, n) { S.army[ut] = (S.army[ut] | 0) + (n || 1); }, setFoeLv(v) { S.foeLv = v; },
+  finishTraining() { for (const b of S.buildings) if (b.q && b.q.length) b.qt = 999; } };

@@ -149,9 +149,9 @@ const R3D = (() => {
     let o = 0;
     geos.forEach((g, k) => {
       const a = g.attributes.position.array; pos.set(a, o * 3);
-      tc.set(parts[k].c || '#ffffff');
       const cnt = g.attributes.position.count;
-      for (let i = 0; i < cnt; i++) { col[(o + i) * 3] = tc.r; col[(o + i) * 3 + 1] = tc.g; col[(o + i) * 3 + 2] = tc.b; }
+      if (parts[k].c === null && g.attributes.color) col.set(g.attributes.color.array, o * 3); // 이미 색이 칠해진 조각 (R.weaponGeo)
+      else { tc.set(parts[k].c || '#ffffff'); for (let i = 0; i < cnt; i++) { col[(o + i) * 3] = tc.r; col[(o + i) * 3 + 1] = tc.g; col[(o + i) * 3 + 2] = tc.b; } }
       o += cnt; g.dispose();
     });
     const out = new THREE.BufferGeometry();
@@ -241,10 +241,34 @@ const R3D = (() => {
         case 'club':
           P.push({ g: cyl(0.065, 0.028, 0.48, 6), c: '#7a5230', p: [0, hy, 0.22], r: X });
           break;
+        default: { const g = R.weaponGeo(o.weapon); if (g) P.push({ g, c: null, p: [0, hy, 0], r: X }); }
       }
       return R.merge(P);
     });
   }
+  // 원거리·장창 무기 (손에서 +Y 방향으로 뻗음. 1 = 사람 키). A3D 캐릭터의 손 뼈에도 붙인다
+  R.weaponGeo = w => R.cached('wpn|' + w, () => {
+    const P = [];
+    if (w === 'bow') {
+      for (let k = -2; k <= 2; k++) { const a = k * 0.33; P.push({ g: box(0.025, 0.12, 0.025), c: '#6b4a2a', p: [0, Math.sin(a) * 0.3, Math.cos(a) * 0.3 - 0.3], r: [-a, 0, 0] }); }
+      P.push({ g: box(0.008, 0.56, 0.008), c: '#e8e0c8', p: [0, 0, -0.1] });
+    } else if (w === 'sling') {
+      P.push({ g: box(0.012, 0.22, 0.012), c: '#8a6a40', p: [0, -0.1, 0] });
+      P.push({ g: ico(0.035, 0), c: '#9a9a90', p: [0, -0.22, 0] });
+    } else if (w === 'xbow') {
+      P.push({ g: box(0.04, 0.38, 0.05), c: '#6b4a2a', p: [0, 0.12, 0] });
+      P.push({ g: box(0.36, 0.03, 0.03), c: '#4a4a50', p: [0, 0.28, 0] });
+    } else if (w === 'musket') {
+      P.push({ g: box(0.045, 0.24, 0.06), c: '#6b4a2a', p: [0, -0.02, 0] });
+      P.push({ g: cyl(0.016, 0.016, 0.5, 5), c: '#3a3a40', p: [0, 0.32, 0.01] });
+      P.push({ g: box(0.05, 0.03, 0.07), c: '#c9a040', p: [0, 0.1, 0] });
+    } else if (w === 'pike' || w === 'spear') {
+      const L = w === 'pike' ? 1.5 : 1.0;
+      P.push({ g: cyl(0.016, 0.016, L, 5), c: '#7a5230', p: [0, L * 0.3, 0] });
+      P.push({ g: cone(0.04, 0.14, 5), c: '#dfe5ea', p: [0, L * 0.8 + 0.07, 0] });
+    } else return null;
+    return R.merge(P);
+  });
   function human(look) {
     const o = Object.assign({}, DEF, look || {});
     for (const k of ['weapon', 'hat', 'plume', 'cape']) if (!o[k]) o[k] = null;
@@ -342,7 +366,7 @@ const R3D = (() => {
     const saddle = new THREE.Mesh(saddleGeo(), mat); saddle.visible = false;
     for (const m of [body, ...legs, saddle]) { m.castShadow = true; group.add(m); }
     return {
-      group, key: 'horse|' + col,
+      group, key: 'horse|' + col, flash() {},
       pose(p) {
         const a = p.moving ? Math.sin(p.walk || 0) * 0.7 : 0;
         for (const m of legs) m.rotation.x = m.userData.ph ? a : -a;

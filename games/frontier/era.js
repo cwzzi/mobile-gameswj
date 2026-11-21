@@ -4,6 +4,7 @@
 //   title: 그 시대 군주의 칭호 · accent: UI 강조색 · maxLv: 마을 최대 레벨(성 모습 상한) · radius: 영토 반경 보너스
 //   prod/income: 생산·세금 배율 · townCost: 새 마을 비용 배율 · diff: 적 강도 배율 · banditHp: 산적 체력
 //   atk/hp: 군주 공격력·체력 보너스 · arrow: 망루 화살 피해 · need: 이 시대로 "들어오기" 위한 조건
+//     need.tech = 앞 시대의 핵심 기술(tech.js TECHS key:true) · need.towns = 가벼운 선행 조건(마을 수)
 //   looks: 군주/아군/적/주민 외형 (R3D.human · drawHuman 옵션. kit/tint 는 CC0 모델 선택용)
 //   factions: 이 시대 전쟁 상대 (모두 지어낸 이름)
 const ERA_SELECT = true;       // false 면 새 게임 화면에서 시대 선택을 숨기고 항상 부족 시대부터
@@ -12,7 +13,7 @@ const ERAS = [
   { id: 'tribal', name: '부족 시대', icon: '🔥', title: '족장', accent: '#d9915a', town: '부락', bandit: '약탈자',
     maxLv: 2, radius: 0, prod: 1, income: 1, townCost: 0.8, diff: 0.8, banditHp: 3, atk: 0, hp: 0, arrow: 1,
     flavor: '돌도끼와 통나무로 첫 터전을 일구는 시대. 부족을 이끌고 사냥터와 숲을 넓히세요.',
-    perks: ['마을 최대 Lv2 (나무 울타리 부락)', '집 · 농장 · 벌목소 · 학당'],
+    perks: ['마을 최대 Lv2 (나무 울타리 부락)', '집 · 벌목소 · 학당 (나머지는 🔬 연구로)'],
     start: { age: 20, desc: '맨땅 · 첫 마을 무료' },
     looks: {
       player: { body: '#7a4a2a', trim: '#d9b36a', legs: '#4a3020', cape: '#5a3a22', hat: 'horned', helm: '#6a5a40', weapon: 'axe', kit: 'chief' },
@@ -31,9 +32,9 @@ const ERAS = [
     ] },
   { id: 'ancient', name: '고대 왕국', icon: '🏺', title: '왕', accent: '#e8b84a', town: '성읍', bandit: '산적',
     maxLv: 3, radius: 0, prod: 1.15, income: 1.1, townCost: 1, diff: 1, banditHp: 4, atk: 0, hp: 2, arrow: 1,
-    need: { dev: 240, pop: 15, towns: 2, wars: 0 },
+    need: { tech: 'bronze', towns: 1 },
     flavor: '청동과 돌의 시대. 부족들이 하나의 왕국으로 모이고, 시장과 망루가 들어섭니다.',
-    perks: ['마을 최대 Lv3 (목책 병영)', '채석장 · 망루 · 시장 해금', '생산 ×1.15 · 세금 ×1.1'],
+    perks: ['마을 최대 Lv3 (목책 병영)', '생산 ×1.15 · 세금 ×1.1'],
     start: { age: 24, desc: '수도 1곳 · 인구 22' },
     looks: {
       player: { body: '#9a3a2a', trim: '#f2c14e', legs: '#4a2a20', cape: '#7a1a4a', hat: 'crown', weapon: 'spear', tint: '#b0503a' },
@@ -52,9 +53,9 @@ const ERAS = [
     ] },
   { id: 'medieval', name: '중세', icon: '🏰', title: '국왕', accent: '#6aa5e0', town: '성', bandit: '도적떼',
     maxLv: 5, radius: 0, prod: 1.3, income: 1.25, townCost: 1.2, diff: 1.25, banditHp: 5, atk: 1, hp: 4, arrow: 1,
-    need: { dev: 700, pop: 45, towns: 3, wars: 1 },
+    need: { tech: 'iron', towns: 2 },
     flavor: '돌성과 기사의 시대. 성벽이 높아지고 금광이 왕국의 금고를 채웁니다.',
-    perks: ['마을 최대 Lv5 (돌성 · 성벽)', '금광 해금', '생산 ×1.3 · 세금 ×1.25 · 공격력 +1'],
+    perks: ['마을 최대 Lv5 (돌성 · 성벽)', '생산 ×1.3 · 세금 ×1.25 · 공격력 +1'],
     start: { age: 26, desc: '마을 2곳 · 인구 46' },
     looks: {
       player: { body: '#2b5fb8', trim: '#f2c14e', cape: '#c0392b', hat: 'crown', weapon: 'sword', armor: true },
@@ -73,7 +74,7 @@ const ERAS = [
     ] },
   { id: 'early_modern', name: '근세', icon: '👑', title: '황제', accent: '#c07ae0', town: '도시', bandit: '무장 도적',
     maxLv: 5, radius: 1, prod: 1.5, income: 1.5, townCost: 1.4, diff: 1.5, banditHp: 6, atk: 2, hp: 6, arrow: 2,
-    need: { dev: 1600, pop: 90, towns: 5, wars: 3 },
+    need: { tech: 'gunpowder', towns: 3 },
     flavor: '여러 왕국을 아우르는 제국의 시대. 도시는 커지고 망루는 화약으로 무장합니다.',
     perks: ['영토 반경 +1', '망루 화살 피해 ×2 (화약)', '생산 ×1.5 · 세금 ×1.5 · 공격력 +2'],
     start: { age: 28, desc: '마을 3곳 · 인구 85' },
@@ -110,9 +111,9 @@ function eraLook(kind, f, era) {
 }
 function eraVillager() { const v = eraCur().looks.villager; return { body: v.cols[ri(v.cols.length)], hat: v.hat, legs: v.legs }; }
 function warFaction(w) { const E = ERAS[w && w.era !== undefined ? w.era : S.era] || eraCur(); return E.factions[((w && w.faction) | 0) % E.factions.length]; }
-function buildUnlocked(k) { return (BUILD[k].era || 0) <= S.era; }
+function buildUnlocked(k) { return !BUILD[k].tech || techHas(BUILD[k].tech); }
 
-// ---------- 발전도 ----------
+// ---------- 연구 점수 (옛 '발전도' S.dev = 쓰지 않은 연구 점수 비축) ----------
 function eraStats() {
   const pop = S.towns.reduce((a, t) => a + t.pop, 0);
   const cnt = k => S.buildings.filter(b => b.type === k).length;
@@ -120,18 +121,29 @@ function eraStats() {
 }
 function devRate() {
   const s = eraStats();
-  return S.towns.length ? 0.2 + s.pop * 0.012 + s.towns * 0.15 + s.schools * 0.5 + s.markets * 0.25 : 0;
+  return S.towns.length ? 0.4 + s.pop * 0.015 + s.towns * 0.2 + s.schools * 0.6 + s.markets * 0.3 : 0;
 }
-// 다음 시대 조건별 진행 [{k, label, cur, need, f}]
+// 다음 시대 조건별 진행 [{k, label, cur, need, f, txt}] — 핵심 기술 + 마을 수
 function eraReqs() {
   const N = eraNext(); if (!N) return [];
-  const s = eraStats(), n = N.need;
-  const R = [{ k: 'dev', label: '📜 발전도', cur: Math.floor(S.dev), need: n.dev }, { k: 'pop', label: '👥 총 인구', cur: s.pop, need: n.pop }, { k: 'towns', label: '🏘️ 마을 수', cur: s.towns, need: n.towns }];
-  if (n.wars) R.push({ k: 'wars', label: '⚔️ 전쟁 승리', cur: s.wars, need: n.wars });
+  const s = eraStats(), n = N.need, kt = TECH[n.tech];
+  const R = [];
+  if (kt) {
+    const done = techHas(kt.id), ri_ = S.research && S.research.id === kt.id ? clamp(S.research.p / kt.cost, 0, 0.99) : 0;
+    R.push({ k: 'tech', label: `🔬 ${kt.name}`, cur: done ? 1 : ri_, need: 1, txt: done ? '완료' : ri_ ? `연구 중 ${Math.floor(ri_ * 100)}%` : '미연구' });
+  }
+  if (n.towns) R.push({ k: 'towns', label: '🏘️ 마을 수', cur: s.towns, need: n.towns });
   for (const r of R) r.f = clamp(r.cur / r.need, 0, 1);
   return R;
 }
-function eraProgress() { const R = eraReqs(); if (!R.length) return 1; return R.reduce((a, r) => a + r.f * (r.k === 'dev' ? 2 : 1), 0) / (R.length + 1); }
+// 시대 진행도: 이 시대 기술을 얼마나 연구했나 (핵심 기술 비중 크게)
+function eraProgress() {
+  const N = eraNext(); if (!N) return 1;
+  const ts = TECHS.filter(t => t.era === S.era); if (!ts.length) return eraReady() ? 1 : 0;
+  let a = 0, w = 0;
+  for (const t of ts) { const k = t.key ? 3 : 1; w += k; a += k * (techHas(t.id) ? 1 : S.research && S.research.id === t.id ? clamp(S.research.p / t.cost, 0, 1) : 0); }
+  return clamp(a / w, 0, 1);
+}
 function eraReady() { const R = eraReqs(); return R.length > 0 && R.every(r => r.f >= 1); }
 
 // ---------- 군주 ----------
@@ -147,10 +159,11 @@ let eraReadyShown = false;
 // updateWorld 맨 앞에서 호출. 군주가 세상을 떠나 계승 화면을 띄우면 true
 function eraTick(dt) {
   if (!S.ruler) return false;
-  // 발전도
+  // 기술 연구 · 적 문명
+  techTick(dt); foeTick(dt);
+  if (MODE !== 'world' || paused) return true; // 연구 완료로 시대 전환 화면이 떴다
   const N = eraNext();
   if (N) {
-    S.dev = Math.min(N.need.dev, (S.dev || 0) + devRate() * dt);
     const ready = eraReady();
     if (ready && !eraReadyShown) { eraReadyShown = true; toast(`🏛️ <b>${N.name}</b>${josaP(N.name, '으로로')} 나아갈 준비가 되었습니다!<br>왼쪽 위 <b>시대 전환</b> 버튼을 누르세요`, 4.5); }
     if (!ready) eraReadyShown = false;
@@ -204,15 +217,16 @@ function succession() {
 }
 
 // ---------- 시대 전환 ----------
-function eraUnlockList(i) {
-  const E = ERAS[i], out = [];
-  for (const k in BUILD) if ((BUILD[k].era || 0) === i) out.push(`${BUILD[k].icon} ${BUILD[k].name}`);
-  return out;
-}
-function advanceEra(force) {
+function eraUnlockList(i) { return TECHS.filter(t => t.era === i).map(t => `${t.icon}${t.name}`); }
+// tech: 시대를 연 기술 (연구 완료로 넘어갈 때)
+function advanceEra(force, tech) {
   const N = eraNext(); if (!N || (!force && !eraReady())) return false;
   const oldTitle = rulerName(), prev = eraCur();
-  S.era++; S.dev = 0; eraReadyShown = false;
+  tech = tech || TECH[N.need && N.need.tech];
+  if (force && tech && !techHas(tech.id)) S.techs.push(tech.id);
+  S.era++; eraReadyShown = false;
+  if (S.research && TECH[S.research.id] && TECH[S.research.id].era < S.era - 1) S.research = null;
+  S.foeLv = Math.max(S.foeLv === undefined ? 0 : S.foeLv, S.era - 0.6);
   toastT = 0; $('toast').classList.remove('show'); // '준비 완료' 안내 지우기
   S.eraLog = S.eraLog || []; S.eraLog.push({ era: S.era, year: S.year, ruler: S.ruler ? S.ruler.name : '' });
   villagers.length = 0; // 새 옷차림으로 다시 나온다
@@ -221,13 +235,15 @@ function advanceEra(force) {
   const unl = eraUnlockList(S.era);
   const p = $('eraUpPanel');
   p.innerHTML = `<div class="era-kicker">${prev.icon} ${prev.name} → ${N.icon}</div>
+    ${tech ? `<div class="era-break">${tech.icon} ${tech.name} 성공!</div>` : ''}
     <h2 class="era-big">${N.name} 시대가<br>열렸습니다</h2>
     <div class="era-flavor">${N.flavor}</div>
     <div class="era-title"><s>${oldTitle}</s> <span>→</span> <b>${rulerName()}</b></div>
-    <ul class="era-list">${N.perks.map(s => `<li>${s}</li>`).join('')}${unl.length ? `<li>새 건물: ${unl.join(' · ')}</li>` : ''}</ul>
+    <ul class="era-list">${N.perks.map(s => `<li>${s}</li>`).join('')}${unl.length ? `<li>🔬 새 기술: ${unl.join(' · ')}</li>` : ''}<li>⚠️ 적들도 곧 새 무기를 들고 옵니다</li></ul>
     <button class="opt primary" id="eraGo"><span class="ic">${N.icon}</span><span>새 시대를 연다</span></button>`;
   p.classList.add('show');
   $('eraGo').onclick = () => { p.classList.remove('show'); paused = false; banner(`${N.icon} ${N.name}`, `${rulerName()}의 시대`, 3); };
+  if (tech) banner(`${tech.icon} ${tech.name} 성공!`, `${N.name} 시대가 열렸습니다`, 3);
   emit(S.player.x, S.player.y - 20, 60, { color: ['#fff', '#ffd54a', N.accent], smin: 60, smax: 220, up: 80, lmin: .6, lmax: 1.4, grav: 120 });
   save();
   return true;
@@ -248,9 +264,10 @@ function openEraPanel() {
     <div class="sub">${E.flavor}<br>${E.perks.join(' · ')}</div>`;
   if (N) {
     h += `<div class="era-next">다음 시대: <b>${N.icon} ${N.name}</b> <small>(칭호 ${N.title})</small></div>`;
-    for (const r of R) h += `<div class="req"><span>${r.f >= 1 ? '✅' : '⬜'} ${r.label}</span><b>${r.cur}/${r.need}</b><div class="barw"><i style="width:${r.f * 100}%"></i></div></div>`;
-    h += `<div class="sub" style="margin-top:8px">발전도는 인구·마을·시장, 특히 <b>📜 학당</b>에서 쌓입니다 (지금 초당 +${devRate().toFixed(1)})<br>해금: ${[...N.perks.slice(0, 1), ...eraUnlockList(S.era + 1)].join(' · ')}</div>`;
-    h += `<button class="opt primary" data-a="adv" ${eraReady() ? '' : 'disabled'}><span class="ic">${N.icon}</span><span>${josa(N.name, '으로로')} 나아가기<small>${eraReady() ? '준비 완료!' : `진행도 ${Math.floor(eraProgress() * 100)}%`}</small></span></button>`;
+    for (const r of R) h += `<div class="req"><span>${r.f >= 1 ? '✅' : '⬜'} ${r.label}</span><b>${r.txt || r.cur + '/' + r.need}</b><div class="barw"><i style="width:${r.f * 100}%"></i></div></div>`;
+    h += `<div class="sub" style="margin-top:8px">연구 점수는 인구·마을·시장, 특히 <b>📜 학당</b>에서 쌓입니다 (지금 초당 +${researchRate().toFixed(1)})<br>다음 시대: ${[...N.perks.slice(0, 1), ...eraUnlockList(S.era + 1)].join(' · ')}<br>적 문명: ${ERAS[foeEra()].icon} ${ERAS[foeEra()].name}</div>`;
+    h += `<button class="opt" data-a="tech"><span class="ic">🔬</span><span>기술 연구 열기<small>시대 진행 ${Math.floor(eraProgress() * 100)}%</small></span></button>`;
+    if (eraReady()) h += `<button class="opt primary" data-a="adv"><span class="ic">${N.icon}</span><span>${josa(N.name, '으로로')} 나아가기<small>준비 완료!</small></span></button>`;
   } else h += `<div class="era-next">마지막 시대에 도달했습니다. 제국을 넓혀 영토 ${GOAL_TILES}칸을 채우세요!</div>`;
   h += `<button class="close" data-a="close">닫기</button>`;
   const p = $('eraPanel'); p.innerHTML = h; p.classList.add('show');
@@ -259,6 +276,7 @@ $('eraPanel').addEventListener('click', e => {
   const b = e.target.closest('button'); if (!b || b.disabled) return;
   $('eraPanel').classList.remove('show'); paused = false;
   if (b.dataset.a === 'adv') advanceEra();
+  if (b.dataset.a === 'tech') openTechPanel();
 });
 function openChronicle() {
   paused = true; $('menuPanel').classList.remove('show');
@@ -304,6 +322,7 @@ function showStart(fromMenu) {
       const name = ($('nameIn').value || '').trim().slice(0, 6) || pickName(RULER_NAMES);
       const dynasty = ($('dynIn').value || '').trim().replace(/\s*왕조$/, '').slice(0, 8) || pickName(DYNASTY_NAMES);
       try { localStorage.removeItem(SAVE_KEY); } catch (err) {}
+      toastT = 0; $('toast').classList.remove('show');
       p.classList.remove('show'); $('menuPanel').classList.remove('show');
       newGame({ era: ERA_SELECT ? startSel : 0, name, dynasty });
       paused = false;
@@ -317,7 +336,8 @@ function showStart(fromMenu) {
 // 새 게임에서 시대 상태 만들기 (+ 늦은 시대는 앞선 발전을 미리 깔아 준다)
 function eraNewGame(opts, home) {
   const era = clamp(opts.era | 0, 0, ERAS.length - 1);
-  S.era = era; S.dev = 0; S.year = 1; S.yearT = 0; S.chron = []; S.eraLog = [{ era, year: 1, ruler: '' }];
+  S.era = era; S.dev = 0; S.year = 1;
+  S.techs = techsBelowEra(era); S.research = null; S.army = {}; S.armyMode = 'follow'; S.foeLv = era; S.foeShown = era; S.yearT = 0; S.chron = []; S.eraLog = [{ era, year: 1, ruler: '' }];
   S.dynasty = opts.dynasty || pickName(DYNASTY_NAMES);
   const name = opts.name || pickName(RULER_NAMES);
   S.ruler = makeRuler(name, ERAS[era].start.age, 1);
@@ -325,9 +345,9 @@ function eraNewGame(opts, home) {
   if (era === 0) return;
   // 수도와 주변 마을
   const plan = [null,
-    { towns: [[22, { house: 3, farm: 1, school: 1, lumber: 1 }]], res: [60, 30, 60], lv: 3, wars: 0 },
-    { towns: [[32, { house: 6, farm: 2, school: 2, market: 1, tower: 1, lumber: 1, quarry: 1 }], [14, { house: 2, farm: 1, school: 1 }]], res: [120, 80, 150], lv: 5, wars: 1 },
-    { towns: [[45, { house: 8, farm: 2, school: 2, market: 2, tower: 2, lumber: 1, quarry: 1, mine: 1 }], [25, { house: 4, farm: 1, school: 1, market: 1 }], [15, { house: 2, farm: 1, school: 1 }]], res: [220, 150, 260], lv: 7, wars: 3 },
+    { towns: [[22, { house: 3, farm: 1, school: 1, lumber: 1, barracks: 1 }]], res: [60, 30, 60], lv: 3, wars: 0, army: { club: 3, sling: 2 } },
+    { towns: [[32, { house: 6, farm: 2, school: 2, market: 1, tower: 1, lumber: 1, quarry: 1, barracks: 1, range: 1 }], [14, { house: 2, farm: 1, school: 1 }]], res: [120, 80, 150], lv: 5, wars: 1, army: { spear: 4, archer: 3, rider: 1 } },
+    { towns: [[45, { house: 8, farm: 2, school: 2, market: 2, tower: 2, lumber: 1, quarry: 1, mine: 1, barracks: 1, range: 1, stable: 1 }], [25, { house: 4, farm: 1, school: 1, market: 1 }], [15, { house: 2, farm: 1, school: 1 }]], res: [220, 150, 260], lv: 7, wars: 3, army: { sword: 5, xbow: 3, knight: 2 } },
   ][era];
   const spots = [home];
   for (let k = 0; k < 6000 && spots.length < plan.towns.length; k++) {
@@ -346,6 +366,7 @@ function eraNewGame(opts, home) {
   });
   S.wood = plan.res[0]; S.stone = plan.res[1]; S.gold = plan.res[2];
   S.hero.lv = plan.lv; S.warsWon = plan.wars; S.player.hp = heroMaxHp();
+  S.army = Object.assign({}, plan.army || {});
   S.ruler.st.towns = 0;
 }
 function eraPlaceBuilding(t, type) {
@@ -378,6 +399,12 @@ function eraMigrate(o) {
     o.era = era;
   }
   if (o.dev === undefined) o.dev = 0;
+  o.dev = Math.min(RP_BANK, o.dev || 0); // 옛 발전도 → 연구 점수 비축
+  if (!Array.isArray(o.techs)) o.techs = techsBelowEra(o.era); // 옛 저장: 지금 시대보다 앞선 시대 기술은 모두 연구된 것으로
+  if (o.research === undefined || (o.research && !TECH[o.research.id])) o.research = null;
+  if (!o.army || typeof o.army !== 'object') o.army = {};
+  if (!o.armyMode) o.armyMode = 'follow';
+  if (o.foeLv === undefined) o.foeLv = o.era;
   if (o.year === undefined) o.year = 1 + Math.floor((o.time || 0) / YEAR_SEC);
   if (o.yearT === undefined) o.yearT = 0;
   if (!o.chron) o.chron = [];
@@ -393,5 +420,5 @@ function eraMigrate(o) {
 
 $('chronBtn').addEventListener('click', openChronicle);
 $('eraMenuBtn').addEventListener('click', () => { $('menuPanel').classList.remove('show'); openEraPanel(); });
-$('goal').addEventListener('click', openEraPanel);
+$('goal').addEventListener('click', () => openTechPanel());
 $('eraBtn').addEventListener('click', openEraPanel);
