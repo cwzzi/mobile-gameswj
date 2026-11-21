@@ -10,11 +10,12 @@ function frame(now) {
   const dt = Math.min(0.05, (now - last) / 1000); last = now;
   shakeAmt *= Math.exp(-12 * dt);
   try {
-    if (USE3D) R3D.show(!(MODE === 'battle' && B)); // 전투는 아직 2D가 화면 전체를 그림
+    if (USE3D) R3D.show(true);
     if (MODE === 'battle' && B) {
       updateBattle(dt);
-      drawBattle();
+      if (USE3D) drawBattle3D(); else drawBattle();
     } else {
+      if (USE3D) b3Cleanup(); // 전투 장면 정리(dispose)
       if (!paused) {
         updateWorld(dt); updateParts(dt); updateFloats(dt);
         saveT += dt; if (saveT > 10) { saveT = 0; save(); }

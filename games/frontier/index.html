@@ -39,6 +39,7 @@
   #bDash { right: 120px; bottom: calc(20px + env(safe-area-inset-bottom)); width: 64px; height: 64px; background: radial-gradient(circle at 35% 30%, #6aa5e0, #2f62a0); font-size: 14px; }
   #bMusou { right: 30px; bottom: calc(132px + env(safe-area-inset-bottom)); width: 68px; height: 68px; background: radial-gradient(circle at 35% 30%, #777, #333); font-size: 14px; }
   #bMusou.ready { background: radial-gradient(circle at 35% 30%, #ffe58a, #d18b10); animation: pulse 0.8s infinite; color: #4a2a00; text-shadow: none; }
+  .btn .lb { position: relative; z-index: 1; }
   .cd { position: absolute; inset: 0; border-radius: 50%; background: conic-gradient(rgba(0,0,0,.55) var(--p, 0%), transparent 0); pointer-events: none; }
   #battleHud { display: none; top: calc(8px + env(safe-area-inset-top)); left: 0; right: 0; pointer-events: none; padding: 0 10px; }
   body.battle #battleHud { display: block; }
@@ -61,7 +62,7 @@
   #banner small { display: block; font-size: 13px; color: #fff; letter-spacing: 0; font-weight: 600; text-shadow: none; margin-top: 2px; }
   #hint { left: 50%; transform: translateX(-50%); bottom: calc(130px + env(safe-area-inset-bottom)); font-size: 13px;
     padding: 5px 11px; border-radius: 10px; white-space: nowrap; pointer-events: none; }
-  #toast { left: 50%; transform: translateX(-50%); top: calc(150px + env(safe-area-inset-top)); font-size: 14px; background: rgba(0,0,0,.78);
+  #toast { left: 50%; transform: translateX(-50%); top: calc(36% + 40px); font-size: 14px; background: rgba(0,0,0,.78);
     padding: 8px 14px; border-radius: 12px; max-width: 86vw; text-align: center; opacity: 0; transition: opacity .3s; pointer-events: none; z-index: 16; }
   #toast.show { opacity: 1; }
   .panel { position: fixed; z-index: 30; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(92vw, 380px);
@@ -108,8 +109,8 @@
 </div>
 <canvas id="bMap" class="bbtn" width="90" height="60"></canvas>
 <div id="bAtk" class="btn bbtn">공격</div>
-<div id="bDash" class="btn bbtn">돌진<span class="cd"></span></div>
-<div id="bMusou" class="btn bbtn">필살<span class="cd"></span></div>
+<div id="bDash" class="btn bbtn"><span class="lb">돌진</span><span class="cd"></span></div>
+<div id="bMusou" class="btn bbtn"><span class="lb">필살</span><span class="cd"></span></div>
 <div id="banner"><div><span id="bannerT"></span><small id="bannerS"></small></div></div>
 
 <div id="buildPanel" class="panel"></div>
@@ -136,6 +137,7 @@
 <script src="world.js"></script>
 <script src="world3d.js"></script>
 <script src="battle.js"></script>
+<script src="battle3d.js"></script>
 <script src="main.js"></script>
 </body>
 </html>
