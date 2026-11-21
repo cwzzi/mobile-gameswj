@@ -416,6 +416,7 @@ function w3dBuildingGeo(type) {
       for (let k = 0; k < 6; k++) P.push({ g: box(0.14, 0.03, 0.66), c: k % 2 ? '#fdf6e8' : '#d9483b', p: [-0.35 + k * 0.14, 0.63, 0.02], r: [0.22, 0, 0] });
       P.push({ g: box(0.22, 0.22, 0.2), c: '#6b4a2a', p: [0.22, 0.11, -0.2] });
     }
+    if (!P.length && typeof w3dResBldGeo === 'function') return w3dResBldGeo(type); // tap-to-act / resource buildings
     return { main: R3D.merge(P), glow: G.length ? R3D.merge(G) : null, flag };
   });
 }
@@ -704,8 +705,11 @@ function drawWorld3D() {
   }
 
   // 행동 대상
-  const act = contextAction();
-  if (act) {
+  const act = contextAction(), amk = autoMarker(); // amk: tap-to-act 대상 표시
+  if (amk) {
+    W3.ring.visible = true; W3.ring.position.set(amk.x, 0.04, amk.z); W3.ring.rotation.y = tm * 2.4;
+    W3.ring.scale.setScalar(amk.rs * (1.1 + Math.sin(tm * 8) * 0.1));
+  } else if (act) {
     let tx, tz, rs = 1;
     if (act.kind === 'harvest') { tx = act.target.x + 0.5; tz = act.target.y + 0.5; rs = act.target.t === FOREST ? 1.05 : 1.4; }
     else if (act.kind === 'mount') { tx = act.target.x / T; tz = act.target.y / T; rs = 1.4; }
@@ -763,4 +767,42 @@ function drawWorld3D() {
   if (p.hurt > 0) { ctx.setTransform(DPR, 0, 0, DPR, 0, 0); ctx.fillStyle = `rgba(200,0,0,${p.hurt * 0.8})`; ctx.fillRect(0, 0, VW, VH); }
   $('hint').textContent = act ? `행동: ${act.label}` : '';
   $('hint').style.display = act ? 'block' : 'none';
+}
+
+
+// --- tap-to-act / resource buildings ---
+// 벌목소·채석장·금광용 간단한 절차적 모델 (다른 모델이 없을 때 w3dBuildingGeo가 사용)
+Object.assign(W3_BSCALE, { lumber: [1.2, 1.35, 1.2], quarry: [1.2, 1.3, 1.2], mine: [1.2, 1.3, 1.2] });
+function w3dResBldGeo(type) {
+  const { box, cyl, cone, ico } = R3D.prim, P = [], G = [];
+  if (type === 'lumber') {
+    P.push({ g: box(0.7, 0.04, 0.6), c: '#8a6a40', p: [0, 0.02, 0] });
+    P.push({ g: box(0.46, 0.3, 0.4), c: '#a0703e', p: [-0.08, 0.17, -0.06] });
+    P.push({ g: w3dPrism(0.52, 0.22, 0.46).rotateY(Math.PI / 2), c: '#6b4a2e', p: [-0.08, 0.32, -0.06] });
+    G.push({ g: box(0.1, 0.1, 0.02), c: '#fff', p: [-0.08, 0.2, 0.15] });
+    for (let k = 0; k < 3; k++) P.push({ g: cyl(0.06, 0.06, 0.32, 6), c: k % 2 ? '#c8a060' : '#b08a4c', p: [0.3, 0.07 + (k > 1 ? 0.1 : 0), 0.12 - (k % 2) * 0.12 + (k > 1 ? 0.06 : 0)], r: [0, 0, Math.PI / 2] });
+    P.push({ g: box(0.04, 0.28, 0.04), c: '#5b3a20', p: [0.3, 0.14, -0.22], r: [0, 0, 0.3] });
+    P.push({ g: box(0.12, 0.05, 0.02), c: '#cfd4d8', p: [0.34, 0.27, -0.22] });
+  } else if (type === 'quarry') {
+    P.push({ g: box(0.72, 0.04, 0.62), c: '#8c8574', p: [0, 0.02, 0] });
+    P.push({ g: ico(0.2, 0), c: '#9a9a9c', p: [-0.18, 0.15, -0.05], s: [1.2, 0.9, 1] });
+    P.push({ g: ico(0.14, 0), c: '#7e7e82', p: [0.12, 0.1, 0.1] });
+    P.push({ g: box(0.26, 0.14, 0.2), c: '#b8b0a0', p: [0.18, 0.11, -0.2] });
+    P.push({ g: box(0.04, 0.34, 0.04), c: '#6b4a2e', p: [-0.3, 0.2, 0.2], r: [0, 0, 0.5] });
+    P.push({ g: box(0.18, 0.04, 0.04), c: '#8a8e94', p: [-0.37, 0.35, 0.2], r: [0, 0, 0.5] });
+    P.push({ g: box(0.22, 0.12, 0.16), c: '#6b4a2a', p: [0.26, 0.1, 0.24] });
+    P.push({ g: cyl(0.04, 0.04, 0.2, 5), c: '#2a2a2e', p: [0.26, 0.04, 0.34], r: [0, 0, Math.PI / 2] });
+  } else { // mine
+    P.push({ g: box(0.74, 0.04, 0.64), c: '#6e6a58', p: [0, 0.02, 0] });
+    P.push({ g: ico(0.36, 0), c: '#7a7468', p: [0, 0.14, -0.14], s: [1.3, 0.8, 0.9] });
+    P.push({ g: box(0.26, 0.28, 0.06), c: '#1c1812', p: [0, 0.16, 0.06] });
+    P.push({ g: box(0.05, 0.3, 0.05), c: '#6b4a2e', p: [-0.16, 0.17, 0.08] });
+    P.push({ g: box(0.05, 0.3, 0.05), c: '#6b4a2e', p: [0.16, 0.17, 0.08] });
+    P.push({ g: box(0.4, 0.05, 0.06), c: '#6b4a2e', p: [0, 0.33, 0.08] });
+    P.push({ g: ico(0.07, 0), c: '#ffd34d', p: [0.3, 0.12, 0.12] });
+    P.push({ g: ico(0.05, 0), c: '#ffd34d', p: [0.24, 0.07, 0.2] });
+    P.push({ g: box(0.2, 0.1, 0.14), c: '#5a4a3a', p: [-0.3, 0.08, 0.22] });
+    G.push({ g: box(0.06, 0.06, 0.02), c: '#fff', p: [0, 0.38, 0.1] });
+  }
+  return { main: R3D.merge(P), glow: G.length ? R3D.merge(G) : null, flag: null };
 }

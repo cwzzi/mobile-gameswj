@@ -12,7 +12,37 @@ const BUILD = {
   farm:   { name: '농장', icon: '🌾', cost: { wood: 10, stone: 4 },        desc: '인구 증가 속도 ↑' },
   tower:  { name: '망루', icon: '🗼', cost: { wood: 10, stone: 15 },       desc: '근처 산적에게 화살 발사' },
   market: { name: '시장', icon: '🏪', cost: { wood: 20, stone: 10, gold: 15 }, desc: '마을 금 수입 +3' },
+  lumber: { name: '벌목소', icon: '🪓', cost: { wood: 15, stone: 5 },   desc: '근처(3칸) 영토 안 숲에서 나무를 자동 수확 · 숲이 점점 줄어요', place: '숲 가까이에 지어요' },
+  quarry: { name: '채석장', icon: '⛏️', cost: { wood: 20 },              desc: '근처(2칸) 산에서 돌을 자동 채석 · 바닥나지 않음', place: '산 가까이에 지어요' },
+  mine:   { name: '금광',   icon: '💰', cost: { wood: 20, stone: 15 },   desc: '근처(2칸) 금맥에서 금을 자동 채굴 · 금맥은 점점 줄어요', place: '금맥 가까이에 지어요' },
 };
+// 자원 생산 건물: 근처 타일 종류, 반경, 산출 자원, 1회 산출량, 분당 생산량 공식(n = 근처 자원 타일 수)
+const RES_DEF = {
+  lumber: { tile: FOREST,   r: 3, own: true, res: 'wood',  icon: '🪵', amt: 1, perMin: n => n ? 6 + 3 * Math.min(n, 6) : 0, thin: 3, none: '숲 없음' },
+  quarry: { tile: MOUNTAIN, r: 2, own: false, res: 'stone', icon: '🪨', amt: 1, perMin: n => n ? 4 + 2 * Math.min(n, 4) : 0, thin: 0, none: '산 없음' },
+  mine:   { tile: GOLD,     r: 2, own: false, res: 'gold',  icon: '🪙', amt: 2, perMin: n => 8 * Math.min(n, 3), thin: 1, none: '금맥 고갈' },
+};
+function resTiles(type, bx, by) {
+  const d = RES_DEF[type], out = [], r = d.r;
+  for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
+    if (dx * dx + dy * dy > r * r + 1) continue;
+    const x = bx + dx, y = by + dy; if (x < 0 || y < 0 || x >= W || y >= H) continue;
+    const i = y * W + x;
+    if (S.tiles[i] !== d.tile || (d.own && owner[i] < 0)) continue;
+    out.push(i);
+  }
+  return out;
+}
+function resRate(b) { const d = RES_DEF[b.type]; if (!d) return 0; return d.perMin(resTiles(b.type, b.x, b.y).length); }
+function resStatus(townId) {
+  const parts = [];
+  for (const k in RES_DEF) {
+    const bs = S.buildings.filter(b => b.town === townId && b.type === k); if (!bs.length) continue;
+    const rate = bs.reduce((a, b) => a + resRate(b), 0);
+    parts.push(`${BUILD[k].name} ${bs.length} · ${rate ? `분당 ${RES_DEF[k].icon}${rate}` : RES_DEF[k].none}`);
+  }
+  return parts.join('<br>');
+}
 const FACTIONS = [
   { name: '흑랑 군단', color: '#3a3a44', plume: '#111', boss: '흑랑장 도견' },
   { name: '붉은매 군단', color: '#9a2a22', plume: '#ffcc33', boss: '홍매장 사련' },
@@ -199,11 +229,12 @@ function buildCheck(type) {
   if (S.buildings.some(b => b.x === x && b.y === y)) return '이미 건물이 있어요';
   const tt = S.tiles[i];
   if (tt !== GRASS && tt !== SAND) return '풀밭이나 모래 위에 지어요 (숲은 먼저 베기)';
+  if (RES_DEF[type] && !resTiles(type, x, y).length) return type === 'lumber' ? '근처 3칸 안에 영토 안의 숲이 필요해요' : type === 'quarry' ? '근처 2칸 안에 산이 필요해요' : '근처 2칸 안에 금맥이 필요해요';
   return null;
 }
 function build(type) {
   const { x, y } = playerTile();
-  S.buildings.push({ type, x, y, town: owner[y * W + x], t: 0 });
+  S.buildings.push({ type, x, y, town: owner[y * W + x], t: 0, pt: 0, cnt: 0 });
   pay(BUILD[type].cost);
   emit((x + .5) * T, (y + .8) * T, 18, { color: ['#d8c8a0', '#b8a880'], smin: 20, smax: 70, lmin: .4, lmax: .8, zmin: 3, zmax: 6, kind: 'smoke', grow: 6 });
   toast(`${BUILD[type].icon} ${BUILD[type].name} 완성`, 2);
@@ -255,8 +286,8 @@ function contextAction() {
   if (hv) return { kind: 'harvest', target: hv, label: hv.t === FOREST ? '나무 베기' : hv.t === GOLD ? '금 캐기' : '돌 캐기' };
   return null;
 }
-function doAction() {
-  const a = contextAction();
+function doAction() { performAction(contextAction()); }
+function performAction(a) {
   swing = 0.2;
   if (!a) return;
   const p = S.player;
@@ -325,7 +356,7 @@ function startWarEvent() {
 // 전쟁이 나면 "대규모 전투로 전환?"을 묻는다. 네 → 전장 액션, 아니오 → 지금 화면에서 적 군단 방어
 function askWar() {
   if (!S.war) return;
-  paused = true; actHeld = false;
+  paused = true; actHeld = false; auto = null;
   const w = S.war, f = FACTIONS[w.faction], t = townById(w.town);
   $('warPanel').innerHTML = `<h2>⚔️ ${f.name} 침공!</h2>
     <div class="sub">${f.name}이(가) <b>${t ? t.name : '마을'}</b>(으)로 진군하고 있습니다. 적 위협도 ${'★'.repeat(Math.min(5, Math.max(1, Math.round(w.diff))))}</div>
@@ -427,7 +458,7 @@ function onBattleEnd(win, st) {
 const bp = $('buildPanel');
 function openBuild() {
   if (!S || MODE !== 'world') return;
-  paused = true; actHeld = false;
+  paused = true; actHeld = false; auto = null;
   const { x, y } = playerTile();
   const tid = owner[y * W + x];
   let html = '';
@@ -439,10 +470,10 @@ function openBuild() {
     const t = townById(tid), cap = townCap(t);
     const cnt = k => S.buildings.filter(b => b.town === t.id && b.type === k).length;
     html += `<h2>${t.name} <span style="font-size:13px;color:#b8c2b0">Lv${townLevel(t)}</span></h2>`;
-    html += `<div class="sub">인구 ${t.pop}/${cap} · 영토 반경 ${townRadius(t)} · 수입 ${townIncome(t)}🪙/5초<br>집 ${cnt('house')} · 농장 ${cnt('farm')} · 망루 ${cnt('tower')} · 시장 ${cnt('market')}<br>인구가 10 늘 때마다 레벨업 → 영토 확장</div>`;
+    html += `<div class="sub">인구 ${t.pop}/${cap} · 영토 반경 ${townRadius(t)} · 수입 ${townIncome(t)}🪙/5초<br>집 ${cnt('house')} · 농장 ${cnt('farm')} · 망루 ${cnt('tower')} · 시장 ${cnt('market')}${resStatus(t.id) ? '<br>' + resStatus(t.id) : ''}<br>인구가 10 늘 때마다 레벨업 → 영토 확장</div>`;
     for (const k in BUILD) {
       const B = BUILD[k], err = buildCheck(k), ok = !err && canAfford(B.cost);
-      html += `<button class="opt" data-a="${k}" ${ok ? '' : 'disabled'}><span class="ic">${B.icon}</span><span>${B.name} — ${B.desc}<small>${costText(B.cost)}${err ? ' · ' + err : !canAfford(B.cost) ? ' · 자원 부족' : ''}</small></span></button>`;
+      html += `<button class="opt" data-a="${k}" ${ok ? '' : 'disabled'}><span class="ic">${B.icon}</span><span>${B.name} — ${B.desc}<small>${costText(B.cost)}${err ? ' · ' + err : !canAfford(B.cost) ? ' · 자원 부족' : B.place ? ' · ' + B.place : ''}</small></span></button>`;
     }
   }
   html += `<button class="close" data-a="close">닫기</button>`;
@@ -456,7 +487,7 @@ bp.addEventListener('click', e => {
   else if (BUILD[a]) build(a);
   closePanels();
 });
-$('menuBtn').addEventListener('click', () => { paused = true; $('goalHelp').innerHTML = `<b>목표</b> 영토 ${GOAL_TILES}칸 차지하기 (지금 ${ownedCount}칸) · 전쟁 승리 ${S.warsWon}회`; $('menuPanel').classList.add('show'); });
+$('menuBtn').addEventListener('click', () => { paused = true; auto = null; $('goalHelp').innerHTML = `<b>목표</b> 영토 ${GOAL_TILES}칸 차지하기 (지금 ${ownedCount}칸) · 전쟁 승리 ${S.warsWon}회`; $('menuPanel').classList.add('show'); });
 $('menuClose').addEventListener('click', closePanels);
 $('newGameBtn').addEventListener('click', () => { try { localStorage.removeItem(SAVE_KEY); } catch (e) {} newGame(); closePanels(); });
 $('minimap').addEventListener('click', () => $('minimap').classList.toggle('big'));
@@ -473,7 +504,8 @@ keyHooks.push((k, down) => {
 function updateWorld(dt) {
   S.time += dt;
   const p = S.player;
-  const mv = moveInput();
+  let mv = moveInput();
+  if (auto) { if (mv.l > 0.08 || joy.active) auto = null; else mv = autoStep(dt) || mv; }
   p.moving = mv.l > 0.08;
   if (p.moving) {
     const onForest = tileAt(p.x / T, p.y / T) === FOREST;
@@ -485,6 +517,7 @@ function updateWorld(dt) {
   }
   if (p.mounted) { const h = S.horses.find(h => h.ridden); if (h) { h.x = p.x; h.y = p.y; } }
   actCd -= dt; swing = Math.max(0, swing - dt);
+  updateProducers(dt);
   if (actHeld && actCd <= 0) { doAction(); actCd = 0.32; }
   const pt = playerTile(), inOwn = owner[pt.y * W + pt.x] >= 0;
   p.regen = (p.regen || 0) + dt;
@@ -507,7 +540,9 @@ function updateWorld(dt) {
   }
   if (changed) recomputeOwner();
   for (let i = villagers.length - 1; i >= 0; i--) {
-    const v = villagers[i], t = townById(v.town);
+    const v = villagers[i];
+    if (v.job) { if (!workerStep(v, dt)) villagers.splice(i, 1); continue; }
+    const t = townById(v.town);
     if (!t) { villagers.splice(i, 1); continue; }
     v.t -= dt;
     if (v.t <= 0) { v.t = rr(2, 5); const r = townRadius(t) - 1; v.tx = (t.x + .5 + rr(-r, r)) * T; v.ty = (t.y + .5 + rr(-r, r)) * T; }
@@ -596,7 +631,7 @@ function playerDie() {
   const p = S.player;
   dismount();
   S.wood = Math.floor(S.wood / 2); S.stone = Math.floor(S.stone / 2); S.gold = Math.floor(S.gold / 2);
-  p.hp = heroMaxHp();
+  p.hp = heroMaxHp(); auto = null;
   const home = S.towns[0];
   if (home) { p.x = (home.x + .5) * T; p.y = (home.y + 1.5) * T; }
   for (const b of bandits.slice()) if (dist2(b.x, b.y, p.x, p.y) < (T * 8) ** 2) bandits.splice(bandits.indexOf(b), 1);
@@ -678,6 +713,7 @@ function drawWorld() {
   const p = S.player, tm = S.time;
   let sx = 0, sy = 0; if (shakeAmt > 0.1) { sx = rr(-shakeAmt, shakeAmt); sy = rr(-shakeAmt, shakeAmt); }
   const camX = p.x - VW / 2 / ZOOM + sx, camY = p.y - VH / 2 / ZOOM + sy;
+  cam2d.x = camX; cam2d.y = camY; // 탭 좌표 역변환용
   ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
   ctx.fillStyle = WATER_COLS[6]; ctx.fillRect(0, 0, VW, VH);
   const tf = () => ctx.setTransform(DPR * ZOOM, 0, 0, DPR * ZOOM, -camX * DPR * ZOOM, -camY * DPR * ZOOM);
@@ -711,8 +747,12 @@ function drawWorld() {
     ctx.globalAlpha = 1;
   }
   // 행동 대상 표시 (바닥)
-  const act = contextAction();
-  if (act) {
+  const act = contextAction(), am = autoMarker();
+  if (am) {
+    const tx = am.x * T, ty = am.z * T + 8;
+    ctx.strokeStyle = 'rgba(255,230,120,.95)'; ctx.lineWidth = 2.5; ctx.setLineDash([5, 4]); ctx.lineDashOffset = -tm * 30;
+    ctx.beginPath(); ctx.ellipse(tx, ty, 14 * am.rs + 8 * Math.sin(tm * 6) ** 2, 7 * am.rs + 3, 0, 0, 7); ctx.stroke(); ctx.setLineDash([]);
+  } else if (act) {
     let tx, ty;
     if (act.kind === 'harvest') { tx = (act.target.x + .5) * T; ty = (act.target.y + .8) * T; }
     else if (act.kind === 'camp') { const q = campPos(act.target); tx = q.x; ty = q.y + 8; }
@@ -862,6 +902,7 @@ function unb64(str) { const s = atob(str), a = new Uint8Array(s.length); for (le
 function save() {
   try {
     const o = { ...S, tiles: b64(S.tiles), hp: b64(S.hp), horses: S.horses.map(h => ({ x: h.x, y: h.y, col: h.col })),
+      buildings: S.buildings.map(({ tiles, scan, rate, idleT, ...r }) => r),
       player: { ...S.player, mounted: false }, camps: S.camps.map(c => ({ x: c.x, y: c.y, hp: c.hp, maxHp: c.maxHp, t: 0 })) };
     localStorage.setItem(SAVE_KEY, JSON.stringify(o));
   } catch (e) {}
@@ -890,4 +931,136 @@ function hudWorld() {
   const wb = $('warBtn');
   if (S.war && S.war.field) { wb.style.display = 'block'; wb.textContent = `⚔️ 적 군단 ${bandits.filter(b => b.war).length}명 · 위치`; }
   else wb.style.display = 'none';
+}
+
+
+// ---------- 자원 생산 건물 (벌목소·채석장·금광) ----------
+function updateProducers(dt) {
+  for (const b of S.buildings) {
+    const d = RES_DEF[b.type]; if (!d) continue;
+    b.scan = (b.scan || 0) - dt;
+    if (b.scan <= 0 || !b.tiles) { b.scan = 2; b.tiles = resTiles(b.type, b.x, b.y); b.rate = d.perMin(b.tiles.length); }
+    const cx = (b.x + .5) * T, cy = (b.y + .5) * T;
+    if (!b.rate) { b.idleT = (b.idleT || 0) + dt; if (b.idleT > 25) { b.idleT = 0; floatText(cx, cy - 34, d.none, '#c8c8c8', 12); } continue; }
+    b.pt = (b.pt || 0) + dt * b.rate / 60;
+    if (b.pt < 1) continue;
+    b.pt -= 1; S[d.res] += d.amt; b.cnt = (b.cnt || 0) + 1;
+    floatText(cx, cy - 34, `+${d.amt}${d.icon}`, d.res === 'wood' ? '#c9f29b' : d.res === 'gold' ? '#ffe27a' : '#ddd', 12);
+    emit(cx, cy - 8, 3, { color: d.res === 'wood' ? ['#c8a060', '#8a6030'] : d.res === 'gold' ? ['#ffd34d', '#fff6c0'] : ['#aaa', '#ddd'], smin: 20, smax: 60, lmin: .3, lmax: .5, grav: 200, up: 40, zmin: 1.2, zmax: 2 });
+    if (d.thin && b.cnt % d.thin === 0 && b.tiles.length) { // 자원 타일 소모
+      let pick = b.tiles[0];
+      for (const i of b.tiles) if (S.hp[i] < S.hp[pick]) pick = i;
+      if (S.hp[pick] > 0) S.hp[pick]--;
+      if (S.hp[pick] <= 0) { setTile(pick, d.tile === GOLD ? MOUNTAIN : GRASS); b.scan = 0; if (d.tile === FOREST) minimapDirty = true; }
+      else if (typeof w3dNotify === 'function') w3dNotify('tile', pick);
+    }
+  }
+  // 일꾼: 건물마다 1명
+  for (const b of S.buildings) {
+    if (!RES_DEF[b.type] || !b.rate) continue;
+    if (!villagers.some(v => v.job === b)) villagers.push({ job: b, town: -1, x: (b.x + .5) * T, y: (b.y + 1.1) * T, tx: 0, ty: 0, t: 0, ph: 0, walk: 0, body: b.type === 'lumber' ? '#7a9a4a' : b.type === 'quarry' ? '#9a9a9a' : '#d8b040' });
+  }
+}
+function workerStep(v, dt) {
+  const b = v.job; if (!S.buildings.includes(b) || !b.rate || !b.tiles || !b.tiles.length) return false;
+  const hx = (b.x + .5) * T, hy = (b.y + 1.1) * T;
+  if (!v.ti || v.ph === 0 && v.t <= 0) { // 목적지 고르기
+    const i = b.tiles[ri(b.tiles.length)], rx = (i % W + .5) * T, ry = ((i / W) | 0) * T + T * .5, dx = hx - rx, dy = hy - ry, dl = Math.hypot(dx, dy) || 1;
+    v.ti = i; v.tx = rx + dx / dl * T * (RES_DEF[b.type].tile === FOREST ? 0.2 : 0.85); v.ty = ry + dy / dl * T * (RES_DEF[b.type].tile === FOREST ? 0.2 : 0.85); v.t = 1; v.stuck = 0;
+  }
+  let gx = v.tx, gy = v.ty;
+  if (v.ph === 2) { gx = hx; gy = hy; }
+  if (v.ph === 1) { v.work = (v.work || 0) - dt; v.walk += dt * 3; if (v.work <= 0) v.ph = 2; return true; }
+  const d = Math.hypot(gx - v.x, gy - v.y);
+  if (d > 5) {
+    const sp = 38 * dt;
+    if (moveEnt(v, (gx - v.x) / d * sp, (gy - v.y) / d * sp, 4)) { v.walk += dt * 8; v.face = gx > v.x ? 1 : -1; v.stuck = 0; }
+    else { v.stuck += dt; if (v.stuck > 1.5) { v.x = gx; v.y = gy; } }
+  } else if (v.ph === 0) { v.ph = 1; v.work = 1.6; chopFx.set(v.ti, 0.3); }
+  else { v.ph = 0; v.t = 0; v.ti = 0; v.rest = 0; }
+  return true;
+}
+
+// ---------- 탭해서 행동 (대상을 터치하면 자동으로 걸어가 반복 행동) ----------
+const cam2d = { x: 0, y: 0 };
+let auto = null; // { kind:'attack'|'camp'|'mount'|'harvest'|'town', target, stop, reach, best, stuck }
+function screenToWorldPx(sx, sy) { // 화면(CSS px) → 게임 픽셀
+  if (typeof USE3D !== 'undefined' && USE3D && R3D.unproject) { const q = R3D.unproject(sx, sy); return q ? { x: q.x * T, y: q.z * T } : null; }
+  return { x: sx / ZOOM + cam2d.x, y: sy / ZOOM + cam2d.y };
+}
+function pickTarget(wx, wy) {
+  const p = S.player;
+  // 3D에서는 키 큰 모델(나무·사람)을 누르면 땅 위 지점이 뒤쪽에 찍히므로 살짝 남쪽으로 보정한 점도 함께 본다
+  const bandit = nearest(bandits, wx, wy + 10, 32);
+  if (bandit) return { kind: 'attack', target: bandit };
+  if (!p.mounted) { const h = nearest(S.horses, wx, wy + 8, 32, h => !h.ridden); if (h) return { kind: 'mount', target: h }; }
+  let bc = null, bcd = 40 * 40;
+  for (const c of S.camps) { const q = campPos(c), d = dist2(wx, wy, q.x, q.y); if (d < bcd) { bcd = d; bc = c; } }
+  if (bc) return { kind: 'camp', target: bc };
+  for (const t of S.towns) if (Math.abs(wx / T - (t.x + .5)) <= 1.6 && Math.abs(wy / T - (t.y + .5)) <= 1.6) return { kind: 'town', target: t };
+  let best = null, bd = 1.25 * 1.25;
+  const cx = Math.floor(wx / T), cy = Math.floor(wy / T);
+  for (let y = cy - 2; y <= cy + 2; y++) for (let x = cx - 2; x <= cx + 2; x++) {
+    const t = tileAt(x, y); if (t !== FOREST && t !== MOUNTAIN && t !== GOLD) continue;
+    const d = dist2(wx / T, wy / T + 0.25, x + .5, y + .5);
+    if (d < bd) { bd = d; best = { x, y, t }; }
+  }
+  if (best) return { kind: 'harvest', target: best };
+  return null;
+}
+function autoPos(a) {
+  const t = a.target;
+  if (a.kind === 'harvest') return { x: (t.x + .5) * T, y: (t.y + .5) * T };
+  if (a.kind === 'camp') return campPos(t);
+  if (a.kind === 'town') return { x: (t.x + .5) * T, y: (t.y + 1.5) * T };
+  return { x: t.x, y: t.y };
+}
+function autoValid(a) {
+  const t = a.target;
+  if (a.kind === 'attack') return bandits.includes(t);
+  if (a.kind === 'camp') return S.camps.includes(t);
+  if (a.kind === 'mount') return !t.ridden && !S.player.mounted;
+  if (a.kind === 'harvest') return tileAt(t.x, t.y) === t.t;
+  if (a.kind === 'town') return S.towns.includes(t);
+  return false;
+}
+const AUTO_RANGE = { attack: [30, 46], camp: [44, 60], mount: [26, 38], harvest: [T * 1.1, T * 1.6], town: [T * 2.2, T * 3] };
+function startAuto(a) {
+  const r = AUTO_RANGE[a.kind]; a.stop = r[0]; a.reach = r[1]; a.best = 1e9; a.stuck = 0; a.age = 0;
+  auto = a; actHeld = false;
+  const q = autoPos(a);
+  emit(q.x, q.y, 10, { color: ['#fff', '#ffe27a'], kind: 'ring', smin: 0, smax: 1, lmin: .3, lmax: .5, zmin: 6, zmax: 10, grow: 40 });
+}
+function worldTap(sx, sy) {
+  if (MODE !== 'world' || paused || !S || !S.towns) return;
+  const q = screenToWorldPx(sx, sy); if (!q) return;
+  const a = pickTarget(q.x, q.y);
+  if (a) startAuto(a);
+}
+tapHooks.push(worldTap);
+function autoStep(dt) { // 매 프레임: 조이스틱처럼 이동 벡터를 돌려주고, 사거리 안이면 행동을 반복
+  const a = auto, p = S.player;
+  if (!autoValid(a)) { auto = null; return null; }
+  a.age += dt;
+  const q = autoPos(a), dx = q.x - p.x, dy = q.y - p.y, d = Math.hypot(dx, dy) || 1;
+  if (d > a.stop) {
+    if (d < a.best - 3) { a.best = d; a.stuck = 0; } else a.stuck += dt;
+    if (a.stuck > 2.5) { if (d > a.reach) { auto = null; toast('갈 수 없는 곳이에요', 1.5); return null; } }
+    else return { x: dx / d, y: dy / d, l: 1 };
+  }
+  if (d > a.reach) return { x: dx / d, y: dy / d, l: 1 };
+  p.dir = Math.atan2(dy, dx);
+  if (a.kind === 'town') { auto = null; openBuild(); return null; }
+  if (actCd <= 0) {
+    actCd = 0.32; performAction(a.kind === 'harvest' ? { kind: 'harvest', target: a.target } : { kind: a.kind, target: a.target });
+    if (a.kind === 'mount') auto = null;
+  }
+  return { x: 0, y: 0, l: 0 };
+}
+function autoMarker() { // 탭 대상 표시 {x, z(타일 단위), rs}
+  if (!auto) return null;
+  const q = autoPos(auto), k = auto.kind;
+  if (k === 'harvest' || k === 'camp') return { x: q.x / T, z: q.y / T, rs: k === 'camp' ? 1.5 : auto.target.t === FOREST ? 1.05 : 1.4 };
+  if (k === 'town') return { x: auto.target.x + .5, z: auto.target.y + .5, rs: 1.8 };
+  return { x: q.x / T, z: q.y / T, rs: k === 'mount' ? 1.4 : 0.9 };
 }

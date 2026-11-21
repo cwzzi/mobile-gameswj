@@ -107,6 +107,31 @@ function buildSprites() {
     for (let k = 0; k < 6; k++) { g.fillStyle = k % 2 ? '#fdf6e8' : '#d9483b'; g.beginPath(); g.moveTo(3 + k * 5.4, 15); g.lineTo(5 + k * 5.4, 6); g.lineTo(10.4 + k * 5.4, 6); g.lineTo(8.4 + k * 5.4, 15); g.closePath(); g.fill(); }
     g.fillStyle = 'rgba(0,0,0,.15)'; g.fillRect(3, 14, 33, 2);
   });
+  // 자원 생산 건물 (tap-to-act / resource buildings)
+  SPR.lumber = sprite(38, 36, 19, 32, g => {
+    g.fillStyle = 'rgba(0,0,0,.22)'; g.beginPath(); g.ellipse(19, 32, 17, 4, 0, 0, 7); g.fill();
+    g.fillStyle = vgrad(g, 14, 31, '#b07a44', '#7a5230'); g.fillRect(4, 14, 22, 17);
+    g.fillStyle = vgrad(g, 6, 15, '#7a5230', '#4a3220'); g.beginPath(); g.moveTo(2, 15); g.lineTo(15, 5); g.lineTo(28, 15); g.closePath(); g.fill();
+    g.fillStyle = '#3a2a18'; g.fillRect(11, 21, 7, 10); g.fillStyle = '#ffe9a0'; g.fillRect(20, 19, 4, 4);
+    for (let k = 0; k < 3; k++) { g.fillStyle = k % 2 ? '#c8a060' : '#a8803c'; g.beginPath(); g.ellipse(31 + (k > 1 ? -3 : (k % 2) * 5), 28 - (k > 1 ? 6 : 0), 3.5, 3, 0, 0, 7); g.fill(); g.strokeStyle = '#6b4a2a'; g.lineWidth = 0.7; g.stroke(); }
+    g.strokeStyle = '#5b3a20'; g.lineWidth = 1.6; g.beginPath(); g.moveTo(3, 30); g.lineTo(8, 22); g.stroke(); g.fillStyle = '#cfd4d8'; g.fillRect(5, 20, 6, 2.5);
+  });
+  SPR.quarry = sprite(38, 36, 19, 32, g => {
+    g.fillStyle = 'rgba(0,0,0,.22)'; g.beginPath(); g.ellipse(19, 32, 17, 4, 0, 0, 7); g.fill();
+    blob(g, 12, 24, 9, '#9a9a9c'); blob(g, 25, 27, 6, '#7e7e82');
+    g.fillStyle = vgrad(g, 18, 30, '#c8c0b0', '#a09888'); g.fillRect(24, 19, 10, 8);
+    g.fillStyle = '#6b4a2a'; rrect(g, 3, 24, 10, 6, 1.5); g.fill();
+    g.strokeStyle = '#6b4a2e'; g.lineWidth = 1.8; g.beginPath(); g.moveTo(8, 29); g.lineTo(18, 9); g.stroke();
+    g.strokeStyle = '#8a8e94'; g.lineWidth = 2.2; g.beginPath(); g.moveTo(13, 8); g.lineTo(22, 11); g.stroke();
+  });
+  SPR.mine = sprite(38, 36, 19, 32, g => {
+    g.fillStyle = 'rgba(0,0,0,.22)'; g.beginPath(); g.ellipse(19, 32, 17, 4, 0, 0, 7); g.fill();
+    blob(g, 19, 22, 15, '#7a7468');
+    g.fillStyle = '#1c1812'; g.beginPath(); g.moveTo(11, 31); g.lineTo(11, 21); g.quadraticCurveTo(19, 13, 27, 21); g.lineTo(27, 31); g.closePath(); g.fill();
+    g.fillStyle = '#6b4a2e'; g.fillRect(9, 20, 3, 11); g.fillRect(26, 20, 3, 11); g.fillRect(9, 18, 20, 3);
+    g.fillStyle = '#ffd34d'; for (const [x, y, r] of [[32, 28, 2.4], [29, 31, 1.8], [6, 29, 1.8]]) { g.beginPath(); g.arc(x, y, r, 0, 7); g.fill(); }
+    g.fillStyle = '#fff6c0'; g.fillRect(33, 27, 1.2, 1.2);
+  });
   SPR.castle = [1, 2, 3, 4, 5].map(lv => {
     const w = 44 + lv * 8, h = 40 + lv * 8;
     return sprite(w + 8, h + 10, (w + 8) / 2, h + 4, g => {

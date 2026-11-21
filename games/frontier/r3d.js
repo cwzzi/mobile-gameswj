@@ -99,6 +99,16 @@ const R3D = (() => {
     ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, cv.width, cv.height);
     ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
   };
+  // --- tap-to-act / resource buildings ---
+  // 화면(CSS px) → 지면(y=0) 위 타일 단위 좌표 {x, z}. 마지막으로 render한 카메라 기준. 하늘을 가리키면 null
+  const uv = new THREE.Vector3();
+  R.unproject = (sx, sy) => {
+    if (!lastCam) return null;
+    uv.set(sx / VW * 2 - 1, 1 - sy / VH * 2, 0.5).unproject(lastCam);
+    const o = lastCam.position, dy = uv.y - o.y; if (dy >= -1e-6) return null;
+    const t = -o.y / dy; return { x: o.x + (uv.x - o.x) * t, z: o.z + (uv.z - o.z) * t };
+  };
+  // --- end tap-to-act ---
   R.yaw = a => Math.PI / 2 - a;
   R.yawTo = (dx, dz) => Math.atan2(dx, dz);
 

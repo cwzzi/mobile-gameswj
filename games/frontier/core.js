@@ -29,29 +29,60 @@ function resize() {
 addEventListener('resize', resize);
 
 // ---------- 입력 ----------
-const joy = { id: null, ox: 0, oy: 0, x: 0, y: 0, active: false };
+const joy = { id: null, ox: 0, oy: 0, x: 0, y: 0, active: false, sx: 0, sy: 0, t0: 0, moved: false };
 const keys = {};
 const JR = 55;
-cv.addEventListener('touchstart', e => {
-  e.preventDefault();
-  for (const t of e.changedTouches) {
-    if (joy.id === null && t.clientX < VW * 0.62) { joy.id = t.identifier; joy.ox = t.clientX; joy.oy = t.clientY; joy.x = 0; joy.y = 0; joy.active = true; }
+// 터치는 처음엔 "대기" 상태: 10px 넘게 움직이거나 180ms 이상 누르고 있으면 조이스틱, 짧게 톡 치면 탭(tapHooks)
+const tapHooks = [];
+const pendTouch = new Map();
+const TAP_MOVE = 10, TAP_HOLD = 180;
+function promoteTouch(id) {
+  const e = pendTouch.get(id); if (!e) return;
+  clearTimeout(e.timer); pendTouch.delete(id);
+  if (joy.id !== null || e.x >= VW * 0.62) return;
+  joy.id = id; joy.ox = e.x; joy.oy = e.y; joy.x = 0; joy.y = 0; joy.active = true; joy.sx = e.x; joy.sy = e.y; joy.t0 = e.t; joy.moved = false;
+}
+function inputDown(id, x, y, ts) {
+  const e = { x, y, t: ts || performance.now(), timer: 0 };
+  if (x < VW * 0.62 && joy.id === null) e.timer = setTimeout(() => promoteTouch(id), TAP_HOLD);
+  pendTouch.set(id, e);
+}
+function inputMove(id, x, y) {
+  const e = pendTouch.get(id);
+  if (e) {
+    if (Math.hypot(x - e.x, y - e.y) <= TAP_MOVE) return;
+    promoteTouch(id); pendTouch.delete(id); clearTimeout(e.timer);
   }
-}, { passive: false });
-cv.addEventListener('touchmove', e => {
-  e.preventDefault();
-  for (const t of e.changedTouches) if (t.identifier === joy.id) {
-    let dx = t.clientX - joy.ox, dy = t.clientY - joy.oy; const d = Math.hypot(dx, dy);
-    if (d > JR) { joy.ox += dx * (1 - JR / d); joy.oy += dy * (1 - JR / d); dx = t.clientX - joy.ox; dy = t.clientY - joy.oy; }
+  if (id === joy.id) {
+    if (Math.hypot(x - joy.sx, y - joy.sy) > TAP_MOVE) joy.moved = true;
+    let dx = x - joy.ox, dy = y - joy.oy; const d = Math.hypot(dx, dy);
+    if (d > JR) { joy.ox += dx * (1 - JR / d); joy.oy += dy * (1 - JR / d); dx = x - joy.ox; dy = y - joy.oy; }
     joy.x = dx / JR; joy.y = dy / JR;
   }
-}, { passive: false });
-const endTouch = e => { for (const t of e.changedTouches) if (t.identifier === joy.id) { joy.id = null; joy.active = false; joy.x = joy.y = 0; } };
-cv.addEventListener('touchend', endTouch); cv.addEventListener('touchcancel', endTouch);
+}
+// 시간은 이벤트 타임스탬프로 잰다 (프레임이 느려 타이머가 먼저 돌아도 짧게 톡 친 건 탭으로 인정)
+function inputUp(id, x, y, cancel, ts) {
+  ts = ts || performance.now();
+  const e = pendTouch.get(id);
+  let tapped = false;
+  if (e) {
+    clearTimeout(e.timer); pendTouch.delete(id);
+    if (!cancel && ts - e.t < 300 && Math.hypot(x - e.x, y - e.y) <= 14) tapped = true;
+  }
+  if (id === joy.id) {
+    if (!cancel && !joy.moved && ts - joy.t0 < 300) tapped = true;
+    joy.id = null; joy.active = false; joy.x = joy.y = 0;
+  }
+  if (tapped) for (const f of tapHooks) f(x, y);
+}
+cv.addEventListener('touchstart', e => { e.preventDefault(); for (const t of e.changedTouches) inputDown(t.identifier, t.clientX, t.clientY, e.timeStamp); }, { passive: false });
+cv.addEventListener('touchmove', e => { e.preventDefault(); for (const t of e.changedTouches) inputMove(t.identifier, t.clientX, t.clientY); }, { passive: false });
+cv.addEventListener('touchend', e => { for (const t of e.changedTouches) inputUp(t.identifier, t.clientX, t.clientY, false, e.timeStamp); });
+cv.addEventListener('touchcancel', e => { for (const t of e.changedTouches) inputUp(t.identifier, t.clientX, t.clientY, true, e.timeStamp); });
 let mouseDown = false;
-cv.addEventListener('mousedown', e => { mouseDown = true; joy.ox = e.clientX; joy.oy = e.clientY; joy.x = joy.y = 0; joy.active = true; joy.id = 'm'; });
-addEventListener('mousemove', e => { if (!mouseDown) return; let dx = e.clientX - joy.ox, dy = e.clientY - joy.oy; const d = Math.hypot(dx, dy); if (d > JR) { dx *= JR / d; dy *= JR / d; } joy.x = dx / JR; joy.y = dy / JR; });
-addEventListener('mouseup', () => { if (!mouseDown) return; mouseDown = false; joy.active = false; joy.id = null; joy.x = joy.y = 0; });
+cv.addEventListener('mousedown', e => { mouseDown = true; inputDown('m', e.clientX, e.clientY, e.timeStamp); });
+addEventListener('mousemove', e => { if (mouseDown) inputMove('m', e.clientX, e.clientY); });
+addEventListener('mouseup', e => { if (!mouseDown) return; mouseDown = false; inputUp('m', e.clientX, e.clientY, false, e.timeStamp); });
 const keyHooks = [];
 addEventListener('keydown', e => { const k = e.key.toLowerCase(); if (keys[k]) return; keys[k] = true; for (const f of keyHooks) f(k, true); });
 addEventListener('keyup', e => { const k = e.key.toLowerCase(); keys[k] = false; for (const f of keyHooks) f(k, false); });

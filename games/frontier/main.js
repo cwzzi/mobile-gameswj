@@ -31,4 +31,4 @@ function frame(now) {
 requestAnimationFrame(frame);
 addEventListener('visibilitychange', () => { if (document.hidden && MODE === 'world') save(); });
 // 테스트·디버그용
-window.__game = { get S() { return S; }, get B() { return B; }, get owned() { return ownedCount; }, bandits, startWarEvent, startBattle, askWar, get use3D() { return USE3D; }, get W3() { return W3; } };
+window.__game = { get S() { return S; }, get B() { return B; }, get owned() { return ownedCount; }, bandits, startWarEvent, startBattle, askWar, get use3D() { return USE3D; }, get W3() { return W3; }, get auto() { return auto; }, villagers, get joy() { return joy; }, pickTarget, screenToWorldPx, resTiles, resRate, build, buildCheck, save, load, playerTile, owner, RES_DEF, setTile, foundTown, newTownCost };
