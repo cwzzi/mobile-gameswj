@@ -210,6 +210,7 @@ function foundTownCheck() {
   return null;
 }
 function foundTown() {
+  toastT = 0; $('toast').classList.remove('show'); // 튜토리얼 토스트 즉시 숨김
   const { x, y } = playerTile();
   const id = S.towns.length ? Math.max(...S.towns.map(t => t.id)) + 1 : 0;
   const t = { id, x, y, pop: 2, name: TOWN_NAMES[id % TOWN_NAMES.length], growT: 0, taxT: 0 };

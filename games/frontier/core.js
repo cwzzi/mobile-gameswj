@@ -32,27 +32,22 @@ addEventListener('resize', resize);
 const joy = { id: null, ox: 0, oy: 0, x: 0, y: 0, active: false, sx: 0, sy: 0, t0: 0, moved: false };
 const keys = {};
 const JR = 55;
-// 터치는 처음엔 "대기" 상태: 10px 넘게 움직이거나 180ms 이상 누르고 있으면 조이스틱, 짧게 톡 치면 탭(tapHooks)
+// 터치는 처음엔 "대기" 상태: 10px 넘게 움직이면 조이스틱(왼쪽 영역만), 14px 이내에서 2초 안에 떼면 탭(tapHooks). 누르고 있는 시간만으로는 조이스틱이 되지 않는다
 const tapHooks = [];
 const pendTouch = new Map();
-const TAP_MOVE = 10, TAP_HOLD = 180;
+const TAP_MOVE = 10, TAP_RANGE = 14, TAP_MAX_MS = 2000;
 function promoteTouch(id) {
   const e = pendTouch.get(id); if (!e) return;
-  clearTimeout(e.timer); pendTouch.delete(id);
   if (joy.id !== null || e.x >= VW * 0.62) return;
+  pendTouch.delete(id);
   joy.id = id; joy.ox = e.x; joy.oy = e.y; joy.x = 0; joy.y = 0; joy.active = true; joy.sx = e.x; joy.sy = e.y; joy.t0 = e.t; joy.moved = false;
 }
 function inputDown(id, x, y, ts) {
-  const e = { x, y, t: ts || performance.now(), timer: 0 };
-  if (x < VW * 0.62 && joy.id === null) e.timer = setTimeout(() => promoteTouch(id), TAP_HOLD);
-  pendTouch.set(id, e);
+  pendTouch.set(id, { x, y, t: ts || performance.now() });
 }
 function inputMove(id, x, y) {
   const e = pendTouch.get(id);
-  if (e) {
-    if (Math.hypot(x - e.x, y - e.y) <= TAP_MOVE) return;
-    promoteTouch(id); pendTouch.delete(id); clearTimeout(e.timer);
-  }
+  if (e && Math.hypot(x - e.x, y - e.y) > TAP_MOVE) promoteTouch(id);
   if (id === joy.id) {
     if (Math.hypot(x - joy.sx, y - joy.sy) > TAP_MOVE) joy.moved = true;
     let dx = x - joy.ox, dy = y - joy.oy; const d = Math.hypot(dx, dy);
@@ -66,11 +61,11 @@ function inputUp(id, x, y, cancel, ts) {
   const e = pendTouch.get(id);
   let tapped = false;
   if (e) {
-    clearTimeout(e.timer); pendTouch.delete(id);
-    if (!cancel && ts - e.t < 300 && Math.hypot(x - e.x, y - e.y) <= 14) tapped = true;
+    pendTouch.delete(id);
+    if (!cancel && ts - e.t < TAP_MAX_MS && Math.hypot(x - e.x, y - e.y) <= TAP_RANGE) tapped = true;
   }
   if (id === joy.id) {
-    if (!cancel && !joy.moved && ts - joy.t0 < 300) tapped = true;
+    if (!cancel && !joy.moved && ts - joy.t0 < TAP_MAX_MS) tapped = true;
     joy.id = null; joy.active = false; joy.x = joy.y = 0;
   }
   if (tapped) for (const f of tapHooks) f(x, y);
