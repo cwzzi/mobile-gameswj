@@ -393,19 +393,22 @@ $('warBtn').addEventListener('click', () => {
   const a = Math.atan2(e.y - p.y, e.x - p.x), dirs = ['동', '남동', '남', '남서', '서', '북서', '북', '북동'];
   toast(`가장 가까운 적은 <b>${dirs[(Math.round(a / (Math.PI / 4)) + 8) % 8]}쪽</b> ${Math.round(Math.hypot(e.x - p.x, e.y - p.y) / T)}칸 거리`, 2.5);
 });
-function warbandSize(w) { return Math.round(6 + w.diff * 3) + 1; }
+function warbandSize(w) { // 플레이어의 마을 수·군대 규모·승전 횟수에 맞춰 (적 시대는 조금만 반영)
+  const base = 3 + S.towns.length * 1.2 + Math.min(20, armyTotal()) * 0.3 + Math.min(6, S.warsWon) * 0.5;
+  return Math.min(16, Math.round(base * (0.85 + 0.15 * Math.max(1, w.diff))) + 1);
+}
 function spawnWarband() {
   const w = S.war, t = townById(w.town); if (!t) { S.war = null; return; }
   let sx = null, sy = null;
   for (let k = 0; k < 3000 && sx === null; k++) {
-    const a = rand() * Math.PI * 2, d = rr(16, 26), x = Math.round(t.x + Math.cos(a) * d), y = Math.round(t.y + Math.sin(a) * d);
-    if (neighborsLand(x, y) && owner[y * W + x] < 0) { sx = x; sy = y; }
+    const a = rand() * Math.PI * 2, d = rr(16, 28), x = Math.round(t.x + Math.cos(a) * d), y = Math.round(t.y + Math.sin(a) * d);
+    if (neighborsLand(x, y) && owner[y * W + x] < 0 && Math.hypot(x * T - S.player.x, y * T - S.player.y) > T * 14) { sx = x; sy = y; }
   }
-  if (sx === null) { sx = t.x + townRadius(t) + 2; sy = t.y; }
-  const n = warbandSize(w) - 1, hp = 3 + Math.round(w.diff), we = w.era !== undefined ? w.era : S.era;
+  if (sx === null) { sx = t.x + townRadius(t) + 2; sy = t.y; if (Math.hypot(sx * T - S.player.x, sy * T - S.player.y) < T * 10) sx = t.x - townRadius(t) - 2; }
+  const n = warbandSize(w) - 1, hp = 3 + Math.round(w.diff * 0.7), we = w.era !== undefined ? w.era : S.era;
   const mk = cmd => { const ut = cmd ? null : pickMix(ENEMY_MIX[we]), mh = cmd ? Math.round(14 * w.diff) : Math.max(2, Math.round(hp * UNITS[ut].hp));
     return { war: true, cmd, ut, x: (sx + .5) * T + rr(-40, 40), y: (sy + .5) * T + rr(-40, 40), hp: mh, maxHp: mh,
-    t: 0, vx: 0, vy: 0, atk: rr(0, 1), walk: rand() * 6, loot: 0, raidT: 0, prog: 0, bestD: 1e9 }; };
+    t: 0, vx: 0, vy: 0, atk: rr(0.8, 2.2), walk: rand() * 6, loot: 0, raidT: 0, prog: 0, bestD: 1e9 }; };
   for (let i = 0; i < n; i++) bandits.push(mk(false));
   bandits.push(mk(true));
 }
@@ -483,6 +486,7 @@ function openBuild() {
     const err = foundTownCheck(), cost = newTownCost(), ok = !err && canAfford(cost);
     html += `<h2>마을 세우기</h2><div class="sub">지금 서 있는 자리에 새 마을을 세웁니다. 마을은 스스로 자라며 금을 벌고 영토를 넓힙니다.</div>`;
     html += `<button class="opt" data-a="town" ${ok ? '' : 'disabled'}><span class="ic">🏘️</span><span>새 마을 (${S.towns.length + 1}번째)<small>${costText(cost)}${err ? ' · ' + err : !canAfford(cost) ? ' · 자원 부족' : ''}</small></span></button>`;
+    if (S.towns.length) html += `<div class="sub" style="margin-top:8px">🏠 영토 안에서 다른 건물을 지을 수 있어요</div>`;
   } else {
     const t = townById(tid), cap = townCap(t);
     const cnt = k => S.buildings.filter(b => b.town === t.id && b.type === k).length;
@@ -550,7 +554,7 @@ function updateWorld(dt) {
   const pt = playerTile(), inOwn = owner[pt.y * W + pt.x] >= 0;
   p.regen = (p.regen || 0) + dt;
   if (p.regen > 1.5) { p.regen = 0; if (inOwn && p.hp < heroMaxHp()) p.hp++; }
-  p.hurt = Math.max(0, (p.hurt || 0) - dt);
+  p.hurt = Math.max(0, (p.hurt || 0) - dt); p.inv = Math.max(0, (p.inv || 0) - dt);
   for (const [k, v] of chopFx) { if (v - dt <= 0) chopFx.delete(k); else chopFx.set(k, v - dt); }
 
   // 마을
@@ -985,7 +989,7 @@ function load() {
 
 function hudWorld() {
   $('rWood').textContent = S.wood; $('rStone').textContent = S.stone; $('rGold').textContent = S.gold;
-  $('rHp').textContent = S.player.hp; $('rTowns').textContent = S.towns.length;
+  $('rHp').textContent = Math.ceil(S.player.hp); $('rTowns').textContent = S.towns.length;
   $('rPop').textContent = S.towns.reduce((a, t) => a + t.pop, 0); $('rLv').textContent = S.hero.lv;
   const R = S.ruler;
   if (R) { const s = `${rulerName()} · ${rulerAge()}세 · 치세 ${S.year - R.start}년`; if ($('rRuler').textContent !== s) $('rRuler').textContent = s; }

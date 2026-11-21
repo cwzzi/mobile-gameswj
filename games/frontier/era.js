@@ -121,7 +121,7 @@ function eraStats() {
 }
 function devRate() {
   const s = eraStats();
-  return S.towns.length ? 0.4 + s.pop * 0.015 + s.towns * 0.2 + s.schools * 0.6 + s.markets * 0.3 : 0;
+  return S.towns.length ? 0.7 + s.pop * 0.02 + s.towns * 0.2 + s.schools * 0.6 + s.markets * 0.3 : 0;
 }
 // 다음 시대 조건별 진행 [{k, label, cur, need, f, txt}] — 핵심 기술 + 마을 수
 function eraReqs() {

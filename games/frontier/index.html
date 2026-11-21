@@ -46,12 +46,15 @@
   .foeciv small { color: #d8d0c0; }
   .era-break { text-align: center; font-size: 15px; font-weight: 800; color: #fff6c8; margin: 2px 0 0; }
   .opt { min-height: 44px; }
-  #techPanel .opt, #armyPanel .opt { padding: 8px 10px; font-size: 14px; margin-bottom: 6px; line-height: 1.35; }
+  #techPanel { padding: 12px 14px; max-height: 92vh; }
+  #techPanel h2 { font-size: 16px; margin-bottom: 2px; }
+  #techPanel .lockbox { margin-top: 4px; }
+  #techPanel .opt, #armyPanel .opt { padding: 6px 10px; font-size: 13.5px; margin-bottom: 4px; line-height: 1.35; }
   #techPanel .opt .ic, #armyPanel .opt .ic { font-size: 21px; width: 26px; }
-  #techPanel .sub, #armyPanel .sub { font-size: 12.5px; margin-bottom: 8px; }
-  #techPanel .close, #armyPanel .close { position: sticky; bottom: -16px; margin-bottom: -16px; border-radius: 12px 12px 0 0; box-shadow: 0 -6px 14px rgba(0,0,0,.45); min-height: 46px; }
+  #techPanel .sub, #armyPanel .sub { font-size: 12px; margin-bottom: 6px; line-height: 1.4; }
+  #techPanel .close, #armyPanel .close { position: sticky; bottom: 0; margin-bottom: 0; border-radius: 12px; margin-top: 4px; box-shadow: 0 -6px 14px rgba(0,0,0,.45); min-height: 46px; }
   body.battle .sideBtn { display: none !important; }
-  #warBtn { top: calc(166px + env(safe-area-inset-top)); left: 8px; display: none; padding: 8px 12px; border-radius: 12px; border: 2px solid #ffb4a8;
+  #warBtn { top: calc(176px + env(safe-area-inset-top)); left: 8px; display: none; min-height: 44px; padding: 10px 14px; border-radius: 12px; border: 2px solid #ffb4a8;
     background: linear-gradient(#e0503f, #a52a20); color: #fff; font-weight: 800; font-size: 14px; animation: pulse 1s infinite; }
   @keyframes pulse { 50% { box-shadow: 0 0 0 6px rgba(224,80,63,.35); } }
   .btn { position: fixed; z-index: 3; border-radius: 50%; border: 2px solid rgba(255,255,255,.4);

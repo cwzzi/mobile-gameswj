@@ -100,7 +100,7 @@ function unitLook(ut, side, era, f) {
 function techHas(id) { return !!(S && S.techs && S.techs.includes(id)); }
 function techBonus(k) { let s = 0; if (S && S.techs) for (const id of S.techs) { const e = TECH[id] && TECH[id].eff; if (e && e[k]) s += e[k]; } return s; }
 function techsBelowEra(era) { return TECHS.filter(t => t.era < era).map(t => t.id); }
-function researchRate() { return devRate() * (1 + techBonus('research')); }
+function researchRate() { return S.towns.length ? Math.max(0.5, devRate() * (1 + techBonus('research'))) : 0; }
 const RP_BANK = 150;
 function techAvail(t) { // null = 연구 가능, 아니면 이유
   if (techHas(t.id)) return '완료';
@@ -172,7 +172,7 @@ function openTechPanel() {
 function renderTechPanel() {
   const E = eraCur(), N = eraNext(), ri_ = researchInfo(), rate = researchRate();
   let h = `<h2>🔬 기술 연구 <span style="font-size:13px;color:#b8c2b0">${E.icon} ${E.name}</span></h2>
-    <div class="sub">연구 점수 초당 <b>+${rate.toFixed(1)}</b> (학당·인구·마을·시장) · 비축 ${Math.floor(S.dev || 0)}<br>${N ? `<b>${TECHS.find(t => t.key && t.era === S.era).icon} ${TECHS.find(t => t.key && t.era === S.era).name}</b>${josaP(TECHS.find(t => t.key && t.era === S.era).name, '을를')} 연구하면 <b>${N.icon} ${N.name}</b> 시대가 열립니다` : '마지막 시대입니다. 남은 기술로 제국을 강하게!'}</div>`;
+    <div class="sub">${S.towns.length ? `연구 점수 초당 <b>+${rate.toFixed(1)}</b> (학당 📜으로 더 빠르게) · 비축 ${Math.floor(S.dev || 0)}` : '첫 마을을 세우면 연구가 시작돼요'}<br>${N ? `<b>${TECHS.find(t => t.key && t.era === S.era).icon} ${TECHS.find(t => t.key && t.era === S.era).name}</b>${josaP(TECHS.find(t => t.key && t.era === S.era).name, '을를')} 연구하면 <b>${N.icon} ${N.name}</b> 시대가 열립니다` : '마지막 시대입니다. 남은 기술로 제국을 강하게!'}</div>`;
   if (ri_) h += `<div class="req"><span>⏳ ${ri_.t.icon} ${ri_.t.name} 연구 중</span><b>${Math.floor(S.research.p)}/${ri_.t.cost}</b><div class="barw"><i style="width:${ri_.f * 100}%"></i></div></div>`;
   for (const t of TECHS.filter(t => t.era === S.era)) {
     const why = techAvail(t), done = techHas(t.id), cur = S.research && S.research.id === t.id;
@@ -311,9 +311,11 @@ function soldierHurt(s, dmg) {
   floatText(s.x, s.y - 30, `💀${UNITS[s.ut].name}`, '#ff9a8a', 12);
   emit(s.x, s.y - 10, 10, { color: ['#4fa3ff', '#fff'], smin: 40, smax: 120, lmin: .3, lmax: .6, grav: 200 });
 }
-function playerHurt(n) {
+// frac: 적 한 방이 줄 수 있는 최대 체력 비율 (근접 10% · 원거리 7%), 맞은 직후엔 잠깐 무적
+function playerHurt(n, frac) {
   const p = S.player;
   if (p.mounted && rand() < 0.3) return;
+  if (frac) { if ((p.inv || 0) > 0) return; n = Math.min(n, Math.max(0.5, heroMaxHp() * frac)); p.inv = 1.1; }
   p.hp -= n; p.hurt = 0.25; shake(4); if (p.hp <= 0) playerDie();
 }
 function fireShot(x, y, tx, ty, team, kind, dmg) {
@@ -399,7 +401,7 @@ function updateArmyWorld(dt) {
     q.x += q.vx * dt; q.y += q.vy * dt;
     let hit = false;
     if (q.team === 1) {
-      if (dist2(q.x, q.y + 12, p.x, p.y) < 14 * 14) { playerHurt(q.dmg); hit = true; }
+      if (dist2(q.x, q.y + 12, p.x, p.y) < 14 * 14) { playerHurt(q.dmg, 0.07); hit = true; }
       else { const s = nearest(soldiers, q.x, q.y + 12, 12); if (s) { soldierHurt(s, q.dmg); hit = true; } }
     } else {
       const b = nearest(bandits, q.x, q.y + 12, 14);
@@ -417,15 +419,15 @@ function foeStrike(b, tgt, d) {
   if (U.role === 'ranged') {
     const R = U.range * 0.75;
     if (d <= R && b.atk <= 0) {
-      b.atk = U.reload * rr(1.1, 1.5); b.swing = 0.25;
+      b.atk = U.reload * rr(1.5, 2.0); b.swing = 0.25;
       fireShot(b.x, b.y - 14, tgt.x, tgt.y - 12, 1, U.proj, U.proj === 'ball' ? 2 : 1);
     }
     return d > R * 0.7;
   }
   if (d < 24 && b.atk <= 0) {
-    b.atk = U.role === 'cav' ? 0.8 : 1; b.swing = 0.25;
+    b.atk = U.role === 'cav' ? 1.2 : 1.1; b.swing = 0.25;
     const dmg = (b.cmd ? 2 : 1) * (U.armor || U.role === 'cav' ? 1.5 : 1);
-    if (tgt === p) playerHurt(Math.round(dmg)); else soldierHurt(tgt, dmg);
+    if (tgt === p) playerHurt(Math.round(dmg), 0.10); else soldierHurt(tgt, dmg);
   }
   return true;
 }
