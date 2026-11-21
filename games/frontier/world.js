@@ -87,6 +87,7 @@ function setTile(i, t) {
   S.tiles[i] = t; minimapDirty = true;
   const x = i % W, y = (i / W) | 0;
   for (const [dx, dy] of [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1]]) chunkCache.delete(chunkKey(Math.floor((x + dx) / CH), Math.floor((y + dy) / CH)));
+  if (typeof w3dNotify === 'function') w3dNotify('tile', i); // 3D 지형 갱신 알림
 }
 function passable(px, py) { const t = tileAt(px / T, py / T); return t !== WATER && t !== MOUNTAIN && t !== GOLD; }
 function canStand(px, py, r) { return passable(px - r, py - r) && passable(px + r, py - r) && passable(px - r, py + r) && passable(px + r, py + r); }
@@ -161,6 +162,7 @@ function recomputeOwner() {
     }
   }
   minimapDirty = true;
+  if (typeof w3dNotify === 'function') w3dNotify('owner'); // 3D 영토 갱신 알림
 }
 function townById(id) { return S.towns.find(t => t.id === id); }
 function playerTile() { return { x: Math.floor(S.player.x / T), y: Math.floor(S.player.y / T) }; }
