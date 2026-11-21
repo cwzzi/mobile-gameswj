@@ -2,7 +2,7 @@
 // ===== 시작 / 메인 루프 =====
 resize();
 buildSprites();
-if (!load()) newGame();
+if (!load()) { newGame(); showStart(false); } // 처음이면 시대·왕조 고르기
 // 3D(WebGL) 가능하면 오픈월드는 3D로, 아니면 기존 2D. 강제 2D: 주소 끝에 ?2d 또는 localStorage 'frontier-render'='2d'
 const USE3D = R3D.available() && R3D.init();
 let last = performance.now(), saveT = 0;
@@ -31,4 +31,8 @@ function frame(now) {
 requestAnimationFrame(frame);
 addEventListener('visibilitychange', () => { if (document.hidden && MODE === 'world') save(); });
 // 테스트·디버그용
-window.__game = { get S() { return S; }, get B() { return B; }, get owned() { return ownedCount; }, bandits, startWarEvent, startBattle, askWar, get use3D() { return USE3D; }, get W3() { return W3; }, get auto() { return auto; }, villagers, get joy() { return joy; }, pickTarget, screenToWorldPx, resTiles, resRate, build, buildCheck, save, load, playerTile, owner, RES_DEF, setTile, foundTown, newTownCost };
+window.__game = { get S() { return S; }, get B() { return B; }, get owned() { return ownedCount; }, bandits, startWarEvent, startBattle, askWar, get use3D() { return USE3D; }, get W3() { return W3; }, get auto() { return auto; }, villagers, get joy() { return joy; }, pickTarget, screenToWorldPx, resTiles, resRate, build, buildCheck, save, load, playerTile, owner, RES_DEF, setTile, foundTown, newTownCost,
+  // 시대·왕조
+  ERAS, advanceEra, openEraPanel, openChronicle, showStart, eraReqs, eraProgress, devRate, succession, newGame,
+  setAge(a) { S.ruler.born = S.year - a; S.ruler.warned = false; }, addYears(n) { for (let i = 0; i < n; i++) { S.yearT = YEAR_SEC; if (eraTick(0)) break; } },
+  addDev(n) { S.dev += n; }, get paused() { return paused; } };

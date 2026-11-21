@@ -222,7 +222,7 @@ function b3Reset() {
     });
     B3.bases.push({ b, g, fl, fe, ring, cap, cg, fires, hq: !!b.hq, own: -1, capN: -1 });
   });
-  B3.heroLook = { body: '#2b5fb8', trim: '#f2c14e', cape: '#c0392b', hat: 'crown', weapon: 'sword', armor: true, scale: 1.15 * B3_MULT * 1.18 };
+  B3.heroLook = Object.assign(eraLook('player'), { scale: 1.15 * B3_MULT * 1.18 }); // 시대별 군주 차림
 }
 
 // ---------- 유닛 풀 ----------

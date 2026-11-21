@@ -81,6 +81,16 @@ function buildSprites() {
     g.fillStyle = vgrad(g, 3, 17, '#d0583a', '#8e2f1f'); g.beginPath(); g.moveTo(2, 18); g.lineTo(18, 3); g.lineTo(34, 18); g.closePath(); g.fill();
     g.strokeStyle = 'rgba(0,0,0,.18)'; g.lineWidth = 0.8; for (let i = 0; i < 4; i++) { g.beginPath(); g.moveTo(6 + i * 2, 15 - i * 3); g.lineTo(30 - i * 2, 15 - i * 3); g.stroke(); }
   });
+  SPR.school = sprite(42, 46, 21, 40, g => { // 학당
+    g.fillStyle = 'rgba(0,0,0,.25)'; g.beginPath(); g.ellipse(21, 40, 19, 4, 0, 0, 7); g.fill();
+    g.fillStyle = vgrad(g, 22, 40, '#f1e4c6', '#cdb98f'); g.fillRect(5, 22, 32, 18);
+    g.fillStyle = '#6b4a2e'; for (const x of [5, 15, 25, 35]) g.fillRect(x, 22, 2, 18); g.fillRect(5, 22, 32, 2);
+    g.fillStyle = '#5b3a20'; rrect(g, 18, 30, 6, 10, 2); g.fill();
+    g.fillStyle = '#ffe9a0'; g.fillRect(8, 27, 5, 4); g.fillRect(29, 27, 5, 4);
+    g.fillStyle = vgrad(g, 8, 23, '#4a7ab0', '#2a4a78'); g.beginPath(); g.moveTo(1, 24); g.lineTo(21, 9); g.lineTo(41, 24); g.closePath(); g.fill();
+    g.fillStyle = '#6b4a2e'; g.fillRect(17, 5, 8, 7); g.fillStyle = '#2a4a78'; g.beginPath(); g.moveTo(15, 6); g.lineTo(21, 0.5); g.lineTo(27, 6); g.fill();
+    g.fillStyle = '#d9b44a'; g.beginPath(); g.arc(21, 9, 2.2, 0, 7); g.fill();
+  });
   SPR.farm = sprite(36, 32, 18, 30, g => {
     g.fillStyle = 'rgba(0,0,0,.18)'; g.fillRect(2, 28, 33, 3);
     g.fillStyle = '#8a6438'; rrect(g, 2, 4, 32, 25, 3); g.fill();

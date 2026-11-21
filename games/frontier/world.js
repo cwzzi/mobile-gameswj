@@ -8,13 +8,15 @@ const DAY_LEN = 240;
 const TOWN_NAMES = ['새벽골','솔내','한빛','바람재','달무리','푸른들','돌샘','별터','노을촌','은빛내','소나무골','들꽃마을','큰나루','해오름','가람','미르골'];
 const TOWN_COLORS = ['#4fa3ff','#ffb347','#c77dff','#5be0b0','#ff6b9d','#f2e863','#7dd3fc','#fb923c','#a3e635','#f472b6'];
 const BUILD = {
-  house:  { name: '집',   icon: '🏠', cost: { wood: 12 },                  desc: '인구 한도 +5' },
-  farm:   { name: '농장', icon: '🌾', cost: { wood: 10, stone: 4 },        desc: '인구 증가 속도 ↑' },
-  tower:  { name: '망루', icon: '🗼', cost: { wood: 10, stone: 15 },       desc: '근처 산적에게 화살 발사' },
-  market: { name: '시장', icon: '🏪', cost: { wood: 20, stone: 10, gold: 15 }, desc: '마을 금 수입 +3' },
-  lumber: { name: '벌목소', icon: '🪓', cost: { wood: 15, stone: 5 },   desc: '근처(3칸) 영토 안 숲에서 나무를 자동 수확 · 숲이 점점 줄어요', place: '숲 가까이에 지어요' },
-  quarry: { name: '채석장', icon: '⛏️', cost: { wood: 20 },              desc: '근처(2칸) 산에서 돌을 자동 채석 · 바닥나지 않음', place: '산 가까이에 지어요' },
-  mine:   { name: '금광',   icon: '💰', cost: { wood: 20, stone: 15 },   desc: '근처(2칸) 금맥에서 금을 자동 채굴 · 금맥은 점점 줄어요', place: '금맥 가까이에 지어요' },
+  // era: 해금되는 시대 번호 (era.js ERAS)
+  house:  { name: '집',   icon: '🏠', cost: { wood: 12 },                  desc: '인구 한도 +5', era: 0 },
+  farm:   { name: '농장', icon: '🌾', cost: { wood: 10, stone: 4 },        desc: '인구 증가 속도 ↑', era: 0 },
+  school: { name: '학당', icon: '📜', cost: { wood: 16, gold: 4 },        desc: '발전도 +0.5/초 · 다음 시대로 나아가는 힘', era: 0 },
+  tower:  { name: '망루', icon: '🗼', cost: { wood: 10, stone: 15 },       desc: '근처 산적에게 화살 발사', era: 1 },
+  market: { name: '시장', icon: '🏪', cost: { wood: 20, stone: 10, gold: 15 }, desc: '마을 금 수입 +3 · 발전도 ↑', era: 1 },
+  lumber: { name: '벌목소', icon: '🪓', cost: { wood: 15, stone: 5 },   desc: '근처(3칸) 영토 안 숲에서 나무를 자동 수확 · 숲이 점점 줄어요', place: '숲 가까이에 지어요', era: 0 },
+  quarry: { name: '채석장', icon: '⛏️', cost: { wood: 20 },              desc: '근처(2칸) 산에서 돌을 자동 채석 · 바닥나지 않음', place: '산 가까이에 지어요', era: 1 },
+  mine:   { name: '금광',   icon: '💰', cost: { wood: 20, stone: 15 },   desc: '근처(2칸) 금맥에서 금을 자동 채굴 · 금맥은 점점 줄어요', place: '금맥 가까이에 지어요', era: 2 },
 };
 // 자원 생산 건물: 근처 타일 종류, 반경, 산출 자원, 1회 산출량, 분당 생산량 공식(n = 근처 자원 타일 수)
 const RES_DEF = {
@@ -33,7 +35,8 @@ function resTiles(type, bx, by) {
   }
   return out;
 }
-function resRate(b) { const d = RES_DEF[b.type]; if (!d) return 0; return d.perMin(resTiles(b.type, b.x, b.y).length); }
+function prodRate(type, n) { return Math.round(RES_DEF[type].perMin(n) * eraCur().prod); }
+function resRate(b) { const d = RES_DEF[b.type]; if (!d) return 0; return prodRate(b.type, resTiles(b.type, b.x, b.y).length); }
 function resStatus(townId) {
   const parts = [];
   for (const k in RES_DEF) {
@@ -128,7 +131,8 @@ function moveEnt(e, dx, dy, r) {
   return moved;
 }
 
-function newGame() {
+function newGame(opts) {
+  opts = opts || {};
   const seed = (Date.now() & 0xffffff) ^ 0x5eed;
   const { tiles, hp } = newWorld(seed);
   S = { seed, tiles, hp, wood: 0, stone: 0, gold: 0, towns: [], buildings: [], camps: [], horses: [], won: false, time: 0,
@@ -150,10 +154,12 @@ function newGame() {
     if (tileAt(x, y) === GRASS && (x !== best.x || y !== best.y)) { S.horses.push(newHorse(x, y)); break; }
   }
   computeDerived();
+  eraNewGame(opts, best); // 시대·군주 (늦은 시대면 마을도 미리 세운다)
+  recomputeOwner();
   for (let k = 0; k < 6; k++) spawnCamp(best.x, best.y, 26);
   bandits.length = 0; arrows.length = 0; floats.length = 0; villagers.length = 0;
-  recomputeOwner();
-  toast('마을을 세울 곳을 찾아 <b>건설</b>을 누르세요. 첫 마을은 무료!', 5);
+  recomputeOwner(); applyEraTheme();
+  if (!S.towns.length) toast('마을을 세울 곳을 찾아 <b>건설</b>을 누르세요. 첫 마을은 무료!', 5);
 }
 const HORSE_COLS = ['#8b5a2b', '#5a3a22', '#c9a27a', '#3a2a22', '#e8e0d0'];
 function newHorse(x, y) { return { x: (x + .5) * T, y: (y + .5) * T, vx: 0, vy: 0, t: 0, ridden: false, col: HORSE_COLS[ri(HORSE_COLS.length)], walk: 0 }; }
@@ -168,17 +174,17 @@ function spawnCamp(avoidX, avoidY, minD) {
     for (const t of S.towns) if (dist2(x, y, t.x, t.y) < 18 * 18) ok = false;
     for (const c of S.camps) if (dist2(x, y, c.x, c.y) < 14 * 14) ok = false;
     if (!ok) continue;
-    S.camps.push({ x, y, hp: 15, maxHp: 15, t: ri(10) });
+    const chp = Math.round(15 * eraCur().diff); S.camps.push({ x, y, hp: chp, maxHp: chp, t: ri(10) });
     return true;
   }
   return false;
 }
 
 // ---------- 마을/영토 ----------
-function townLevel(t) { return Math.min(5, 1 + Math.floor(t.pop / 10)); }
-function townRadius(t) { return 3 + townLevel(t); }
+function townLevel(t) { return Math.min(eraCur().maxLv, 5, 1 + Math.floor(t.pop / 10)); }
+function townRadius(t) { return 3 + townLevel(t) + (eraCur().radius || 0); }
 function townCap(t) { return 6 + 5 * S.buildings.filter(b => b.town === t.id && b.type === 'house').length; }
-function townIncome(t) { return Math.ceil(t.pop / 3) + 3 * S.buildings.filter(b => b.town === t.id && b.type === 'market').length; }
+function townIncome(t) { return Math.round((Math.ceil(t.pop / 3) + 3 * S.buildings.filter(b => b.town === t.id && b.type === 'market').length) * eraCur().income); }
 function recomputeOwner() {
   owner.fill(-1); ownedCount = 0;
   for (const t of S.towns) {
@@ -196,7 +202,7 @@ function recomputeOwner() {
 }
 function townById(id) { return S.towns.find(t => t.id === id); }
 function playerTile() { return { x: Math.floor(S.player.x / T), y: Math.floor(S.player.y / T) }; }
-function newTownCost() { const n = S.towns.length; if (n === 0) return {}; return { wood: 15 + n * 10, stone: 8 + n * 6, gold: 10 + n * 15 }; }
+function newTownCost() { const n = S.towns.length; if (n === 0) return {}; const m = eraCur().townCost; return { wood: Math.round((15 + n * 10) * m), stone: Math.round((8 + n * 6) * m), gold: Math.round((10 + n * 15) * m) }; }
 function canAfford(c) { return (S.wood >= (c.wood || 0)) && (S.stone >= (c.stone || 0)) && (S.gold >= (c.gold || 0)); }
 function pay(c) { S.wood -= c.wood || 0; S.stone -= c.stone || 0; S.gold -= c.gold || 0; }
 function costText(c) { const p = []; if (c.wood) p.push('🪵' + c.wood); if (c.stone) p.push('🪨' + c.stone); if (c.gold) p.push('🪙' + c.gold); return p.length ? p.join(' ') : '무료'; }
@@ -216,9 +222,10 @@ function foundTown() {
   const t = { id, x, y, pop: 2, name: TOWN_NAMES[id % TOWN_NAMES.length], growT: 0, taxT: 0 };
   S.towns.push(t);
   setTile(y * W + x, GRASS);
+  rulerStat('towns');
   recomputeOwner();
   emit((x + .5) * T, (y + .5) * T, 30, { color: ['#fff', '#ffd54a', TOWN_COLORS[id % TOWN_COLORS.length]], smin: 40, smax: 140, up: 40, lmin: .5, lmax: 1.1, grav: 120 });
-  banner(`${t.name} 건설`, '마을이 스스로 자라며 영토를 넓힙니다', 2.2);
+  banner(`${t.name} ${eraCur().town} 건설`, '마을이 스스로 자라며 영토를 넓힙니다', 2.2);
   save();
 }
 function buildCheck(type) {
@@ -243,13 +250,13 @@ function build(type) {
 }
 
 // ---------- 영웅 ----------
-function heroMaxHp() { return 10 + (S.hero.lv - 1) * 2; }
-function heroDmg() { return 1 + Math.floor((S.hero.lv - 1) / 2); }
+function heroMaxHp() { return 10 + (S.hero.lv - 1) * 2 + eraCur().hp; }
+function heroDmg() { return 1 + Math.floor((S.hero.lv - 1) / 2) + eraCur().atk; }
 function expNeed(lv) { return 60 + lv * 40; }
 function gainExp(n) {
   S.hero.exp += n; let up = false;
   while (S.hero.exp >= expNeed(S.hero.lv)) { S.hero.exp -= expNeed(S.hero.lv); S.hero.lv++; up = true; }
-  if (up) { S.player.hp = heroMaxHp(); toast(`⭐ 영주 레벨 ${S.hero.lv}! 체력과 공격력이 올랐습니다`, 3); }
+  if (up) { S.player.hp = heroMaxHp(); toast(`⭐ ${rulerName()} 레벨 ${S.hero.lv}! 체력과 공격력이 올랐습니다`, 3); }
 }
 
 // ---------- 행동 ----------
@@ -349,16 +356,16 @@ function killBandit(b) {
 function startWarEvent() {
   if (!S.towns.length) return;
   const town = S.towns.reduce((a, t) => t.pop > a.pop ? t : a);
-  const f = ri(FACTIONS.length);
-  const diff = 1 + S.warsWon * 0.35 + S.towns.length * 0.1;
-  S.war = { town: town.id, diff, faction: f, field: false };
+  const f = ri(eraCur().factions.length);
+  const diff = (1 + S.warsWon * 0.35 + S.towns.length * 0.1) * eraCur().diff;
+  S.war = { town: town.id, diff, faction: f, field: false, era: S.era };
   askWar();
 }
 // 전쟁이 나면 "대규모 전투로 전환?"을 묻는다. 네 → 전장 액션, 아니오 → 지금 화면에서 적 군단 방어
 function askWar() {
   if (!S.war) return;
   paused = true; actHeld = false; auto = null;
-  const w = S.war, f = FACTIONS[w.faction], t = townById(w.town);
+  const w = S.war, f = warFaction(w), t = townById(w.town);
   $('warPanel').innerHTML = `<h2>⚔️ ${f.name} 침공!</h2>
     <div class="sub">${f.name}이(가) <b>${t ? t.name : '마을'}</b>(으)로 진군하고 있습니다. 적 위협도 ${'★'.repeat(Math.min(5, Math.max(1, Math.round(w.diff))))}</div>
     <div style="font-size:17px;font-weight:800;margin:4px 0 12px;text-align:center">대규모 전투로 전환하시겠습니까?</div>
@@ -430,9 +437,9 @@ function warUnitAI(b, dt) {
 function fieldWarWin() {
   const w = S.war, t = w && townById(w.town);
   const gold = 30 + Math.round(w.diff * 20);
-  S.gold += gold; S.warsWon++; gainExp(40);
+  S.gold += gold; S.warsWon++; rulerStat('wars'); gainExp(40);
   S.war = null; S.warT = 0; S.nextWar = 150 + ri(80);
-  banner('방어 성공!', `${FACTIONS[w.faction].name} 격퇴 · 🪙+${gold} · 경험치 +40`, 3);
+  banner('방어 성공!', `${warFaction(w).name} 격퇴 · 🪙+${gold} · 경험치 +40`, 3);
   save();
 }
 function allyCount() { return Math.min(24, 4 + Math.floor(S.towns.reduce((a, t) => a + t.pop, 0) / 4)); }
@@ -441,7 +448,7 @@ function onBattleEnd(win, st) {
   S.war = null; S.warT = 0; S.nextWar = 150 + ri(80);
   if (win) {
     const gold = 40 + st.kos + Math.round(w.diff * 30);
-    S.gold += gold; S.warsWon++;
+    S.gold += gold; S.warsWon++; rulerStat('wars');
     if (t) t.pop = Math.min(townCap(t) + 5, t.pop + 4);
     gainExp(st.exp);
     toast(`🏆 승리! 🪙+${gold}${t ? ` · ${t.name} 인구 +4` : ''}`, 3.5);
@@ -470,11 +477,19 @@ function openBuild() {
   } else {
     const t = townById(tid), cap = townCap(t);
     const cnt = k => S.buildings.filter(b => b.town === t.id && b.type === k).length;
-    html += `<h2>${t.name} <span style="font-size:13px;color:#b8c2b0">Lv${townLevel(t)}</span></h2>`;
-    html += `<div class="sub">인구 ${t.pop}/${cap} · 영토 반경 ${townRadius(t)} · 수입 ${townIncome(t)}🪙/5초<br>집 ${cnt('house')} · 농장 ${cnt('farm')} · 망루 ${cnt('tower')} · 시장 ${cnt('market')}${resStatus(t.id) ? '<br>' + resStatus(t.id) : ''}<br>인구가 10 늘 때마다 레벨업 → 영토 확장</div>`;
+    const E = eraCur(), lvCap = townLevel(t) >= E.maxLv && t.pop >= E.maxLv * 10;
+    html += `<h2>${t.name} ${E.town} <span style="font-size:13px;color:#b8c2b0">Lv${townLevel(t)}/${E.maxLv}</span></h2>`;
+    html += `<div class="sub">인구 ${t.pop}/${cap} · 영토 반경 ${townRadius(t)} · 수입 ${townIncome(t)}🪙/5초<br>집 ${cnt('house')} · 농장 ${cnt('farm')} · 학당 ${cnt('school')} · 망루 ${cnt('tower')} · 시장 ${cnt('market')}${resStatus(t.id) ? '<br>' + resStatus(t.id) : ''}<br>${lvCap ? `<b style="color:var(--accent)">${E.name}의 한계 Lv${E.maxLv}</b> — 시대가 발전하면 더 커집니다` : '인구가 10 늘 때마다 레벨업 → 영토 확장'}</div>`;
+    const locked = [];
     for (const k in BUILD) {
-      const B = BUILD[k], err = buildCheck(k), ok = !err && canAfford(B.cost);
+      const B = BUILD[k];
+      if (!buildUnlocked(k)) { locked.push(k); continue; }
+      const err = buildCheck(k), ok = !err && canAfford(B.cost);
       html += `<button class="opt" data-a="${k}" ${ok ? '' : 'disabled'}><span class="ic">${B.icon}</span><span>${B.name} — ${B.desc}<small>${costText(B.cost)}${err ? ' · ' + err : !canAfford(B.cost) ? ' · 자원 부족' : B.place ? ' · ' + B.place : ''}</small></span></button>`;
+    }
+    if (locked.length) { // 아직 잠긴 건물: 시대별 한 줄씩
+      const by = {}; for (const k of locked) (by[BUILD[k].era] = by[BUILD[k].era] || []).push(`${BUILD[k].icon}${BUILD[k].name}`);
+      html += `<div class="lockbox">🔒 ${Object.keys(by).map(e => `<b>${ERAS[e].icon} ${ERAS[e].name}</b>: ${by[e].join(' · ')}`).join('<br>🔒 ')}</div>`;
     }
   }
   html += `<button class="close" data-a="close">닫기</button>`;
@@ -485,12 +500,12 @@ bp.addEventListener('click', e => {
   const btn = e.target.closest('button'); if (!btn || btn.disabled) return;
   const a = btn.dataset.a;
   if (a === 'town') { pay(newTownCost()); foundTown(); }
-  else if (BUILD[a]) build(a);
+  else if (BUILD[a] && buildUnlocked(a)) build(a);
   closePanels();
 });
 $('menuBtn').addEventListener('click', () => { paused = true; auto = null; $('goalHelp').innerHTML = `<b>목표</b> 영토 ${GOAL_TILES}칸 차지하기 (지금 ${ownedCount}칸) · 전쟁 승리 ${S.warsWon}회`; $('menuPanel').classList.add('show'); });
 $('menuClose').addEventListener('click', closePanels);
-$('newGameBtn').addEventListener('click', () => { try { localStorage.removeItem(SAVE_KEY); } catch (e) {} newGame(); closePanels(); });
+$('newGameBtn').addEventListener('click', () => { $('menuPanel').classList.remove('show'); showStart(true); });
 $('minimap').addEventListener('click', () => $('minimap').classList.toggle('big'));
 holdBtn($('actBtn'), () => { actHeld = true; if (!paused && actCd <= 0) { doAction(); actCd = 0.32; } }, () => { actHeld = false; });
 holdBtn($('buildBtn'), () => openBuild());
@@ -503,6 +518,7 @@ keyHooks.push((k, down) => {
 
 // ---------- 업데이트 ----------
 function updateWorld(dt) {
+  if (eraTick(dt)) return; // 군주 서거 → 계승 화면
   S.time += dt;
   const p = S.player;
   let mv = moveInput();
@@ -537,7 +553,7 @@ function updateWorld(dt) {
     // 마을 사람
     const want = Math.min(5, Math.ceil(t.pop / 6));
     const have = villagers.filter(v => v.town === t.id).length;
-    if (have < want) villagers.push({ town: t.id, x: (t.x + .5) * T + rr(-20, 20), y: (t.y + 1.5) * T, tx: 0, ty: 0, t: 0, walk: 0, body: ['#7a9a4a', '#a0603a', '#4a7aa0', '#b08a4a', '#8a5a9a'][ri(5)] });
+    if (have < want) { const vl = eraVillager(); villagers.push({ town: t.id, x: (t.x + .5) * T + rr(-20, 20), y: (t.y + 1.5) * T, tx: 0, ty: 0, t: 0, walk: 0, body: vl.body, hat: vl.hat, legs: vl.legs }); }
   }
   if (changed) recomputeOwner();
   for (let i = villagers.length - 1; i >= 0; i--) {
@@ -564,7 +580,7 @@ function updateWorld(dt) {
     c.t += dt; c.hit = Math.max(0, (c.hit || 0) - dt);
     const alive = bandits.filter(b => b.camp === c).length;
     const interval = Math.max(9, 22 - S.towns.length * 2);
-    if (c.t > interval && alive < 3) { c.t = 0; const q = campPos(c); bandits.push({ x: q.x, y: q.y + 20, hp: 3, camp: c, t: 0, vx: 0, vy: 0, atk: 0, loot: 0, walk: 0 }); }
+    if (c.t > interval && alive < 3) { c.t = 0; const q = campPos(c); const bhp = eraCur().banditHp; bandits.push({ x: q.x, y: q.y + 20, hp: bhp, maxHp: bhp, camp: c, t: 0, vx: 0, vy: 0, atk: 0, loot: 0, walk: 0 }); }
   }
   S.spawnT += dt;
   if (S.spawnT > 70 && S.camps.length < 4 + S.towns.length) { S.spawnT = 0; const pt2 = playerTile(); if (spawnCamp(pt2.x, pt2.y, 22)) toast('⚠️ 어딘가에 새 산적 소굴이 생겼습니다', 2.5); }
@@ -583,7 +599,7 @@ function updateWorld(dt) {
         if (dist2(b.x, b.y, tx, ty) < 26 * 26) {
           const steal = Math.min(S.gold, 8 + ri(8)); S.gold -= steal; b.loot += steal; b.raided = true;
           const lost = Math.min(2, town.pop - 1); town.pop -= lost;
-          toast(`🏴 산적이 ${town.name}을 습격! 🪙-${steal} 👥-${lost}`, 2.5);
+          toast(`🏴 ${eraCur().bandit}이(가) ${town.name}을 습격! 🪙-${steal} 👥-${lost}`, 2.5);
           floatText(tx, ty - 30, `-${steal}🪙`, '#ff7a7a');
           recomputeOwner();
         }
@@ -613,7 +629,7 @@ function updateWorld(dt) {
   for (const a of arrows.slice()) {
     if (!bandits.includes(a.tgt)) { arrows.splice(arrows.indexOf(a), 1); continue; }
     const d = Math.hypot(a.tgt.x - a.x, a.tgt.y - 12 - a.y);
-    if (d < 10) { a.tgt.hp--; a.tgt.hit = 0.15; if (a.tgt.hp <= 0) killBandit(a.tgt); arrows.splice(arrows.indexOf(a), 1); continue; }
+    if (d < 10) { a.tgt.hp -= eraCur().arrow || 1; a.tgt.hit = 0.15; if (a.tgt.hp <= 0) killBandit(a.tgt); arrows.splice(arrows.indexOf(a), 1); continue; }
     a.ang = Math.atan2(a.tgt.y - 12 - a.y, a.tgt.x - a.x);
     a.x += Math.cos(a.ang) * a.sp * dt; a.y += Math.sin(a.ang) * a.sp * dt;
   }
@@ -798,11 +814,13 @@ function drawWorld() {
       }
       case 'town': {
         const t = e.o, lv = townLevel(t), s = SPR.castle[lv - 1];
+        if (S.era === 0) drawPalisade(ctx, e.x, e.y, lv, false);
         blit(ctx, s, e.x, e.y);
+        if (S.era === 0) drawPalisade(ctx, e.x, e.y, lv, true);
         const top = e.y - s.ay;
         drawFlag(ctx, e.x, top + 8 - (lv >= 3 ? 4 : 0), TOWN_COLORS[t.id % TOWN_COLORS.length], tm, 0.9);
         ctx.textAlign = 'center'; ctx.font = '800 12px system-ui, sans-serif';
-        const label = `${t.name} Lv${lv}`, tw = ctx.measureText(label).width + 12;
+        const label = townLabel(t), tw = ctx.measureText(label).width + 12;
         ctx.fillStyle = 'rgba(0,0,0,.55)'; rrect(ctx, e.x - tw / 2, top - 26, tw, 17, 8); ctx.fill();
         ctx.fillStyle = '#fff'; ctx.fillText(label, e.x, top - 13);
         if (S.war && S.war.town === t.id) { ctx.font = '20px system-ui'; ctx.fillText('⚔️', e.x + tw / 2 + 10, top - 10 + Math.sin(tm * 6) * 2); }
@@ -820,17 +838,16 @@ function drawWorld() {
         break;
       }
       case 'horse': { const h = e.o; drawHorse(ctx, h.x, h.y, h.vx < 0 ? -1 : 1, h.walk, false, h.col); break; }
-      case 'vil': { const v = e.o; drawHuman(ctx, v.x, v.y, { scale: 0.75, face: v.face || 1, walk: v.walk, body: v.body, legs: '#4a3a2a', hat: hash2(v.x | 0, 1) > 0.5 ? 'band' : null, helm: '#e8d8b0' }); break; }
+      case 'vil': { const v = e.o; drawHuman(ctx, v.x, v.y, { scale: 0.75, face: v.face || 1, walk: v.walk, body: v.body, legs: v.legs || '#4a3a2a', hat: v.hat === undefined ? (hash2(v.x | 0, 1) > 0.5 ? 'band' : null) : v.hat, helm: '#e8d8b0' }); break; }
       case 'bandit': {
         const b = e.o, swingAim = sw => (b.face || 1) > 0 ? (sw ? -0.6 + (0.25 - sw) * 8 : 0.4) : (sw ? Math.PI + 0.6 - (0.25 - sw) * 8 : Math.PI - 0.4);
         if (b.war) {
-          const f = FACTIONS[S.war ? S.war.faction : 0];
-          drawHuman(ctx, b.x, b.y, { face: b.face || 1, walk: b.walk, body: f.color, trim: b.cmd ? '#c9a040' : '#2a2218', legs: '#2a2420', hat: 'helm', helm: b.cmd ? '#8a7a50' : '#6a6a70', plume: f.plume,
-            weapon: b.cmd ? 'axe' : 'spear', armor: b.cmd, cape: b.cmd ? '#5a1a1a' : null, scale: b.cmd ? 1.25 : 1, aim: swingAim(b.swing), flash: b.hit > 0 });
+          const lk = warUnitLook(b.cmd);
+          drawHuman(ctx, b.x, b.y, Object.assign(lk, { face: b.face || 1, walk: b.walk, scale: b.cmd ? 1.25 : 1, aim: swingAim(b.swing), flash: b.hit > 0 }));
           bar(b.x, b.y - (b.cmd ? 54 : 44), b.hp / b.maxHp, '#e44');
         } else {
-          drawHuman(ctx, b.x, b.y, { face: b.face || 1, walk: b.walk, body: '#7a2a22', trim: '#2a1a12', legs: '#2a2420', hat: 'hood', helm: '#3a2a22', weapon: 'club', aim: swingAim(b.swing), flash: b.hit > 0 });
-          bar(b.x, b.y - 44, b.hp / 3, '#e44');
+          drawHuman(ctx, b.x, b.y, Object.assign(eraLook('bandit'), { face: b.face || 1, walk: b.walk, aim: swingAim(b.swing), flash: b.hit > 0 }));
+          bar(b.x, b.y - 44, b.hp / (b.maxHp || 3), '#e44');
         }
         if (b.loot) { ctx.fillStyle = '#ffd34d'; ctx.beginPath(); ctx.arc(b.x + 9, b.y - 8, 3.5, 0, 7); ctx.fill(); }
         break;
@@ -854,6 +871,18 @@ function drawWorld() {
   $('hint').textContent = act ? `행동: ${act.label}` : '';
   $('hint').style.display = act ? 'block' : 'none';
 }
+// 부족 시대: 마을 둘레 나무 말뚝 울타리 (front=false 뒤쪽 절반, true 앞쪽 절반)
+function drawPalisade(g, x, y, lv, front) {
+  const rx = 30 + lv * 6, ry = 13 + lv * 2.5, n = 22;
+  for (let k = 0; k < n; k++) {
+    const a = k / n * Math.PI * 2, sy = Math.sin(a);
+    if ((sy > 0) !== front || (front && Math.abs(Math.cos(a)) < 0.18)) continue; // 앞쪽 가운데는 출입구
+    const px = x + Math.cos(a) * rx, py = y - 4 + sy * ry, h = 13 + hash2(k, lv) * 4;
+    g.fillStyle = '#6b4a2a'; g.fillRect(px - 2, py - h, 4, h);
+    g.fillStyle = '#8a6a40'; g.beginPath(); g.moveTo(px - 2, py - h); g.lineTo(px, py - h - 4); g.lineTo(px + 2, py - h); g.fill();
+  }
+}
+function warUnitLook(cmd) { const w = S.war, f = warFaction(w); return eraLook(cmd ? 'officer' : 'grunt', f, w && w.era !== undefined ? w.era : S.era); }
 function bar(x, y, f, col) { ctx.fillStyle = 'rgba(0,0,0,.6)'; rrect(ctx, x - 14, y, 28, 5, 2.5); ctx.fill(); ctx.fillStyle = col; rrect(ctx, x - 13, y + 1, 26 * clamp(f, 0, 1), 3, 1.5); ctx.fill(); }
 function drawPlayerW(p) {
   const face = Math.cos(p.dir) < 0 ? -1 : 1, up = Math.sin(p.dir) < -0.6;
@@ -862,8 +891,8 @@ function drawPlayerW(p) {
   if (p.mounted) {
     const h = S.horses.find(h => h.ridden);
     drawHorse(ctx, p.x, p.y + 4, face, p.walk || 0, true, h && h.col);
-    drawHuman(ctx, p.x - face * 2, p.y - 10, { face, up, walk: 0, body: '#2b5fb8', trim: '#f2c14e', cape: '#c0392b', hat: 'crown', weapon: 'sword', aim, noShadow: true, armor: true });
-  } else drawHuman(ctx, p.x, p.y, { face, up, walk: p.moving ? p.walk : 0, body: '#2b5fb8', trim: '#f2c14e', cape: '#c0392b', hat: 'crown', weapon: 'sword', aim, armor: true, flash: p.hurt > 0.15 });
+    drawHuman(ctx, p.x - face * 2, p.y - 10, Object.assign(eraLook('player'), { face, up, walk: 0, aim, noShadow: true }));
+  } else drawHuman(ctx, p.x, p.y, Object.assign(eraLook('player'), { face, up, walk: p.moving ? p.walk : 0, aim, flash: p.hurt > 0.15 }));
   if (swing > 0) {
     ctx.strokeStyle = `rgba(255,255,255,${swing * 3})`; ctx.lineWidth = 3;
     ctx.beginPath(); ctx.arc(p.x, p.y - 14, 22, p.dir - 1.1, p.dir + 1.1); ctx.stroke();
@@ -916,8 +945,9 @@ function load() {
     if (o.tiles.length !== W * H) return false;
     o.horses = o.horses.map(h => ({ ...h, vx: 0, vy: 0, t: 0, ridden: false, walk: 0, col: h.col || HORSE_COLS[ri(HORSE_COLS.length)] }));
     o.hero = o.hero || { lv: 1, exp: 0 }; o.warT = o.warT || 0; o.nextWar = o.nextWar || 80; o.warsWon = o.warsWon || 0; o.war = o.war || null;
+    eraMigrate(o); // 옛 저장: 시대·군주·연대기 채워 넣기
     S = o; bandits.length = 0; villagers.length = 0;
-    computeDerived(); recomputeOwner();
+    computeDerived(); recomputeOwner(); applyEraTheme();
     toast('이어서 플레이합니다', 1.5);
     if (S.war && !S.war.field) setTimeout(askWar, 600);
     return true;
@@ -928,10 +958,19 @@ function hudWorld() {
   $('rWood').textContent = S.wood; $('rStone').textContent = S.stone; $('rGold').textContent = S.gold;
   $('rHp').textContent = S.player.hp; $('rTowns').textContent = S.towns.length;
   $('rPop').textContent = S.towns.reduce((a, t) => a + t.pop, 0); $('rLv').textContent = S.hero.lv;
-  $('goal').textContent = S.towns.length === 0 ? '목표: 마을 세우기 (건설 버튼)' : `영토 ${ownedCount}/${GOAL_TILES}칸 · 소굴 ${S.camps.length}`;
+  const R = S.ruler;
+  if (R) { const s = `${rulerName()} · ${rulerAge()}세 · 치세 ${S.year - R.start}년`; if ($('rRuler').textContent !== s) $('rRuler').textContent = s; }
+  const N = eraNext(), pr = eraProgress();
+  const g1 = S.towns.length === 0 ? '목표: 마을 세우기 (건설 버튼)' : `영토 ${ownedCount}/${GOAL_TILES}칸 · 소굴 ${S.camps.length}`;
+  const g2 = N ? `${eraCur().icon} ${eraCur().name} → ${N.name} ${Math.floor(pr * 100)}%` : `${eraCur().icon} ${eraCur().name} (마지막 시대)`;
+  const gk = g1 + g2 + S.year;
+  if (hudWorld.gk !== gk) { hudWorld.gk = gk; $('goal').innerHTML = `${g1}<div class="eraline">${g2} · 건국 ${S.year}년</div><div class="ebar"><i style="width:${N ? pr * 100 : 100}%"></i></div>`; }
   const wb = $('warBtn');
   if (S.war && S.war.field) { wb.style.display = 'block'; wb.textContent = `⚔️ 적 군단 ${bandits.filter(b => b.war).length}명 · 위치`; }
   else wb.style.display = 'none';
+  const eb = $('eraBtn'), rd = !!N && eraReady();
+  eb.style.display = rd ? 'block' : 'none';
+  if (rd) { eb.textContent = `${N.icon} 시대 전환: ${N.name}`; eb.style.top = `calc(${wb.style.display === 'block' ? 192 : 148}px + env(safe-area-inset-top))`; }
 }
 
 
@@ -940,7 +979,7 @@ function updateProducers(dt) {
   for (const b of S.buildings) {
     const d = RES_DEF[b.type]; if (!d) continue;
     b.scan = (b.scan || 0) - dt;
-    if (b.scan <= 0 || !b.tiles) { b.scan = 2; b.tiles = resTiles(b.type, b.x, b.y); b.rate = d.perMin(b.tiles.length); }
+    if (b.scan <= 0 || !b.tiles) { b.scan = 2; b.tiles = resTiles(b.type, b.x, b.y); b.rate = prodRate(b.type, b.tiles.length); }
     const cx = (b.x + .5) * T, cy = (b.y + .5) * T;
     if (!b.rate) { b.idleT = (b.idleT || 0) + dt; if (b.idleT > 25) { b.idleT = 0; floatText(cx, cy - 34, d.none, '#c8c8c8', 12); } continue; }
     b.pt = (b.pt || 0) + dt * b.rate / 60;

@@ -12,9 +12,9 @@ const COMBO = [
 function heroBattleDmg() { return 2 * (1 + (S.hero.lv - 1) * 0.15); }
 
 function startBattle(war) {
-  const f = FACTIONS[war.faction];
+  const f = warFaction(war);
   const diff = war.diff;
-  B = { war, f, diff, t: 0, limit: 360, kos: 0, officers: 0, captured: 0, units: [], bases: [], obs: [], boss: null,
+  B = { war, f, era: war.era !== undefined ? war.era : S.era, diff, t: 0, limit: 360, kos: 0, officers: 0, captured: 0, units: [], bases: [], obs: [], boss: null,
         phase: 'bases', over: false, result: null, hitstop: 0, dashId: 0, overT: 0, allyMax: allyCount() + 6, spawnT: 0, allyT: 0 };
   const r = mulberry((Date.now() & 0xffff) + 7);
   B.allyBase = { x: 170, y: 640 };
@@ -402,7 +402,7 @@ function allyAI(u, dt, enemies) {
 function endBattle(win) {
   if (B.over) return;
   B.over = true; B.result = win; B.overT = 0;
-  banner(win ? '승리!' : '패배…', win ? `${B.f.boss} 격파` : (B.hero.hp <= 0 ? '영주가 쓰러졌습니다' : '시간 초과'), 2.5);
+  banner(win ? '승리!' : '패배…', win ? `${B.f.boss} 격파` : (B.hero.hp <= 0 ? `${rulerName()}이(가) 쓰러졌습니다` : '시간 초과'), 2.5);
 }
 function showResult() {
   const win = B.result, t = Math.floor(B.t);
@@ -427,11 +427,10 @@ function showResult() {
 
 // ---------- 그리기 ----------
 function enemyLook(u) {
+  // 시대별 무장 (era.js ERAS[].looks)
   const f = B.f;
-  if (u.kind === 'grunt') return { body: f.color, trim: '#2a2218', legs: '#2a2420', hat: 'helm', helm: '#6a6a70', plume: f.plume, weapon: hash2(u.x | 0, 3) > 0.5 ? 'spear' : 'sword' };
-  if (u.kind === 'officer') return { body: f.color, trim: '#c9a040', legs: '#222', hat: 'helm', helm: '#8a7a50', plume: f.plume, weapon: 'axe', armor: true, cape: '#5a1a1a', scale: 1.25 };
-  if (u.kind === 'boss') return { body: shadeHex(f.color, 0.8), trim: '#e0b040', legs: '#1a1a1a', hat: 'horned', helm: '#2a2a30', weapon: 'glaive', armor: true, cape: '#7a0e0e', scale: 1.55 };
-  return { body: '#3a6fc0', trim: '#d9c080', legs: '#2a3040', hat: 'helm', helm: '#9aa4b0', plume: '#4fa3ff', weapon: 'spear' };
+  if (u.kind === 'grunt' || u.kind === 'officer' || u.kind === 'boss') return eraLook(u.kind, f, B.era);
+  return eraLook('ally', f, B.era);
 }
 function drawBattle() {
   const H = B.hero, Z = ZOOM * 0.84, tm = B.t;
@@ -540,14 +539,14 @@ function drawHero(H, tm) {
     ctx.fillStyle = gr; ctx.beginPath(); ctx.moveTo(H.x, H.y - 10); ctx.arc(H.x, H.y - 10, c.r, a0, a1); ctx.closePath(); ctx.fill();
   } else if (H.musouT > 0) aim = H.dir;
   else if (H.dashT > 0) aim = H.dir;
-  drawHuman(ctx, H.x, H.y, { face: H.face, up: Math.sin(H.dir) < -0.6 && H.atkT <= 0 && H.musouT <= 0, walk: H.moving ? H.walk : 0, body: '#2b5fb8', trim: '#f2c14e', cape: '#c0392b', hat: 'crown',
-    weapon: 'sword', aim, armor: true, scale: 1.15, flash: H.hurt > 0.15 });
+  drawHuman(ctx, H.x, H.y, Object.assign(eraLook('player'), { face: H.face, up: Math.sin(H.dir) < -0.6 && H.atkT <= 0 && H.musouT <= 0, walk: H.moving ? H.walk : 0,
+    aim, scale: 1.15, flash: H.hurt > 0.15 }));
 }
 function hudBattle() {
   const H = B.hero;
   $('bHp').firstElementChild.style.width = (H.hp / H.maxHp * 100) + '%';
   $('bMg').firstElementChild.style.width = H.mg + '%';
-  $('bLv').textContent = `Lv${S.hero.lv}`;
+  $('bLv').textContent = `Lv${S.hero.lv}`; if ($('bName').textContent !== rulerName()) $('bName').textContent = rulerName();
   $('bKo').innerHTML = `${B.kos}<small>KO</small>`;
   const left = Math.max(0, Math.ceil(B.limit - B.t)), tt = `${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}`;
   $('bObj').textContent = B.phase === 'boss' ? `⚔️ 적장 격파 · ⏱ ${tt}` : `🚩 적 거점 제압 ${B.captured}/2 · ⏱ ${tt}`;

@@ -127,6 +127,10 @@ const A3D = (() => {
           ['building_windmill_blue', 0.26, 0, -0.24, -0.4, fit('building_windmill_blue', 0.5)],
           ['sack', -0.3, 0.05, 0.33, 0.6, 1.1], ['wheelbarrow', 0.33, 0.05, 0.3, -0.9, 0.9],
         ]); break;
+        case 'school': g = compose([ // 학당: 작은 강당 + 과녁(활쏘기 수업) + 짐
+          ['building_tavern_blue', 0, 0, -0.05, 0, fit('building_tavern_blue', 0.92)],
+          ['sack', 0.36, 0.02, 0.36, 0.4, 0.9], ['crate_open', -0.36, 0.02, 0.36, -0.3, 0.8],
+        ]); break;
         case 'tower': g = compose([['building_tower_A_blue', 0, 0, 0, 0, fit('building_tower_A_blue', 0.95)]]); break;
         case 'market': g = compose([['building_market_blue', 0, 0, 0, 0, fit('building_market_blue', 1.08)]]); break;
         case 'lumber': g = compose([
@@ -305,7 +309,12 @@ const A3D = (() => {
   function plan(look) {
     const o = look || {};
     const lo = !!o.lod;
-    if (o.hat === 'crown') return { ch: 'knight', extra: ['Crown', 'Knight_Cape', '1H_Sword', 'Badge_Shield'], tint: null, mode: 'hero', atk: 'atk', k: 1.18 };
+    // 시대별 차림(kit): chief = 부족 족장, tribe = 부족 전사, knight = 중세 이후 기사 (era.js)
+    const two = o.weapon === 'glaive';
+    if (o.kit === 'chief') return { ch: 'barbarian', body: 'barbarian', extra: ['Barbarian_Hat', 'Barbarian_Cape', '2H_Axe'], tint: o.tint || null, mode: 'armor', atk: 'atk2', k: 1.18 };
+    if (o.kit === 'tribe') return { ch: lo ? 'barbarian_lo' : 'barbarian', body: 'barbarian', extra: two ? ['Barbarian_Hat', 'Barbarian_Cape', '2H_Axe'] : o.armor ? ['Barbarian_Hat', 'Barbarian_Cape', '1H_Axe', 'Barbarian_Round_Shield'] : ['1H_Axe'], tint: o.body, mode: 'armor', atk: two ? 'atk2' : 'atk' };
+    if (o.kit === 'knight') return { ch: lo ? 'knight_lo' : 'knight', body: 'knight', extra: ['Knight_Helmet', ...(o.cape ? ['Knight_Cape'] : []), two ? '2H_Sword' : '1H_Sword', ...(two ? [] : ['Badge_Shield'])], tint: o.body, mode: 'armor', atk: two ? 'atk2' : 'atk' };
+    if (o.hat === 'crown') return { ch: 'knight', extra: ['Crown', 'Knight_Cape', two ? '2H_Sword' : '1H_Sword', ...(two ? [] : ['Badge_Shield'])], tint: o.tint || null, mode: o.tint ? 'armor' : 'hero', atk: two ? 'atk2' : 'atk', k: 1.18 };
     if (o.hat === 'hood') return { ch: 'rogue_lo', body: 'rogue', extra: ['Rogue_Cape', 'Knife', 'Knife_Offhand'], tint: o.tint || o.body, mode: 'green', atk: 'atk' };
     if (o.hat === 'horned' || (o.hat === 'helm' && o.armor)) {
       const two = o.weapon === 'glaive';

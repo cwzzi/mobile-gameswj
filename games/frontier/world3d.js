@@ -539,6 +539,18 @@ function w3dBuildingGeo(type) {
       for (let k = 0; k < 6; k++) P.push({ g: box(0.14, 0.03, 0.66), c: k % 2 ? '#fdf6e8' : '#d9483b', p: [-0.35 + k * 0.14, 0.63, 0.02], r: [0.22, 0, 0] });
       P.push({ g: box(0.22, 0.22, 0.2), c: '#6b4a2a', p: [0.22, 0.11, -0.2] });
     }
+    else if (type === 'school') { // 학당: 넓은 강당 + 푸른 지붕 + 종
+      P.push({ g: box(0.78, 0.36, 0.5), c: '#efe2c2', p: [0, 0.18, 0] });
+      for (const x of [-0.39, -0.13, 0.13, 0.39]) P.push({ g: box(0.05, 0.36, 0.05), c: '#6b4a2e', p: [x, 0.18, 0.25] });
+      P.push({ g: w3dPrism(0.6, 0.26, 0.9).rotateY(Math.PI / 2), c: '#3a6a9a', p: [0, 0.37, 0] });
+      P.push({ g: box(0.16, 0.2, 0.16), c: '#6b4a2e', p: [0, 0.72, 0] });
+      P.push({ g: cone(0.13, 0.14, 4), c: '#3a6a9a', p: [0, 0.89, 0], r: [0, Math.PI / 4, 0] });
+      P.push({ g: cyl(0.035, 0.05, 0.07, 6), c: '#d9b44a', p: [0, 0.68, 0.06] });
+      P.push({ g: box(0.15, 0.22, 0.02), c: '#5b3a20', p: [0, 0.11, 0.255] });
+      P.push({ g: box(0.24, 0.1, 0.02), c: '#f6f0dc', p: [0.26, 0.42, 0.21], r: [0.5, 0, 0] });
+      G.push({ g: box(0.1, 0.09, 0.02), c: '#fff', p: [-0.24, 0.22, 0.255] });
+      G.push({ g: box(0.1, 0.09, 0.02), c: '#fff', p: [0.24, 0.22, 0.255] });
+    }
     if (!P.length && typeof w3dResBldGeo === 'function') return w3dResBldGeo(type); // tap-to-act / resource buildings
     return { main: R3D.merge(P), glow: G.length ? R3D.merge(G) : null, flag };
   });
@@ -608,18 +620,40 @@ function w3dFaceMove(r, x, z, dt, forceYaw) {
   return r.yaw;
 }
 
+// 부족 시대 마을 울타리: 뾰족한 통나무 말뚝 고리 (앞쪽은 출입구)
+function w3dPalisadeGeo() {
+  return R3D.cached('palisade', () => {
+    const { cyl, cone } = R3D.prim, P = [], n = 44, R = 1.75;
+    for (let k = 0; k < n; k++) {
+      const a = k / n * Math.PI * 2, sx = Math.sin(a), cz = Math.cos(a);
+      if (cz > 0.93) continue; // 출입구
+      const h = 0.42 + hash2(k, 7) * 0.12, c = k % 2 ? '#7a5634' : '#6b4a2a';
+      P.push({ g: cyl(0.055, 0.06, h, 5), c, p: [sx * R, h / 2, cz * R] });
+      P.push({ g: cone(0.055, 0.12, 5), c: '#9a7a50', p: [sx * R, h + 0.06, cz * R] });
+    }
+    for (const [x, z] of [[-0.3, R], [0.3, R]]) P.push({ g: cyl(0.07, 0.08, 0.75, 5), c: '#5a3a20', p: [x, 0.375, z * 0.99] });
+    return R3D.merge(P);
+  });
+}
 // ---------- 모습 ----------
 const W3_HS = 1.4; // 말 크기
-const W3_BSCALE = { house: [1.25, 1.4, 1.25], tower: [1.15, 1.45, 1.15], market: [1.2, 1.35, 1.2], farm: [1, 1.3, 1] };
+const W3_BSCALE = { school: [1.25, 1.35, 1.25], house: [1.25, 1.4, 1.25], tower: [1.15, 1.45, 1.15], market: [1.2, 1.35, 1.2], farm: [1, 1.3, 1] };
 const W3_LOOK = {
   player: { body: '#2b5fb8', trim: '#f2c14e', cape: '#c0392b', hat: 'crown', weapon: 'sword', armor: true, scale: 1.45 * 1.1 },
   bandit: { body: '#7a2a22', trim: '#2a1a12', legs: '#2a2420', hat: 'hood', helm: '#3a2a22', weapon: 'club', scale: 1.45, tint: '#8a2a20', lod: 1 },
 };
-function w3dWarLook(cmd) {
-  const f = FACTIONS[S.war ? S.war.faction : 0];
-  return cmd ? { body: f.color, trim: '#c9a040', legs: '#2a2420', hat: 'horned', helm: '#8a7a50', weapon: 'axe', armor: true, cape: '#5a1a1a', scale: 1.45 * 1.3 }
-    : { body: f.color, trim: '#2a2218', legs: '#2a2420', hat: 'helm', helm: '#6a6a70', plume: f.plume, weapon: 'spear', scale: 1.45, lod: 1 };
+// 시대별 외형 (era.js ERAS[].looks) — 시대·진영이 바뀔 때만 새로 만든다
+const w3dLookCache = new Map();
+function w3dEraLook(kind, extra) {
+  const w = S.war, key = kind + '|' + S.era + '|' + (w ? w.faction + '|' + w.era : '');
+  let lk = w3dLookCache.get(key);
+  if (!lk) {
+    lk = kind === 'grunt' || kind === 'officer' ? Object.assign(warUnitLook(kind === 'officer'), extra) : Object.assign(eraLook(kind), extra);
+    w3dLookCache.set(key, lk);
+  }
+  return lk;
 }
+function w3dWarLook(cmd) { return cmd ? w3dEraLook('officer', { scale: 1.45 * 1.3 }) : w3dEraLook('grunt', { scale: 1.45, lod: 1 }); }
 function w3dHuman(obj, look) { const key = R3D.human.key(look); return w3dUse(obj, 'h|' + key, () => R3D.human(look)); }
 
 // ---------- 매 프레임 ----------
@@ -740,8 +774,15 @@ function drawWorld3D() {
       else { const cg = w3dCastle(lv); m.main.geometry = cg.main; m.main.material = R3D.mats.vc; m.glow.geometry = cg.glow; m.glow.visible = true; m.flag.mesh.position.set(...cg.flag); m.top = cg.top; m.sy = 1.4; m.sxz = 1.08; }
       m.lv = lv;
     }
-    m.group.position.set(x, 0, z); m.group.scale.set(m.sxz, m.sy, m.sxz); w3dWave(m.flag, tm);
-    labels.push({ x, y: m.top * m.sy + 0.35, z, s: `${t.name} Lv${lv}`, war: S.war && S.war.town === t.id });
+    if (m.era !== S.era) { // 시대 모습: 부족 시대엔 나무 말뚝 울타리, 근세엔 조금 더 크게
+      m.era = S.era;
+      if (S.era === 0 && !m.pal) { m.pal = new THREE.Mesh(w3dPalisadeGeo(), R3D.mats.vc); m.pal.castShadow = m.pal.receiveShadow = true; m.group.add(m.pal); }
+      if (m.pal) m.pal.visible = S.era === 0;
+    }
+    const ek = S.era >= 3 ? 1.12 : 1;
+    m.group.position.set(x, 0, z); m.group.scale.set(m.sxz * ek, m.sy * ek, m.sxz * ek); w3dWave(m.flag, tm);
+    if (m.pal) { const ps = 1 + (lv - 1) * 0.18, gx = m.sxz * ek, gy = m.sy * ek; m.pal.scale.set(ps / gx, 1 / gy, ps / gx); } // 성 크기 배율과 무관하게
+    labels.push({ x, y: m.top * m.sy + 0.35, z, s: townLabel(t), war: S.war && S.war.town === t.id });
     lights.push({ x, y: 1.4, z: z + 0.9, col: '#ffbb66', r: 6 + lv, k: 1.3 });
   }
   for (const b of S.buildings) {
@@ -799,7 +840,7 @@ function drawWorld3D() {
   for (const v of villagers) {
     const x = v.x / T, z = v.y / T; if (!w3dInView(x, z, 1)) continue;
     let lk = W3.look.get(v);
-    if (!lk) { lk = { body: v.body, legs: '#4a3a2a', hat: rand() > 0.5 ? 'band' : null, helm: '#e8d8b0', hair: ['#3a2414', '#6a4a2a', '#222'][ri(3)], scale: 1.1, lod: 1 }; W3.look.set(v, lk); }
+    if (!lk) { lk = { body: v.body, legs: v.legs || '#4a3a2a', hat: v.hat === undefined ? (rand() > 0.5 ? 'band' : null) : (v.hat && rand() > 0.4 ? v.hat : null), helm: '#e8d8b0', hair: ['#3a2414', '#6a4a2a', '#222'][ri(3)], scale: 1.1, lod: 1 }; W3.look.set(v, lk); }
     const r = w3dHuman(v, lk);
     const moved = r.lx !== null && (Math.abs(x - r.lx) + Math.abs(z - r.lz)) > 1e-4;
     r.m.pose({ walk: v.walk, moving: moved, yaw: w3dFaceMove(r, x, z, dt) });
@@ -807,7 +848,7 @@ function drawWorld3D() {
   }
   for (const b of bandits) {
     const x = b.x / T, z = b.y / T; if (!w3dInView(x, z, 1.5)) continue;
-    const look = b.war ? w3dWarLook(b.cmd) : W3_LOOK.bandit;
+    const look = b.war ? w3dWarLook(b.cmd) : w3dEraLook('bandit', { scale: 1.45, lod: 1 });
     const r = w3dHuman(b, look);
     const dpx = p.x - b.x, dpy = p.y - b.y, near = dpx * dpx + dpy * dpy < 44 * 44;
     const moved = r.lx !== null && (Math.abs(x - r.lx) + Math.abs(z - r.lz)) > 1e-4;
@@ -820,7 +861,7 @@ function drawWorld3D() {
   }
   // 영주
   {
-    const r = w3dHuman(p, W3_LOOK.player), yaw = R3D.yaw(p.dir || 0);
+    const r = w3dHuman(p, w3dEraLook('player', { scale: 1.45 * 1.1 })), yaw = R3D.yaw(p.dir || 0);
     const sw = swing > 0 ? swing / 0.2 : 0;
     if (p.mounted) {
       const h = S.horses.find(h => h.ridden);

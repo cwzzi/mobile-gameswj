@@ -79,7 +79,7 @@ cv.addEventListener('mousedown', e => { mouseDown = true; inputDown('m', e.clien
 addEventListener('mousemove', e => { if (mouseDown) inputMove('m', e.clientX, e.clientY); });
 addEventListener('mouseup', e => { if (!mouseDown) return; mouseDown = false; inputUp('m', e.clientX, e.clientY, false, e.timeStamp); });
 const keyHooks = [];
-addEventListener('keydown', e => { const k = e.key.toLowerCase(); if (keys[k]) return; keys[k] = true; for (const f of keyHooks) f(k, true); });
+addEventListener('keydown', e => { if (e.target && /^(INPUT|TEXTAREA)$/.test(e.target.tagName)) return; const k = e.key.toLowerCase(); if (keys[k]) return; keys[k] = true; for (const f of keyHooks) f(k, true); });
 addEventListener('keyup', e => { const k = e.key.toLowerCase(); keys[k] = false; for (const f of keyHooks) f(k, false); });
 function moveInput() {
   let mx = joy.x, my = joy.y;
