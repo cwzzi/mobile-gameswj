@@ -307,6 +307,7 @@ function killBandit(b) {
   const i = bandits.indexOf(b); if (i >= 0) bandits.splice(i, 1);
   const loot = 4 + (b.loot || 0);
   S.gold += loot; floatText(b.x, b.y - 20, `+${loot}🪙`, '#ffe27a'); gainExp(5);
+  if (b.war && S.war && !bandits.some(x => x.war)) fieldWarWin();
   emit(b.x, b.y - 10, 14, { color: ['#a52a2a', '#fff', '#ffd54a'], smin: 50, smax: 160, lmin: .3, lmax: .6, grav: 200 });
 }
 
@@ -316,30 +317,90 @@ function startWarEvent() {
   const town = S.towns.reduce((a, t) => t.pop > a.pop ? t : a);
   const f = ri(FACTIONS.length);
   const diff = 1 + S.warsWon * 0.35 + S.towns.length * 0.1;
-  S.war = { town: town.id, t: 120, diff, faction: f };
-  banner('⚔️ 전쟁 발발', `${FACTIONS[f].name}이(가) ${town.name}로 진군 중`, 3);
-  toast(`왼쪽 위 <b>⚔️ 전쟁!</b> 버튼을 눌러 출전하세요 (2분 안에)`, 4);
+  S.war = { town: town.id, diff, faction: f, field: false };
+  askWar();
 }
-function openWar() {
+// 전쟁이 나면 "대규모 전투로 전환?"을 묻는다. 네 → 전장 액션, 아니오 → 지금 화면에서 적 군단 방어
+function askWar() {
   if (!S.war) return;
   paused = true; actHeld = false;
   const w = S.war, f = FACTIONS[w.faction], t = townById(w.town);
-  const allies = allyCount();
-  $('warPanel').innerHTML = `<h2>⚔️ ${f.name}의 침공</h2>
-    <div class="sub">${f.name}이(가) <b>${t ? t.name : '마을'}</b>을(를) 노리고 있습니다.<br>
-    남은 시간 ${Math.ceil(w.t)}초 · 적 위협도 ${'★'.repeat(Math.min(5, Math.round(w.diff)))}<br>
-    아군 병사 ${allies}명이 함께 싸웁니다 (전체 인구에 비례).<br>
-    적 거점 3곳 중 2곳을 빼앗으면 적장 <b>${f.boss}</b>이(가) 나타납니다. 적장을 쓰러뜨리면 승리!</div>
-    <button class="opt primary" data-a="go"><span class="ic">⚔️</span><span>출전<small>전장으로 이동 · 승리하면 금·경험치·인구 보상</small></span></button>
-    <button class="close" data-a="close">나중에</button>`;
+  $('warPanel').innerHTML = `<h2>⚔️ ${f.name} 침공!</h2>
+    <div class="sub">${f.name}이(가) <b>${t ? t.name : '마을'}</b>(으)로 진군하고 있습니다. 적 위협도 ${'★'.repeat(Math.min(5, Math.max(1, Math.round(w.diff))))}</div>
+    <div style="font-size:17px;font-weight:800;margin:4px 0 12px;text-align:center">대규모 전투로 전환하시겠습니까?</div>
+    <button class="opt primary" data-a="go"><span class="ic">⚔️</span><span>네<small>전장으로 이동해 아군 ${allyCount()}명과 함께 수많은 적을 직접 쓸어버립니다. 적장을 쓰러뜨리면 승리</small></span></button>
+    <button class="opt" data-a="field"><span class="ic">🛡️</span><span>아니오<small>지금 화면에서 마을로 다가오는 적 군단(${warbandSize(w)}명)을 직접·망루로 막아냅니다</small></span></button>`;
   $('warPanel').classList.add('show');
 }
 $('warPanel').addEventListener('click', e => {
-  const b = e.target.closest('button'); if (!b) return;
+  const b = e.target.closest('button'); if (!b || !S.war) return;
   $('warPanel').classList.remove('show'); paused = false;
   if (b.dataset.a === 'go') { dismount(); startBattle(S.war); }
+  else if (b.dataset.a === 'field') { S.war.field = true; spawnWarband(); banner('적 군단 접근!', '마을로 향하는 적을 막아내세요', 2.5); save(); }
 });
-$('warBtn').addEventListener('click', openWar);
+$('warBtn').addEventListener('click', () => {
+  if (!S.war || !S.war.field) return;
+  const p = S.player, e = nearest(bandits, p.x, p.y, 1e6, b => b.war);
+  if (!e) return;
+  const a = Math.atan2(e.y - p.y, e.x - p.x), dirs = ['동', '남동', '남', '남서', '서', '북서', '북', '북동'];
+  toast(`가장 가까운 적은 <b>${dirs[(Math.round(a / (Math.PI / 4)) + 8) % 8]}쪽</b> ${Math.round(Math.hypot(e.x - p.x, e.y - p.y) / T)}칸 거리`, 2.5);
+});
+function warbandSize(w) { return Math.round(6 + w.diff * 3) + 1; }
+function spawnWarband() {
+  const w = S.war, t = townById(w.town); if (!t) { S.war = null; return; }
+  let sx = null, sy = null;
+  for (let k = 0; k < 3000 && sx === null; k++) {
+    const a = rand() * Math.PI * 2, d = rr(16, 26), x = Math.round(t.x + Math.cos(a) * d), y = Math.round(t.y + Math.sin(a) * d);
+    if (neighborsLand(x, y) && owner[y * W + x] < 0) { sx = x; sy = y; }
+  }
+  if (sx === null) { sx = t.x + townRadius(t) + 2; sy = t.y; }
+  const n = warbandSize(w) - 1, hp = 3 + Math.round(w.diff);
+  const mk = cmd => ({ war: true, cmd, x: (sx + .5) * T + rr(-40, 40), y: (sy + .5) * T + rr(-40, 40), hp: cmd ? Math.round(14 * w.diff) : hp, maxHp: cmd ? Math.round(14 * w.diff) : hp,
+    t: 0, vx: 0, vy: 0, atk: rr(0, 1), walk: rand() * 6, loot: 0, raidT: 0, prog: 0, bestD: 1e9 });
+  for (let i = 0; i < n; i++) bandits.push(mk(false));
+  bandits.push(mk(true));
+}
+function warUnitAI(b, dt) {
+  const p = S.player, t = S.war && townById(S.war.town);
+  const dp = Math.hypot(p.x - b.x, p.y - b.y);
+  let tx, ty;
+  const chase = dp < T * 7;
+  if (chase) { tx = p.x; ty = p.y; } else if (t) { tx = (t.x + .5) * T; ty = (t.y + 1.3) * T; } else return;
+  const d = Math.hypot(tx - b.x, ty - b.y), ox = b.x;
+  if (d > 20) {
+    const sp = (b.cmd ? 78 : 90) * dt;
+    if (!moveEnt(b, (tx - b.x) / d * sp, (ty - b.y) / d * sp, 8)) { const a = rand() * Math.PI * 2; moveEnt(b, Math.cos(a) * sp * 2, Math.sin(a) * sp * 2, 8); }
+    if (d < b.bestD - 4) { b.bestD = d; b.prog = 0; } else b.prog += dt;
+    if (b.prog > 3) { // 물·산에 막히면 목표 쪽 땅으로 건너뛴다
+      for (let k = 1; k <= 6; k++) { const nx = b.x + (tx - b.x) / d * T * k, ny = b.y + (ty - b.y) / d * T * k; if (canStand(nx, ny, 8)) { b.x = nx; b.y = ny; break; } }
+      b.prog = 0; b.bestD = 1e9;
+    }
+  } else if (!chase && t) {
+    b.raidT -= dt;
+    if (b.raidT <= 0) {
+      b.raidT = 3; b.swing = 0.25;
+      const steal = Math.min(S.gold, 5), lv = townLevel(t);
+      S.gold -= steal; if (t.pop > 1) t.pop--;
+      floatText(tx, ty - 40, `👥-1${steal ? ' 🪙-' + steal : ''}`, '#ff7a7a');
+      if (townLevel(t) !== lv) recomputeOwner();
+      if (!b.warned) { b.warned = true; toast(`🏴 적 군단이 ${t.name}에 침입했습니다!`, 2.5); }
+    }
+  }
+  b.walk += dt * 9; if (Math.abs(b.x - ox) > 0.1) b.face = b.x > ox ? 1 : -1;
+  if (dp < 26 && b.atk <= 0) {
+    b.atk = 1; b.swing = 0.25;
+    if (!(p.mounted && rand() < 0.3)) { p.hp -= b.cmd ? 2 : 1; p.hurt = 0.25; shake(4); if (p.hp <= 0) playerDie(); }
+  }
+  b.swing = Math.max(0, (b.swing || 0) - dt);
+}
+function fieldWarWin() {
+  const w = S.war, t = w && townById(w.town);
+  const gold = 30 + Math.round(w.diff * 20);
+  S.gold += gold; S.warsWon++; gainExp(40);
+  S.war = null; S.warT = 0; S.nextWar = 150 + ri(80);
+  banner('방어 성공!', `${FACTIONS[w.faction].name} 격퇴 · 🪙+${gold} · 경험치 +40`, 3);
+  save();
+}
 function allyCount() { return Math.min(24, 4 + Math.floor(S.towns.reduce((a, t) => a + t.pop, 0) / 4)); }
 function onBattleEnd(win, st) {
   const w = S.war; const t = w && townById(w.town);
@@ -472,6 +533,7 @@ function updateWorld(dt) {
   for (const b of bandits.slice()) {
     b.hit = Math.max(0, (b.hit || 0) - dt); b.atk -= dt;
     if (b.kx) { moveEnt(b, b.kx * dt, b.ky * dt, 8); b.kx *= 0.85; b.ky *= 0.85; if (Math.abs(b.kx) < 5) b.kx = b.ky = 0; }
+    if (b.war) { warUnitAI(b, dt); continue; }
     const dp = Math.sqrt(dist2(b.x, b.y, p.x, p.y));
     let tx = null, ty = null, sp = 85;
     if (dp < T * 6) { tx = p.x; ty = p.y; sp = 100; }
@@ -522,16 +584,8 @@ function updateWorld(dt) {
 
   // 전쟁
   if (S.towns.length) {
-    if (S.war) {
-      S.war.t -= dt;
-      if (S.war.t <= 0) {
-        const t = townById(S.war.town);
-        if (t) t.pop = Math.max(1, Math.floor(t.pop / 2));
-        const lost = Math.floor(S.gold * 0.3); S.gold -= lost;
-        banner('마을 함락…', `${t ? t.name : '마을'} 인구 절반 · 🪙-${lost}`, 3);
-        S.war = null; S.warT = 0; S.nextWar = 150 + ri(80); recomputeOwner(); save();
-      }
-    } else { S.warT += dt; if (S.warT > S.nextWar) startWarEvent(); }
+    if (S.war) { if (S.war.field && !bandits.some(b => b.war)) spawnWarband(); }
+    else { S.warT += dt; if (S.warT > S.nextWar) startWarEvent(); }
   }
 
   if (!S.won && ownedCount >= GOAL_TILES) { S.won = true; banner('👑 개척왕', `영토 ${GOAL_TILES}칸 달성! 계속 플레이할 수 있어요`, 5); save(); }
@@ -725,10 +779,16 @@ function drawWorld() {
       case 'horse': { const h = e.o; drawHorse(ctx, h.x, h.y, h.vx < 0 ? -1 : 1, h.walk, false, h.col); break; }
       case 'vil': { const v = e.o; drawHuman(ctx, v.x, v.y, { scale: 0.75, face: v.face || 1, walk: v.walk, body: v.body, legs: '#4a3a2a', hat: hash2(v.x | 0, 1) > 0.5 ? 'band' : null, helm: '#e8d8b0' }); break; }
       case 'bandit': {
-        const b = e.o;
-        drawHuman(ctx, b.x, b.y, { face: b.face || 1, walk: b.walk, body: '#7a2a22', trim: '#2a1a12', legs: '#2a2420', hat: 'hood', helm: '#3a2a22', weapon: 'club',
-          aim: (b.face || 1) > 0 ? (b.swing ? -0.6 + (0.25 - b.swing) * 8 : 0.4) : (b.swing ? Math.PI + 0.6 - (0.25 - b.swing) * 8 : Math.PI - 0.4), flash: b.hit > 0 });
-        bar(b.x, b.y - 44, b.hp / 3, '#e44');
+        const b = e.o, swingAim = sw => (b.face || 1) > 0 ? (sw ? -0.6 + (0.25 - sw) * 8 : 0.4) : (sw ? Math.PI + 0.6 - (0.25 - sw) * 8 : Math.PI - 0.4);
+        if (b.war) {
+          const f = FACTIONS[S.war ? S.war.faction : 0];
+          drawHuman(ctx, b.x, b.y, { face: b.face || 1, walk: b.walk, body: f.color, trim: b.cmd ? '#c9a040' : '#2a2218', legs: '#2a2420', hat: 'helm', helm: b.cmd ? '#8a7a50' : '#6a6a70', plume: f.plume,
+            weapon: b.cmd ? 'axe' : 'spear', armor: b.cmd, cape: b.cmd ? '#5a1a1a' : null, scale: b.cmd ? 1.25 : 1, aim: swingAim(b.swing), flash: b.hit > 0 });
+          bar(b.x, b.y - (b.cmd ? 54 : 44), b.hp / b.maxHp, '#e44');
+        } else {
+          drawHuman(ctx, b.x, b.y, { face: b.face || 1, walk: b.walk, body: '#7a2a22', trim: '#2a1a12', legs: '#2a2420', hat: 'hood', helm: '#3a2a22', weapon: 'club', aim: swingAim(b.swing), flash: b.hit > 0 });
+          bar(b.x, b.y - 44, b.hp / 3, '#e44');
+        }
         if (b.loot) { ctx.fillStyle = '#ffd34d'; ctx.beginPath(); ctx.arc(b.x + 9, b.y - 8, 3.5, 0, 7); ctx.fill(); }
         break;
       }
@@ -815,6 +875,7 @@ function load() {
     S = o; bandits.length = 0; villagers.length = 0;
     computeDerived(); recomputeOwner();
     toast('이어서 플레이합니다', 1.5);
+    if (S.war && !S.war.field) setTimeout(askWar, 600);
     return true;
   } catch (e) { return false; }
 }
@@ -825,6 +886,6 @@ function hudWorld() {
   $('rPop').textContent = S.towns.reduce((a, t) => a + t.pop, 0); $('rLv').textContent = S.hero.lv;
   $('goal').textContent = S.towns.length === 0 ? '목표: 마을 세우기 (건설 버튼)' : `영토 ${ownedCount}/${GOAL_TILES}칸 · 소굴 ${S.camps.length}`;
   const wb = $('warBtn');
-  if (S.war) { wb.style.display = 'block'; const s = Math.max(0, Math.ceil(S.war.t)); wb.textContent = `⚔️ 전쟁! 출전 ${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; }
+  if (S.war && S.war.field) { wb.style.display = 'block'; wb.textContent = `⚔️ 적 군단 ${bandits.filter(b => b.war).length}명 · 위치`; }
   else wb.style.display = 'none';
 }
