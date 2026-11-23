@@ -22,11 +22,13 @@ const RA = (() => {
   window.__real = A;
   if (typeof THREE === 'undefined' || !THREE.GLTFLoader) { A.done = true; A.has = () => false; return A; }
   const NAMES = ['tree_broadleaf_a', 'tree_broadleaf_b', 'tree_conifer', 'bush', 'rock_a', 'rock_b', 'hut_tribal', 'house_ancient', 'house_medieval',
-    'house_earlymodern', 'castle_keep', 'wall_stone', 'palisade', 'farm_field', 'well', 'campfire'];
+    'house_earlymodern', 'castle_keep', 'wall_stone', 'palisade', 'farm_field', 'well', 'campfire',
+    // 2차: 나머지 건물 · 산 · 바닥 풀/꽃 카드
+    'school', 'market', 'tower_wood', 'tower_stone', 'lumber', 'quarry', 'mine', 'barracks', 'range', 'stable', 'mountain_a', 'scatter_grass', 'scatter_flowers'];
   const M = new Map(); // name → { parts: [{geo, mat, role}], box }
   A.U = { time: { value: 0 }, chop: { value: new THREE.Vector3(-99, -99, 0) } };
   let tier = 'medium';
-  const SMALL = new Set(['well', 'campfire', 'farm_field', 'palisade', 'rock_a', 'rock_b']);
+  const SMALL = new Set(['well', 'campfire', 'farm_field', 'palisade', 'rock_a', 'rock_b', 'scatter_grass', 'scatter_flowers']);
   const allMats = new Set(), nrm = new Map(); // 노멀맵 켜고 끄기용: 재질 → 원래 노멀맵
 
   // ---------- 공용 재질 ----------
@@ -88,7 +90,7 @@ const RA = (() => {
     }
     const leaf = /^(tree_|bush)/.test(name), crop = nm === 'crop';
     const m = new THREE.MeshLambertMaterial({ map: src.map || null, side: src.side, vertexColors: false });
-    if (src.alphaTest > 0 || src.transparent || crop || leaf) { m.alphaTest = leaf ? 0.42 : 0.5; m.transparent = false; m.side = THREE.DoubleSide; }
+    if (src.alphaTest > 0 || src.transparent || crop || leaf) { m.alphaTest = leaf ? 0.42 : 0.5; m.transparent = false; m.side = /^scatter_/.test(name) ? THREE.FrontSide : THREE.DoubleSide; } // scatter 카드는 뒷면이 따로 모델링돼 있어 DoubleSide 면 법선이 뒤집혀 시커멓게 나온다
     if (src.map) { src.map.anisotropy = Math.min(4, R3D.maxAniso || 1); }
     // 노멀맵: 큰 건물만, '높음' 품질에서만 (이 카메라 거리에선 차이가 작고 텍스처 메모리를 크게 먹는다)
     if (src.normalMap && !leaf && !SMALL.has(name)) { nrm.set(m, src.normalMap); m.normalMap = tier === 'high' ? src.normalMap : null; m.normalScale.set(0.9, 0.9); }
