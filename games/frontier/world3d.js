@@ -431,6 +431,15 @@ function w3dPaint(c) {
       if (own(x, y - 1) !== o) g.fillRect(px, py, P, b);
       if (own(x, y + 1) !== o) g.fillRect(px, py + P - b, P, b);
       g.globalAlpha = 1;
+    } else if (kOwner[y * W + x] >= 0) { // 이웃 왕국 땅: 그 나라 색 + 점선 국경
+      const ko = kOwner[y * W + x], kown = (xx, yy) => (xx < 0 || yy < 0 || xx >= W || yy >= H) ? -1 : kOwner[yy * W + xx];
+      g.fillStyle = kCiv(S.kingdoms[ko]).color; g.globalAlpha = 0.14; g.fillRect(px, py, P, P);
+      g.globalAlpha = 0.9; const b = 2, hd = P / 2;
+      if (kown(x - 1, y) !== ko) g.fillRect(px, py, b, hd);
+      if (kown(x + 1, y) !== ko) g.fillRect(px + P - b, py + hd, b, hd);
+      if (kown(x, y - 1) !== ko) g.fillRect(px + hd, py, hd, b);
+      if (kown(x, y + 1) !== ko) g.fillRect(px, py + P - b, hd, b);
+      g.globalAlpha = 1;
     }
   }
   c.tex.needsUpdate = true;
@@ -524,7 +533,7 @@ function w3dBuildProps(c) {
       const s = 1.0 + hash2(x + 3, y) * 0.2, sy = 1.25 + hash2(x, y + 3) * 0.5;
       L[kind].push([x + 0.5 + (h - 0.5) * 0.1, y + 0.5, gold ? 0 : h * 6.28, s, sy, h]);
       if (gold) L.nug.push([x + 0.5 + (h - 0.5) * 0.1, y + 0.5, 0, s, sy, h]);
-    } else if ((t === GRASS || t === SAND) && owner[i] < 0) { // 영토 밖 풀숲·바위 (영토 안은 건물 자리라 비움)
+    } else if ((t === GRASS || t === SAND) && owner[i] < 0 && kOwner[i] < 0) { // 영토 밖 풀숲·바위 (영토 안은 건물 자리라 비움)
       const h2 = hash2(x + 17, y + 31), h3 = hash2(x + 5, y + 71);
       if (t === GRASS && h2 < 0.3) L.tuft.push([x + 0.2 + h3 * 0.6, y + 0.2 + hash2(x, y + 9) * 0.6, h2 * 20, 1.3 + h3 * 0.7, 1, h3]);
       if (h2 > (t === SAND ? 0.95 : 0.975)) L.rock.push([x + 0.3 + h3 * 0.4, y + 0.3 + hash2(x + 9, y) * 0.4, h3 * 6, 0.8 + h2 * 0.6, 0.7, h3]);
@@ -622,7 +631,7 @@ function w3dRealProps(RL, t, x, y, i, h, low, L) {
     RL[k].push({ x: x + 0.5 + Math.sin(a) * 0.42, z: y + 0.5 + Math.abs(Math.cos(a)) * 0.4, ry: a, s: k === 'rock_a' ? 0.34 + h : 0.5 + h, sy: 0.9, c: col(null, h) });
     return false; // 봉우리는 그대로 그린다
   }
-  if ((t === GRASS || t === SAND) && owner[i] < 0) {
+  if ((t === GRASS || t === SAND) && owner[i] < 0 && kOwner[i] < 0) {
     const h2 = hash2(x + 17, y + 31), h3 = hash2(x + 5, y + 71);
     if (h2 > (t === SAND ? 0.95 : 0.975)) { // 들판 바위
       const k = h3 < 0.5 ? 'rock_a' : 'rock_b';
@@ -867,7 +876,7 @@ const W3_LOOK = {
 // 시대별 외형 (era.js ERAS[].looks) — 시대·진영이 바뀔 때만 새로 만든다
 const w3dLookCache = new Map();
 function w3dEraLook(kind, extra) {
-  const w = S.war, key = kind + '|' + S.era + '|' + (w ? w.faction + '|' + w.era : '');
+  const w = S.war, key = kind + '|' + S.era + '|' + (w ? w.faction + '|' + w.era + '|' + (w.kingdom === undefined ? '' : w.kingdom) : '');
   let lk = w3dLookCache.get(key);
   if (!lk) {
     lk = kind === 'grunt' || kind === 'officer' ? Object.assign(warUnitLook(kind === 'officer'), extra) : Object.assign(eraLook(kind), extra);
@@ -1083,8 +1092,9 @@ function drawWorld3D() {
   if (w3dOwnerDirty) {
     w3dOwnerDirty = false;
     const snap = W3.ownSnap;
-    for (let i = 0; i < W * H; i++) if (owner[i] !== snap[i]) { const x = i % W, y = (i / W) | 0; markG(x, y); markG(x + 1, y); markG(x - 1, y); markG(x, y + 1); markG(x, y - 1); W3.chunks[((y / CK) | 0) * NCK + ((x / CK) | 0)].pDirty = true; }
-    snap.set(owner);
+    const ksnap = W3.kSnap || (W3.kSnap = new Int8Array(W * H).fill(-1));
+    for (let i = 0; i < W * H; i++) if (owner[i] !== snap[i] || kOwner[i] !== ksnap[i]) { const x = i % W, y = (i / W) | 0; markG(x, y); markG(x + 1, y); markG(x - 1, y); markG(x, y + 1); markG(x, y - 1); W3.chunks[((y / CK) | 0) * NCK + ((x / CK) | 0)].pDirty = true; }
+    snap.set(owner); ksnap.set(kOwner);
   }
   // CC0 모델이 막 준비됐으면: 숲/산 다시 만들고, 건물·사람은 새 모델로 바꿔 끼운다
   const AV = (typeof A3D !== 'undefined' ? A3D.ver : 0) * 100 + (typeof RA !== 'undefined' ? RA.ver : 0);
@@ -1157,10 +1167,11 @@ function drawWorld3D() {
     }
     lights.push({ x, y: Math.min(1.6, m.top * m.sy * 0.4), z: z + 0.7, col: W3_WIN, k: 0.8, glow: 0, pool: 2.0 + lv * 0.2, real: true, r: 4 + lv * 0.5 });
   }
-  for (const b of S.buildings) {
+  w3dKingdoms(AV, labels, lights, tm);
+  for (const b of w3dBldList()) {
     const x = b.x + 0.5, z = b.y + 0.5;
     if (!w3dInView(x, z, 1.5)) continue;
-    const col = TOWN_COLORS[b.town % TOWN_COLORS.length];
+    const col = b.kcol || TOWN_COLORS[b.town % TOWN_COLORS.length];
     // CC0 모델이 있으면 그걸(집은 두 가지 모양), 없거나 모르는 종류면 절차적 모델
     const btype = b.type === 'house' && hash2(b.x, b.y) > 0.5 ? 'house2' : b.type;
     const rb = w3dRealBld(b);
@@ -1236,6 +1247,13 @@ function drawWorld3D() {
     const sc = look.scale || 1;
     bars.push({ x, y: 1.12 * sc + 0.1 + (look.mount ? R3D.mountUp(W3_HS) : 0), z, f: b.hp / (b.maxHp || 3), col: '#e44' });
     if (b.loot) coins.push({ x, y: 0.5, z });
+  }
+  for (const e of envoys) { // 이웃 왕국 사신 (말 탄 전령)
+    const x = e.x / T, z = e.y / T; if (!w3dInView(x, z, 1.5)) continue;
+    const k = S.kingdoms[e.k]; if (!k) continue;
+    const look = w3dUnitLook(unitLook('rider', 'foe', kEra(k), kFaction(k)));
+    w3dRider(e, look, x, z, dt, { cloth: R3D.CLOTH.foe, swing: 0 }, BL);
+    labels.push({ x, y: 2.3, z, s: `${kCiv(k).icon} 사신`, war: e.kind === 'declare' });
   }
   for (const s of soldiers) { // 훈련된 아군 병사
     const x = s.x / T, z = s.y / T; if (!w3dInView(x, z, 1.5)) continue;
@@ -1364,7 +1382,8 @@ function w3dTPBlock(ptx, ptz, x, z) { // 숲 칸 · 건물 칸 · 마을 중심 
   const tx = Math.floor(x), tz = Math.floor(z), t = tileAt(tx, tz);
   if (tx === ptx && tz === ptz) return false;
   if (t === FOREST || t === MOUNTAIN || t === GOLD) return true;
-  for (const b of S.buildings) if (b.x === tx && b.y === tz) return true;
+  for (const b of w3dBldList()) if (b.x === tx && b.y === tz) return true;
+  if (S.kingdoms) for (const k of S.kingdoms) if (Math.abs(x - k.x - 0.5) < 1.1 && Math.abs(z - k.y - 0.5) < 1.1) return true;
   for (const tw of S.towns) if (Math.abs(x - tw.x - 0.5) < 1.1 && Math.abs(z - tw.y - 0.5) < 1.1) return true;
   return false;
 }
@@ -1582,4 +1601,38 @@ function w3dResBldGeo(type) {
     G.push({ g: box(0.06, 0.06, 0.02), c: '#fff', p: [0, 0.38, 0.1] });
   }
   return { main: R3D.merge(P), glow: G.length ? R3D.merge(G) : null, flag: null };
+}
+
+// ---------- 이웃 왕국 (kingdoms.js): 수도 + 둘레 건물 ----------
+let w3dBldN = -1, w3dBldK = null, w3dBldArr = [];
+function w3dBldList() { // 우리 건물 + 왕국 건물 (바뀔 때만 다시 합친다)
+  const kb = kBuildings();
+  if (w3dBldN !== S.buildings.length || w3dBldK !== kb || w3dBldArr.length !== S.buildings.length + kb.length || w3dBldArr[0] !== S.buildings[0]) {
+    w3dBldN = S.buildings.length; w3dBldK = kb; w3dBldArr = S.buildings.concat(kb);
+  }
+  return w3dBldArr;
+}
+function w3dKingdoms(AV, labels, lights, tm) {
+  if (!S.kingdoms) return;
+  for (const k of S.kingdoms) {
+    const x = k.x + 0.5, z = k.y + 0.5;
+    if (!w3dInView(x, z, 3)) continue;
+    const C = kCiv(k), lv = kCapLv(k), era = kEra(k);
+    const r = w3dUse(k, 'kcap|' + C.color + '|' + AV, () => { const group = new THREE.Group(), flag = w3dFlag(C.color); group.add(flag.mesh); return { group, flag, body: null, key: '' }; });
+    const m = r.m, real = w3dRealOK() && RA.has(W3_RHOUSE[era]), key = lv + '|' + era + '|' + real;
+    if (m.key !== key) {
+      if (m.body) { m.group.remove(m.body.group); if (m.body.dispose) m.body.dispose(); m.body = null; }
+      if (real) { m.body = w3dRealTown(lv, era); m.top = m.body.top; m.flag.mesh.position.set(...m.body.flag); }
+      else {
+        const g = new THREE.Group(), ac = typeof A3D !== 'undefined' ? A3D.castle(lv) : null;
+        if (ac) { const mm = new THREE.Mesh(ac.geo, A3D.mat); mm.castShadow = mm.receiveShadow = true; g.add(mm); m.flag.mesh.position.set(...ac.flag); m.top = ac.top; }
+        else { const cg = w3dCastle(lv), mm = new THREE.Mesh(cg.main, R3D.mats.vc); mm.castShadow = mm.receiveShadow = true; g.add(mm, new THREE.Mesh(cg.glow, R3D.mats.glow)); g.scale.set(1.08, 1.4, 1.08); m.flag.mesh.position.set(cg.flag[0] * 1.08, cg.flag[1] * 1.4, cg.flag[2] * 1.08); m.top = cg.top * 1.4; }
+        m.body = { group: g };
+      }
+      m.group.add(m.body.group); m.key = key;
+    }
+    m.group.position.set(x, 0, z); w3dWave(m.flag, tm);
+    labels.push({ x, y: m.top + 0.3, z, s: `${C.icon} ${C.name} · ${ERAS[era].name}`, war: k.st === 'war' });
+    lights.push({ x, y: Math.min(1.6, m.top * 0.4), z: z + 0.7, col: W3_WIN, k: 0.8, glow: 0, pool: 2.0 + lv * 0.2, real: true, r: 4 + lv * 0.5 });
+  }
 }

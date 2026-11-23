@@ -137,6 +137,7 @@ function moveEnt(e, dx, dy, r) {
 function newGame(opts) {
   opts = opts || {};
   const seed = (Date.now() & 0xffffff) ^ 0x5eed;
+  kOwner.fill(-1); envoys.length = 0;
   const { tiles, hp } = newWorld(seed);
   S = { seed, tiles, hp, wood: 0, stone: 0, gold: 0, towns: [], buildings: [], camps: [], horses: [], won: false, time: 0,
         player: { x: 0, y: 0, hp: 10, mounted: false, dir: 0 }, spawnT: 0,
@@ -159,6 +160,7 @@ function newGame(opts) {
   computeDerived();
   eraNewGame(opts, best); // 시대·군주 (늦은 시대면 마을도 미리 세운다)
   recomputeOwner();
+  kInit(best); // 이웃 왕국 3곳 (kingdoms.js)
   for (let k = 0; k < 6; k++) spawnCamp(best.x, best.y, 26);
   bandits.length = 0; arrows.length = 0; floats.length = 0; villagers.length = 0; soldiers.length = 0; shots.length = 0;
   recomputeOwner(); applyEraTheme();
@@ -172,8 +174,9 @@ function spawnCamp(avoidX, avoidY, minD) {
     const x = 4 + ri(W - 8), y = 4 + ri(H - 8);
     if (!neighborsLand(x, y)) continue;
     if (dist2(x, y, avoidX, avoidY) < minD * minD) continue;
-    if (owner[y * W + x] >= 0) continue;
+    if (owner[y * W + x] >= 0 || kOwner[y * W + x] >= 0) continue;
     let ok = true;
+    if (S.kingdoms) for (const kd of S.kingdoms) if (dist2(x, y, kd.x, kd.y) < 14 * 14) ok = false;
     for (const t of S.towns) if (dist2(x, y, t.x, t.y) < 18 * 18) ok = false;
     for (const c of S.camps) if (dist2(x, y, c.x, c.y) < 14 * 14) ok = false;
     if (!ok) continue;
@@ -196,7 +199,7 @@ function recomputeOwner() {
       if (x < 0 || y < 0 || x >= W || y >= H) continue;
       if (dist2(x, y, t.x, t.y) > r * r + r) continue;
       const i = y * W + x;
-      if (owner[i] >= 0 || S.tiles[i] === WATER) continue;
+      if (owner[i] >= 0 || S.tiles[i] === WATER || kOwner[i] >= 0) continue;
       owner[i] = t.id; ownedCount++;
     }
   }
@@ -214,6 +217,8 @@ function foundTownCheck() {
   const { x, y } = playerTile();
   if (owner[y * W + x] >= 0) return '이미 영토 안입니다';
   if (!landTile(x, y)) return '땅 위에 세워야 해요';
+  if (kOwner[y * W + x] >= 0) return `${kCiv(S.kingdoms[kOwner[y * W + x]]).name}의 땅입니다`;
+  if (S.kingdoms) for (const k of S.kingdoms) if (dist2(x, y, k.x, k.y) < (kRadius(k) + 4) ** 2) return `${kCiv(k).name} 수도와 너무 가까워요`;
   for (const t of S.towns) if (dist2(x, y, t.x, t.y) < 10 * 10) return '다른 마을과 너무 가까워요';
   for (const c of S.camps) if (dist2(x, y, c.x, c.y) < 7 * 7) return '산적 소굴이 너무 가까워요';
   return null;
@@ -372,9 +377,10 @@ function askWar() {
   const w = S.war, f = warFaction(w), t = townById(w.town);
   const we = w.era !== undefined ? w.era : S.era, FE = ERAS[we], rel = we > S.era ? '<b style="color:#ff8a7a">우리보다 앞선 문명!</b>' : we < S.era ? '우리보다 뒤처진 문명' : '우리와 같은 시대';
   const army = armyTotal(), deploy = Math.min(30, army);
-  $('warPanel').innerHTML = `<h2>⚔️ ${f.name} 침공!</h2>
+  const kd = kByWar(w), KC = kd && kCiv(kd);
+  $('warPanel').innerHTML = `<h2>⚔️ ${KC ? KC.icon + ' ' + KC.name : f.name} 침공!</h2>
     <div class="sub">${josa(f.name, '이가')} <b>${t ? t.name : '마을'}</b>${josaP(t ? t.name : '마을', '으로로')} 진군하고 있습니다. 적 위협도 ${'★'.repeat(Math.min(5, Math.max(1, Math.round(w.diff))))}</div>
-    <div class="foeciv">적 문명 <b>${FE.icon} ${FE.name}</b> · ${rel}<br><small>주력: ${mixNames(we)}</small></div>
+    <div class="foeciv">적 문명 <b>${FE.icon} ${FE.name}</b> · ${rel}<br><small>주력: ${mixText(warMix(w))}</small>${KC ? `<br><small>💪 ${KC.strong} · ⚠️ ${KC.weak}</small>` : ''}</div>
     <div style="font-size:17px;font-weight:800;margin:4px 0 12px;text-align:center">대규모 전투로 전환하시겠습니까?</div>
     <button class="opt primary" data-a="go"><span class="ic">⚔️</span><span>네<small>전장으로 이동해 민병 ${allyCount()}명${deploy ? ` + 훈련병 ${deploy}명` : ''}과 함께 수많은 적을 직접 쓸어버립니다. 적장을 쓰러뜨리면 승리${deploy ? ' · 쓰러진 병사는 군대에서 빠집니다' : ''}</small></span></button>
     <button class="opt" data-a="field"><span class="ic">🛡️</span><span>아니오<small>지금 화면에서 마을로 다가오는 적 군단(${warbandSize(w)}명)을 ${army ? `병사 ${army}명·` : '직접·'}망루로 막아냅니다</small></span></button>`;
@@ -406,7 +412,7 @@ function spawnWarband() {
   }
   if (sx === null) { sx = t.x + townRadius(t) + 2; sy = t.y; if (Math.hypot(sx * T - S.player.x, sy * T - S.player.y) < T * 10) sx = t.x - townRadius(t) - 2; }
   const n = warbandSize(w) - 1, hp = 3 + Math.round(w.diff * 0.7), we = w.era !== undefined ? w.era : S.era;
-  const mk = cmd => { const ut = cmd ? null : pickMix(ENEMY_MIX[we]), mh = cmd ? Math.round(14 * w.diff) : Math.max(2, Math.round(hp * UNITS[ut].hp));
+  const mk = cmd => { const ut = cmd ? null : pickMix(warMix(w)), mh = cmd ? Math.round(14 * w.diff) : Math.max(2, Math.round(hp * UNITS[ut].hp));
     return { war: true, cmd, ut, x: (sx + .5) * T + rr(-40, 40), y: (sy + .5) * T + rr(-40, 40), hp: mh, maxHp: mh,
     t: 0, vx: 0, vy: 0, atk: rr(0.8, 2.2), walk: rand() * 6, loot: 0, raidT: 0, prog: 0, bestD: 1e9 }; };
   for (let i = 0; i < n; i++) bandits.push(mk(false));
@@ -446,7 +452,7 @@ function warUnitAI(b, dt) {
 }
 function fieldWarWin() {
   const w = S.war, t = w && townById(w.town);
-  const gold = 30 + Math.round(w.diff * 20);
+  const gold = 30 + Math.round(w.diff * 20) + kWarResult(w, true);
   S.gold += gold; S.warsWon++; rulerStat('wars'); gainExp(40);
   S.war = null; S.warT = 0; S.nextWar = 150 + ri(80);
   banner('방어 성공!', `${warFaction(w).name} 격퇴 · 🪙+${gold} · 경험치 +40`, 3);
@@ -458,12 +464,17 @@ function onBattleEnd(win, st) {
   const w = S.war; const t = w && townById(w.town);
   if (st.lost) for (const k in st.lost) S.army[k] = Math.max(0, (S.army[k] | 0) - st.lost[k]); // 전사한 훈련병
   S.war = null; S.warT = 0; S.nextWar = 150 + ri(80);
+  const kx = kWarResult(w, win), kd = kByWar(w);
   if (win) {
-    const gold = 40 + st.kos + Math.round(w.diff * 30);
+    const gold = 40 + st.kos + Math.round(w.diff * 30) + kx;
     S.gold += gold; S.warsWon++; rulerStat('wars');
     if (t) t.pop = Math.min(townCap(t) + 5, t.pop + 4);
     gainExp(st.exp);
-    toast(`🏆 승리! 🪙+${gold}${t ? ` · ${t.name} 인구 +4` : ''}`, 3.5);
+    toast(w.attack && kd ? `🏆 ${kCiv(kd).name} 수도 약탈! 🪙+${gold} · 그들의 국력이 크게 줄었습니다` : `🏆 승리! 🪙+${gold}${t ? ` · ${t.name} 인구 +4` : ''}`, 3.5);
+  } else if (w.attack) { // 원정 실패: 마을은 무사, 금만 조금 잃는다
+    const lost = Math.floor(S.gold * 0.15); S.gold -= lost;
+    gainExp(Math.floor(st.exp / 2));
+    toast(`원정 실패… 🪙-${lost} · 군대가 퇴각했습니다`, 3.5);
   } else {
     if (t) { t.pop = Math.max(1, Math.floor(t.pop / 2)); }
     const lost = Math.floor(S.gold * 0.25); S.gold -= lost;
@@ -974,11 +985,13 @@ function drawMinimap(dt) {
       if (o >= 0) { const tc = parseInt(TOWN_COLORS[o % TOWN_COLORS.length].slice(1), 16); r = (r + (tc >> 16)) / 2; g = (g + (tc >> 8 & 255)) / 2; b = (b + (tc & 255)) / 2; }
       d[i * 4] = r; d[i * 4 + 1] = g; d[i * 4 + 2] = b; d[i * 4 + 3] = 255;
     }
+    kMinimap(d);
   }
   mmCtx.putImageData(mmImg, 0, 0);
   const p = playerTile();
   mmCtx.fillStyle = '#e22'; for (const c of S.camps) mmCtx.fillRect(c.x - 1, c.y - 1, 3, 3);
   mmCtx.fillStyle = '#8cf'; for (const s of soldiers) mmCtx.fillRect(Math.floor(s.x / T), Math.floor(s.y / T), 1, 1);
+  kMinimapMarks(mmCtx);
   mmCtx.fillStyle = '#fff'; for (const t of S.towns) mmCtx.fillRect(t.x - 1, t.y - 1, 3, 3);
   if (S.war) { const t = townById(S.war.town); if (t && (S.time * 4 | 0) % 2) { mmCtx.strokeStyle = '#f33'; mmCtx.strokeRect(t.x - 3, t.y - 3, 7, 7); } }
   mmCtx.fillStyle = (S.time * 3 | 0) % 2 ? '#fff' : '#ff0'; mmCtx.fillRect(p.x - 1, p.y - 1, 3, 3);
@@ -1004,8 +1017,10 @@ function load() {
     o.horses = o.horses.map(h => ({ ...h, vx: 0, vy: 0, t: 0, ridden: false, walk: 0, col: h.col || HORSE_COLS[ri(HORSE_COLS.length)] }));
     o.hero = o.hero || { lv: 1, exp: 0 }; o.warT = o.warT || 0; o.nextWar = o.nextWar || 80; o.warsWon = o.warsWon || 0; o.war = o.war || null;
     eraMigrate(o); // 옛 저장: 시대·군주·연대기 채워 넣기
-    S = o; bandits.length = 0; villagers.length = 0; soldiers.length = 0; shots.length = 0;
-    computeDerived(); recomputeOwner(); applyEraTheme();
+    S = o; bandits.length = 0; villagers.length = 0; soldiers.length = 0; shots.length = 0; envoys.length = 0;
+    computeDerived(); kOwner.fill(-1);
+    if (S.kingdoms && S.kingdoms.length) kRecompute(); // 왕국 땅을 먼저 (마을 영토가 겹치지 않게)
+    recomputeOwner(); kInit(); applyEraTheme();
     toast('이어서 플레이합니다', 1.5);
     if (S.war && !S.war.field) setTimeout(askWar, 600);
     return true;
@@ -1026,6 +1041,7 @@ function hudWorld() {
   const gk = g1 + g2 + g3;
   if (hudWorld.gk !== gk) { hudWorld.gk = gk; $('goal').innerHTML = `${g1}<div class="eraline">${g2}</div><div class="techline${rs ? '' : ' idle'}">${g3}</div><div class="ebar"><i style="width:${pr * 100}%"></i></div>`; }
   $('techBtn').classList.toggle('nag', !rs && S.towns.length > 0 && TECHS.some(t => !techAvail(t)));
+  $('diploBtn').classList.toggle('war', !!(S.kingdoms && S.kingdoms.some(k => k.st === 'war')));
   const wb = $('warBtn');
   if (S.war && S.war.field) { wb.style.display = 'block'; wb.textContent = `⚔️ 적 군단 ${bandits.filter(b => b.war).length}명 · 위치`; }
   else wb.style.display = 'none';
@@ -1137,6 +1153,7 @@ function worldTap(sx, sy) {
   if (MODE !== 'world' || paused || !S || !S.towns) return;
   if (typeof evTap === 'function' && evTap(sx, sy)) return; // 3인칭: 마을 사람 톡 → 말 걸기
   const q = screenToWorldPx(sx, sy); if (!q) return;
+  const kc = kNearCapital(q.x / T, q.y / T + 0.2, 1.7); if (kc) { openDiplo(S.kingdoms.indexOf(kc)); return; } // 이웃 왕국 수도 → 외교
   const a = pickTarget(q.x, q.y);
   if (a && a.kind === 'mil') { openArmyPanel(); return; } // 병영·궁술장·마구간: 훈련 화면
   if (a) startAuto(a);

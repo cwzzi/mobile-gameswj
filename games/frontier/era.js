@@ -111,7 +111,7 @@ function eraLook(kind, f, era) {
   return Object.assign({ role: kind, era: e }, typeof L === 'function' ? L(f || eraCur().factions[0]) : L);
 }
 function eraVillager() { const v = eraCur().looks.villager; return { body: v.cols[ri(v.cols.length)], hat: v.hat, legs: v.legs }; }
-function warFaction(w) { const E = ERAS[w && w.era !== undefined ? w.era : S.era] || eraCur(); return E.factions[((w && w.faction) | 0) % E.factions.length]; }
+function warFaction(w) { if (typeof kByWar === 'function' && kByWar(w)) return kFaction(kByWar(w)); const E = ERAS[w && w.era !== undefined ? w.era : S.era] || eraCur(); return E.factions[((w && w.faction) | 0) % E.factions.length]; }
 function buildUnlocked(k) { return !BUILD[k].tech || techHas(BUILD[k].tech); }
 
 // ---------- 연구 점수 (옛 '발전도' S.dev = 쓰지 않은 연구 점수 비축) ----------

@@ -55,7 +55,7 @@ function frame(now) {
     } else {
       if (USE3D) b3Cleanup(); // 전투 장면 정리(dispose)
       if (!paused) {
-        updateWorld(dt); if (MODE === 'world') evUpdate(dt); updateParts(dt); updateFloats(dt);
+        updateWorld(dt); if (MODE === 'world') { evUpdate(dt); kTick(dt); kUpdateEnvoys(dt); } updateParts(dt); updateFloats(dt);
         saveT += dt; if (saveT > 10) { saveT = 0; save(); }
       }
       tickBanner(dt);

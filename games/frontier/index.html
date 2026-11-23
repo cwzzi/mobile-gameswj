@@ -32,6 +32,22 @@
   .sideBtn { right: 8px; width: 44px; height: 44px; border-radius: 12px; color: var(--txt); font-size: 21px; padding: 0; }
   #techBtn { top: calc(162px + env(safe-area-inset-top)); }
   #armyBtn { top: calc(212px + env(safe-area-inset-top)); }
+  #diploBtn { top: calc(262px + env(safe-area-inset-top)); }
+  #diploBtn.war { border: 2px solid #ff7a6a; animation: pulse 1s infinite; }
+  #kPanel { padding: 12px 14px; max-height: 92vh; }
+  #kPanel .opt { padding: 7px 10px; font-size: 14px; margin-bottom: 5px; line-height: 1.35; }
+  #kPanel .opt .ic { font-size: 21px; width: 26px; }
+  #kPanel .close { position: sticky; bottom: 0; margin-bottom: 0; box-shadow: 0 -6px 14px rgba(0,0,0,.45); min-height: 46px; }
+  .khead { display: flex; align-items: center; gap: 10px; margin: 2px 0 6px; }
+  .kcrest { flex: none; width: 46px; height: 52px; background: var(--kc); border: 2px solid #f6f2e6; border-radius: 6px 6px 23px 23px;
+    display: flex; align-items: center; justify-content: center; font-size: 24px; box-shadow: inset 0 -8px 12px rgba(0,0,0,.3), 0 3px 8px rgba(0,0,0,.4); }
+  .kcard { border: 1px solid var(--line); border-left: 4px solid var(--kc); border-radius: 12px; padding: 8px 10px 4px; margin-bottom: 10px; background: rgba(0,0,0,.18); }
+  .ktrait { font-size: 12.5px; line-height: 1.5; background: rgba(0,0,0,.25); border-radius: 8px; padding: 6px 8px; margin: 4px 0 6px; color: #e6e0d0; }
+  .ksay { font-size: 14.5px; line-height: 1.6; background: rgba(255,248,225,.08); border-radius: 10px; padding: 9px 11px; margin: 4px 0 8px; font-style: italic; }
+  .krel { position: relative; height: 7px; background: rgba(0,0,0,.45); border-radius: 4px; overflow: hidden; margin-top: 4px; }
+  .krel i { position: absolute; top: 0; bottom: 0; border-radius: 4px; }
+  .krel b { position: absolute; left: 50%; top: -2px; bottom: -2px; width: 2px; background: #fff8; }
+  .krelT { font-size: 12px; color: #c8d0c0; margin: 3px 0 7px; }
   #techBtn.nag { border: 2px solid var(--accent); animation: pulseG 1.1s infinite; }
   #goal .techline { color: #cfe6ff; font-weight: 700; white-space: nowrap; margin-top: 1px; }
   #goal .techline.idle { color: #ffe08a; }
@@ -179,6 +195,7 @@
 <button id="menuBtn" class="hud glass">☰</button>
 <button id="techBtn" class="hud glass sideBtn" aria-label="기술 연구">🔬</button>
 <button id="armyBtn" class="hud glass sideBtn" aria-label="군대">🪖</button>
+<button id="diploBtn" class="hud glass sideBtn" aria-label="이웃 왕국">🏰</button>
 <div id="hint" class="hud glass"></div>
 <div id="toast" class="hud"></div>
 <div id="actBtn" class="btn wbtn">행동</div>
@@ -213,6 +230,7 @@
 <div id="startPanel" class="panel"></div>
 <div id="techPanel" class="panel"></div>
 <div id="armyPanel" class="panel"></div>
+<div id="kPanel" class="panel"></div>
 <div id="evPanel" class="panel"></div>
 <div id="menuPanel" class="panel help">
   <h2>개척왕</h2>
@@ -255,6 +273,7 @@
 <script src="world.js"></script>
 <script src="era.js"></script>
 <script src="tech.js"></script>
+<script src="kingdoms.js"></script>
 <script src="world3d.js"></script>
 <script src="battle.js"></script>
 <script src="battle3d.js"></script>

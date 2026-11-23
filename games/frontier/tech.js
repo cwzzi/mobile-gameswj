@@ -98,7 +98,7 @@ function unitLook(ut, side, era, f) {
 
 // ---------- 기술 ----------
 function techHas(id) { return !!(S && S.techs && S.techs.includes(id)); }
-function techBonus(k) { let s = 0; if (S && S.techs) for (const id of S.techs) { const e = TECH[id] && TECH[id].eff; if (e && e[k]) s += e[k]; } return s; }
+function techBonus(k) { let s = typeof kBonus === 'function' ? kBonus(k) : 0; if (S && S.techs) for (const id of S.techs) { const e = TECH[id] && TECH[id].eff; if (e && e[k]) s += e[k]; } return s; }
 function techsBelowEra(era) { return TECHS.filter(t => t.era < era).map(t => t.id); }
 function researchRate() { return S.towns.length ? Math.max(0.5, devRate() * (1 + techBonus('research'))) : 0; }
 const RP_BANK = 150;
@@ -200,7 +200,7 @@ function foeTick(dt) {
   S.foeLv = clamp(S.foeLv + dt / 300, lo, hi);
   const fe = foeEra();
   if (S.foeShown === undefined) S.foeShown = fe;
-  if (fe > S.foeShown) { S.foeShown = fe; toast(`📯 적 세력이 <b>${ERAS[fe].icon} ${ERAS[fe].name}</b>에 들어섰습니다<br><small>${mixNames(fe)}</small>`, 4); }
+  if (fe > S.foeShown) { S.foeShown = fe; toast(`📯 떠도는 침략 군단이 <b>${ERAS[fe].icon} ${ERAS[fe].name}</b>에 들어섰습니다<br><small>${mixNames(fe)}</small>`, 4); }
   else if (fe < S.foeShown) S.foeShown = fe;
 }
 function foeEra() { return clamp(Math.floor((S.foeLv === undefined ? S.era : S.foeLv) + 1e-6), 0, ERAS.length - 1); }

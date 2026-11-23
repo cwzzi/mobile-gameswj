@@ -38,6 +38,9 @@ function startBattle(war) {
   // 아군
   for (let i = 0; i < allyCount(); i++) addUnit('ally', 0, 200 + rr(-60, 60), 640 + rr(-120, 120));
   deployArmy(Math.min(30, armyTotal()), B.allyBase); // 훈련된 군대 (병종 그대로)
+  // 동맹 기마국의 기마 원군
+  const hk = S.kingdoms && S.kingdoms.find(k => kCiv(k).id === 'horse' && k.st === 'ally' && S.kingdoms.indexOf(k) !== war.kingdom);
+  if (hk) { for (let i = 0; i < 6; i++) addUnit('ally', 0, 200 + rr(-40, 40), 640 + rr(-160, 160), null, kEra(hk) >= 2 ? 'knight' : 'rider'); setTimeout(() => toast(`🐎 동맹 ${kCiv(hk).name}의 기마 원군 6기가 합류했습니다!`, 2.5), 1500); }
   // 적
   B.bases.forEach((b, i) => {
     if (!b.hq) { b.officer = addUnit('officer', 1, b.x + 10, b.y, b); b.officer.name = `${f.name.split(' ')[0]} 부장`; }
@@ -67,7 +70,7 @@ function addUnit(kind, team, x, y, home, ut) {
     officer: { hp: Math.round(28 * d), sp: 82, r: 14 },
     boss: { hp: Math.round(110 * d), sp: 96, r: 18 },
   }[kind];
-  if (kind === 'grunt' && !ut) ut = pickMix(ENEMY_MIX[clamp(B.era, 0, ENEMY_MIX.length - 1)]);
+  if (kind === 'grunt' && !ut) ut = pickMix(warMix(B.war));
   if (kind === 'ally' && !ut) ut = ERA_BASIC[S.era];
   const U = ut ? UNITS[ut] : null;
   let hp = st.hp, sp = st.sp, r = st.r;
