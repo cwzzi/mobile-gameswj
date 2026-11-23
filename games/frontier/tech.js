@@ -77,7 +77,7 @@ function unitLook(ut, side, era, f) {
   if (side === 'ally') { const a = E.looks.ally; base = { body: a.body, trim: a.trim, legs: a.legs, plume: '#4fa3ff', helm: '#9aa4b0', band: '#d9b36a' }; }
   else if (side === 'bandit') { const b = E.looks.bandit; base = { body: b.body, trim: b.trim, legs: b.legs, plume: '#2a1a12', helm: '#3a3a3a', band: b.helm }; }
   else { f = f || E.factions[0]; base = { body: f.color, trim: '#2a2218', legs: '#2a2420', plume: f.plume, helm: '#8a8e96', band: f.plume }; }
-  L = { body: base.body, trim: base.trim, legs: base.legs, plume: base.plume };
+  L = { body: base.body, trim: base.trim, legs: base.legs, plume: base.plume, ut, side, era }; // ut/side/era: 3D 사실적 인물 선택용
   const hood = side === 'bandit' ? '#2a2220' : '#4a3a2a';
   switch (ut) {
     case 'club': Object.assign(L, side === 'bandit' ? { hat: 'hood', helm: base.band, weapon: 'club', tint: base.body } : { hat: 'band', helm: base.band, weapon: 'club', kit: 'tribe' }); break;

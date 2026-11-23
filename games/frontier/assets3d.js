@@ -271,7 +271,9 @@ const A3D = (() => {
       const n = g.attributes.position.count, I = new Uint16Array(n * 4), Wt = new Float32Array(n * 4);
       for (let i = 0; i < n; i++) { I[i * 4] = j; Wt[i * 4] = 1; }
       g.setAttribute('skinIndex', new THREE.BufferAttribute(I, 4)); g.setAttribute('skinWeight', new THREE.BufferAttribute(Wt, 4));
-      parts[m.name] = { geo: g, skin: false };
+      // 사실적 인물(real/chars)에 옮겨 달 무기·방패용: 손 슬롯 뼈 기준 지오메트리
+      const gl = plainGeo(m.geometry, false); gl.applyMatrix4(mbone.copy(bones[j].matrixWorld).invert().multiply(m.matrixWorld));
+      parts[m.name] = { geo: g, skin: false, local: gl, bone: bones[j].name };
     }
     // 템플릿 루트: 원래 메시는 떼어내고 뼈대만 남긴다
     for (const m of [...skinned, ...rigid]) m.parent.remove(m);
@@ -375,6 +377,7 @@ const A3D = (() => {
       let hit = false;
       if (mode === 'armor') hit = sat < 0.16 && lum > 0.42 || (b > r * 1.12 && b > gg * 0.98 && sat > 0.2);
       else if (mode === 'green') hit = gg > r * 1.15 && gg >= b * 0.95 && sat > 0.25;
+      else if (mode === 'blue') hit = b > r * 1.12 && b > gg * 0.98 && sat > 0.2; // 방패 색칠만 (칼날은 그대로)
       if (!hit) continue;
       const k = Math.min(1.6, lum / Math.max(0.25, tl)) * (mode === 'armor' ? 0.85 : 0.95), mix = mode === 'armor' ? 0.62 : 0.9;
       p[i] = r + (Math.min(255, R0 * k) - r) * mix; p[i + 1] = gg + (Math.min(255, G0 * k) - gg) * mix; p[i + 2] = b + (Math.min(255, B0 * k) - b) * mix;
@@ -409,15 +412,236 @@ const A3D = (() => {
     if (g === undefined) { g = merge(list.map(n => C.parts[n] && C.parts[n].geo).filter(Boolean)); C.geoCache.set(key, g); }
     return g;
   }
-  A.humanKey = look => { const p = plan(look); return 'A|' + p.ch + '|' + p.extra.join(',') + '|' + (p.tint || '') + '|' + ((look && look.scale) || 1) + (p.prop ? '|' + p.prop : ''); };
+  // ---------- 사실적 인물 (assets/real/chars) ----------
+  // 메시+뼈대만 있고, 애니메이션은 KayKit 클립을 옮겨 쓴다 (뼈 이름·쉬는 자세 회전이 같음 → 회전 트랙 그대로, 엉덩이 위치만 키에 맞춰 늘림)
+  // 준비 안 됐거나 실패하면 KayKit 그대로. ?noreal 이면 안 불러온다
+  const RNAMES = ['ruler_tribal', 'ruler_king', 'ruler_emperor', 'soldier_spear', 'soldier_archer', 'soldier_sword', 'villager'];
+  const R_H = 1.72;                 // 사실적 몸 기준 키(m) → KayKit 과 같은 화면 키(1.2 단위 × scale)로 맞춤
+  const R_K = 0.64;                 // KayKit(큰 머리) 화면 키의 약 1.15배 — 사실적 비율은 가늘어서 조금 크게 둔다
+  const R_WS = 0.48;                // KayKit 무기(손 슬롯 기준, 한손검 1.78) → 사실적 크기(약 0.85m)
+  const HIPS_SCALE = 2.2186, HIPS_OFFSET_Z = -0.0247;
+  const R_ARM = 0.32;               // 팔 내림 각(rad)
+  const RCK = n => 'r_' + n;
+  const hasReal = n => A.realChars && !!CH[RCK(n)];
+  // 진영색: 아군(파랑)과 헷갈리지 않게 적은 파랑·청록 계열을 보라 쪽으로 돌리고, 채도·밝기를 읽히는 범위로
+  const teamCache = new Map();
+  const hex2 = v => ('0' + Math.round(Math.max(0, Math.min(255, v))).toString(16)).slice(-2);
+  function foeTint(c) {
+    if (!c) return '#a8352a';
+    let t = teamCache.get(c); if (t) return t;
+    let x = c.replace('#', ''); if (x.length === 3) x = x.split('').map(ch => ch + ch).join('');
+    if (!/^[0-9a-f]{6}$/i.test(x)) x = new THREE.Color(c).getHexString();
+    const r = parseInt(x.slice(0, 2), 16) / 255, g = parseInt(x.slice(2, 4), 16) / 255, b = parseInt(x.slice(4, 6), 16) / 255;
+    const mx = Math.max(r, g, b), mn = Math.min(r, g, b), l0 = (mx + mn) / 2, d = mx - mn;
+    const s0 = d ? d / (1 - Math.abs(2 * l0 - 1)) : 0;
+    let h = !d ? 0 : mx === r ? ((g - b) / d + 6) % 6 : mx === g ? (b - r) / d + 2 : (r - g) / d + 4; h *= 60;
+    if (s0 < 0.2) h = 4;                      // 회색·검정 진영 → 붉은 계열
+    else if (h > 170 && h < 260) h = 278;     // 파랑·청록 진영 → 보라 (아군 파랑과 구분)
+    const S_ = Math.max(0.58, Math.min(0.8, s0)), L_ = Math.max(0.36, Math.min(0.46, l0));
+    // HSL → RGB (sRGB)
+    const C = (1 - Math.abs(2 * L_ - 1)) * S_, X = C * (1 - Math.abs((h / 60) % 2 - 1)), m = L_ - C / 2;
+    const [r1, g1, b1] = h < 60 ? [C, X, 0] : h < 120 ? [X, C, 0] : h < 180 ? [0, C, X] : h < 240 ? [0, X, C] : h < 300 ? [X, 0, C] : [C, 0, X];
+    t = '#' + hex2((r1 + m) * 255) + hex2((g1 + m) * 255) + hex2((b1 + m) * 255);
+    teamCache.set(c, t);
+    return t;
+  }
+  // 무기: KayKit 무기 메시(손 슬롯에 붙음) 이름과 그걸 가진 캐릭터
+  const KW = { '1H_Sword': 'knight', '2H_Sword': 'knight', 'Badge_Shield': 'knight', '1H_Axe': 'barbarian', '2H_Axe': 'barbarian', 'Barbarian_Round_Shield': 'barbarian' };
+  // look → 사실적 몸/색/무기. 해당 없으면 null (→ KayKit)
+  function realPlan(o) {
+    if (!A.realChars || o.noreal) return null;
+    const role = o.role, era = o.era | 0, ut = o.ut, foe = o.side === 'foe' || role === 'grunt' || role === 'officer' || role === 'boss';
+    let rc = null, tint = null, mode = null, w = [], prop = null, rng = null, atk = 'atk', k = 1;
+    const melee = wp => {
+      if (wp === 'spear' || wp === 'pike') { rc = 'soldier_spear'; prop = wp; }
+      else if (wp === 'glaive') { rc = 'soldier_sword'; w = ['2H_Sword']; atk = 'atk2'; }
+      else if (wp === 'axe' || wp === 'club') { rc = 'soldier_sword'; w = ['1H_Axe']; }
+      else { rc = 'soldier_sword'; w = ['1H_Sword', 'Badge_Shield']; }
+    };
+    if (role === 'player') {
+      if (era <= 0) { rc = 'ruler_tribal'; w = ['2H_Axe']; atk = 'atk2'; }
+      else if (era === 1) { rc = 'ruler_king'; tint = '#b07a2a'; mode = 'red'; prop = 'spear'; }
+      else if (era === 2) { rc = 'ruler_king'; w = ['1H_Sword', 'Badge_Shield']; }
+      else { rc = 'ruler_emperor'; w = ['2H_Sword']; atk = 'atk2'; }
+      k = 1.08;
+    } else if (role === 'villager') { rc = 'villager'; tint = o.body || null; mode = 'beige'; }
+    else if (role === 'officer' || role === 'boss') {
+      const boss = role === 'boss';
+      rc = era <= 0 ? 'ruler_tribal' : boss && era >= 2 ? 'ruler_emperor' : 'ruler_king';
+      tint = foeTint(o.body); mode = rc === 'ruler_tribal' ? 'fur' : rc === 'ruler_king' ? 'red' : 'purple';
+      if (o.weapon === 'glaive') { w = [era <= 0 ? '2H_Axe' : '2H_Sword']; atk = 'atk2'; }
+      else if (o.weapon === 'axe') w = ['1H_Axe', 'Barbarian_Round_Shield'];
+      else w = ['1H_Sword', 'Badge_Shield'];
+      k = 1.08;
+    } else if (ut) {
+      switch (ut) {
+        case 'sling': rc = 'soldier_archer'; prop = 'sling'; rng = 't'; break;
+        case 'archer': rc = 'soldier_archer'; prop = 'bow'; rng = '1'; break;
+        case 'xbow': rc = 'soldier_archer'; prop = 'xbow'; rng = '2'; break;
+        case 'musket': rc = 'soldier_archer'; prop = 'musket'; rng = '2'; break;
+        case 'spear': case 'pike': case 'rider': rc = 'soldier_spear'; prop = ut === 'pike' ? 'pike' : 'spear'; break;
+        case 'knight': rc = 'soldier_sword'; prop = 'spear'; break;
+        case 'club': if (o.side === 'bandit') { rc = 'soldier_archer'; w = ['1H_Axe']; } else melee('club'); break;
+        default: melee(o.weapon);
+      }
+    } else if (role === 'ally' || role === 'grunt') melee(o.weapon);
+    else if (role === 'bandit') { rc = 'soldier_archer'; w = o.weapon === 'sword' ? ['1H_Sword'] : ['1H_Axe']; }
+    else return null;
+    if (!rc || !hasReal(rc)) return null;
+    if (role !== 'player' && role !== 'villager' && role !== 'officer' && role !== 'boss') {
+      tint = foe ? foeTint(o.body) : o.body || null;
+      mode = rc === 'soldier_archer' ? 'green' : rc === 'soldier_sword' ? 'white' : 'beige';
+    }
+    w = w.filter(n => CH[KW[n]] && CH[KW[n]].parts[n]);
+    return { rc, tint, mode, w, prop, rng, atk, k, lod: !!o.lod };
+  }
+  // 사실적 텍스처 색 바꾸기. 해당 부분의 평균 밝기를 목표색에 맞추고 명암은 살린다
+  function realTex(rc, tint, mode) {
+    const C = CH[RCK(rc)], key = (tint || '-') + mode;
+    let t = C.texCache.get(key); if (t) return t;
+    if (!tint || !mode || !C.map || !C.map.image) { C.texCache.set(key, C.map); return C.map; }
+    const img = C.map.image, wd = img.width, ht = img.height;
+    const cv = document.createElement('canvas'); cv.width = wd; cv.height = ht;
+    const g = cv.getContext('2d'); g.drawImage(img, 0, 0);
+    const d = g.getImageData(0, 0, wd, ht), p = d.data, n = p.length / 4, hit = new Uint8Array(n);
+    let sum = 0, cnt = 0;
+    for (let i = 0; i < n; i++) {
+      const r = p[i * 4], gg = p[i * 4 + 1], b = p[i * 4 + 2];
+      const mx = Math.max(r, gg, b), mn = Math.min(r, gg, b), sat = mx ? (mx - mn) / mx : 0, lum = (0.3 * r + 0.59 * gg + 0.11 * b) / 255;
+      let h = false;
+      if (mode === 'beige') h = sat > 0.06 && sat < 0.42 && r - gg < 26 && gg > b && lum > 0.3;            // 베이지·올리브 천 (피부는 r-g 가 커서 빠짐)
+      else if (mode === 'green') h = gg > r * 1.12 && gg >= b * 0.95 && sat > 0.22;
+      else if (mode === 'white') h = sat < 0.1 && lum > 0.62;                                              // 흰 겉옷
+      else if (mode === 'red') h = r > gg * 1.7 && r > b * 1.5 && sat > 0.45;                               // 붉은 망토·옷 (금색은 빠짐)
+      else if (mode === 'purple') h = r > gg * 1.25 && b > gg * 1.35 && sat > 0.35;
+      else if (mode === 'fur') h = sat > 0.25 && sat < 0.75 && r > b * 1.4 && r - gg > 8 && lum > 0.12 && lum < 0.5; // 갈색 가죽·털
+      if (h) { hit[i] = 1; sum += lum; cnt++; }
+    }
+    if (cnt) {
+      cA.set(tint);
+      const legacy = THREE.ColorManagement && THREE.ColorManagement.legacyMode;
+      const cv8 = v => legacy ? v * 255 : Math.pow(v, 1 / 2.2) * 255;
+      const R0 = cv8(cA.r), G0 = cv8(cA.g), B0 = cv8(cA.b), tl = (0.3 * R0 + 0.59 * G0 + 0.11 * B0) / 255 || 0.01;
+      const avg = sum / cnt, mix = mode === 'fur' ? 0.55 : 0.92;
+      for (let i = 0; i < n; i++) {
+        if (!hit[i]) continue;
+        const r = p[i * 4], gg = p[i * 4 + 1], b = p[i * 4 + 2], lum = (0.3 * r + 0.59 * gg + 0.11 * b) / 255;
+        const s = Math.min(1.8, Math.pow(lum / avg, 0.85)) * Math.min(1.35, Math.max(1, 0.16 / tl)); // 아주 어두운 목표색만 살짝 밝게
+        p[i * 4] = r + (Math.min(255, R0 * s) - r) * mix; p[i * 4 + 1] = gg + (Math.min(255, G0 * s) - gg) * mix; p[i * 4 + 2] = b + (Math.min(255, B0 * s) - b) * mix;
+      }
+      g.putImageData(d, 0, 0);
+    }
+    t = new THREE.CanvasTexture(cv); t.flipY = false; t.encoding = THREE.sRGBEncoding; t.anisotropy = 2;
+    C.texCache.set(key, t);
+    return t;
+  }
+  // KayKit 클립 → 사실적 리그: 회전 그대로, 엉덩이 위치 ×HIPS_SCALE, 그 밖의 위치·크기·없는 뼈 트랙은 버림
+  // 서 있기·뛰기는 팔 흔들림(윗팔)과 엉덩이 들썩임을 조금 줄인다 (사실적 비율에선 KayKit 동작이 과장돼 보임)
+  let rclipSet = null; const rrclips = {};
+  const qa = new THREE.Quaternion(), qb = new THREE.Quaternion();
+  const qm = new THREE.Quaternion(), qd = new THREE.Quaternion(), ZAX = new THREE.Vector3(0, 0, 1);
+  function retarget(clip, calm, drop, seat) {
+    const C = CH[RCK(RNAMES.find(n => CH[RCK(n)]))];
+    const names = new Set(C.skeleton.bones.map(b => b.name));
+    const tracks = [];
+    for (const t of clip.tracks) {
+      const i = t.name.lastIndexOf('.'), node = t.name.slice(0, i), prop = t.name.slice(i + 1);
+      if (!names.has(node)) continue;
+      if (prop === 'quaternion') {
+        const arm = /^upperarm\.?([lr])$/.exec(node);
+        if (arm && (calm || drop)) {
+          // calm: 클립 평균 자세 쪽으로 흔들림을 75%로 / drop: 가슴 기준 앞축(z)으로 팔을 몸 쪽으로 내림 (사실적 어깨는 좁아 KayKit 팔이 벌어져 보임)
+          const v = t.values.slice();
+          if (calm) {
+            qm.set(0, 0, 0, 0);
+            for (let j = 0; j < v.length; j += 4) { qa.fromArray(v, j); if (j && qa.dot(qm) < 0) { qa.x *= -1; qa.y *= -1; qa.z *= -1; qa.w *= -1; } qm.x += qa.x; qm.y += qa.y; qm.z += qa.z; qm.w += qa.w; }
+            qm.normalize();
+            for (let j = 0; j < v.length; j += 4) { qa.fromArray(v, j); qb.copy(qm).slerp(qa, 0.75); qb.toArray(v, j); }
+          }
+          if (drop) { qd.setFromAxisAngle(ZAX, arm[1] === 'l' ? -drop : drop); for (let j = 0; j < v.length; j += 4) { qa.fromArray(v, j); qa.premultiply(qd); qa.toArray(v, j); } }
+          tracks.push(new THREE.QuaternionKeyframeTrack(t.name, t.times, v));
+        } else tracks.push(t);
+      } else if (prop === 'position' && node === 'hips') {
+        const v = t.values.slice();
+        let my = 0; for (let j = 1; j < v.length; j += 3) my += v[j]; my /= v.length / 3;
+        for (let j = 0; j < v.length; j += 3) {
+          const y = calm ? my + (v[j + 1] - my) * 0.6 : v[j + 1];
+          v[j] *= HIPS_SCALE; v[j + 1] = y * HIPS_SCALE; v[j + 2] = v[j + 2] * HIPS_SCALE + HIPS_OFFSET_Z;
+          if (seat) { v[j] = 0; v[j + 2] = HIPS_OFFSET_Z; } // 말 위: 의자용 엉덩이 뒤로 빼기를 없애 안장 한가운데에
+        }
+        tracks.push(new THREE.VectorKeyframeTrack(t.name, t.times, v));
+      }
+    }
+    return new THREE.AnimationClip(clip.name, clip.duration, tracks);
+  }
+  function realClips() {
+    if (rclipSet) return rclipSet;
+    rclipSet = {};
+    for (const k in clips) { const loco = k === 'idle' || k === 'run' || k === 'walk'; rclipSet[k] = retarget(clips[k], loco, loco || k === 'sit' ? R_ARM : k === 'die' ? 0 : R_ARM * 0.4, k === 'sit'); }
+    return rclipSet;
+  }
+  const realR = k => rrclips[k] || (rclips[k] ? (rrclips[k] = retarget(rclips[k], false)) : null);
+  // 손 무기·방패: KayKit 무기 메시를 사실적 손 슬롯 뼈에 스키닝 (같은 스켈레톤 → 메시 1개, KayKit 아틀라스 재질)
+  const mW = new THREE.Matrix4(), mWs = new THREE.Matrix4().makeScale(R_WS, R_WS, R_WS);
+  function realWeaponGeo(rc, list, lod) {
+    const C = CH[RCK(rc)], key = 'w|' + list.join(',') + (lod ? '|lo' : '');
+    if (C.geoCache.has(key)) return C.geoCache.get(key);
+    const bones = C.skeleton.bones, bmi = new THREE.Matrix4().copy(C.bindMatrix).invert(), out = [];
+    for (const n of list) {
+      const src = CH[KW[n] + (lod && CH[KW[n] + '_lo'] ? '_lo' : '')] || CH[KW[n]], P = src && src.parts[n];
+      if (!P || !P.local) continue;
+      const j = bones.findIndex(b => b.name === P.bone); if (j < 0) continue;
+      const g = P.local.clone();
+      mW.copy(C.skeleton.boneInverses[j]).invert().multiply(mWs); mW.premultiply(bmi); g.applyMatrix4(mW);
+      const cnt = g.attributes.position.count, I = new Uint16Array(cnt * 4), Wt = new Float32Array(cnt * 4);
+      for (let i = 0; i < cnt; i++) { I[i * 4] = j; Wt[i * 4] = 1; }
+      g.setAttribute('skinIndex', new THREE.BufferAttribute(I, 4)); g.setAttribute('skinWeight', new THREE.BufferAttribute(Wt, 4));
+      out.push(g);
+    }
+    const g = out.length ? merge(out) : null;
+    C.geoCache.set(key, g);
+    return g;
+  }
+
+  // 풀링 키 (같은 look 객체면 다시 계산하지 않는다)
+  const keyMemo = new WeakMap();
+  A._ch = CH; // 디버그용
+  A.foeTint = foeTint; // 적 진영색 (battle3d 의 먼 KayKit 졸병도 같은 색으로)
+  A.humanKey = look => {
+    look = look || {};
+    const m = keyMemo.get(look); if (m && m.v === A.ver) return m.k;
+    const sc = look.scale || 1, rp = realPlan(look);
+    let k;
+    if (rp) k = 'R|' + rp.rc + '|' + rp.w.join(',') + '|' + (rp.tint || '') + '|' + sc + '|' + (rp.prop || '') + (rp.lod ? '|lo' : '');
+    else { const p = plan(look); k = 'A|' + p.ch + '|' + p.extra.join(',') + '|' + (p.tint || '') + '|' + sc + (p.prop ? '|' + p.prop : ''); }
+    keyMemo.set(look, { v: A.ver, k });
+    return k;
+  };
   A.human = look => {
-    if (!A.chars) return null;
+    if (!A.chars || !clips) return null;
+    look = look || {};
+    const rp = realPlan(look);
+    if (rp) {
+      const C = CH[RCK(rp.rc)], geo = charGeo(RCK(rp.rc), Object.keys(C.parts).filter(n => C.parts[n].skin));
+      if (geo) {
+        const wg = rp.w.length ? realWeaponGeo(rp.rc, rp.w, rp.lod) : null;
+        const wsrc = rp.w.length ? KW[rp.w[0]] : null;
+        return rigHuman(look, {
+          C, geo, mat: charMat(realTex(rp.rc, rp.tint, rp.mode)), clipSet: realClips(), getR: realR,
+          wgeo: wg, wmat: wg ? charMat(tintTex(wsrc, rp.tint, 'blue')) : null,
+          prop: rp.prop, rng: rp.rng, atk: rp.atk, k: rp.k * R_K, norm: 1 / R_H, sitDrop: 0.9 / R_H, real: true,
+        });
+      }
+    }
     const pl = plan(look);
-    const C = CH[pl.ch]; if (!C || !clips) return null;
+    const C = CH[pl.ch]; if (!C) return null;
     const bodyKey = pl.body || pl.ch;
     const geo = charGeo(pl.ch, [...BODY[bodyKey], ...pl.extra]); if (!geo) return null;
-    const mat = charMat(tintTex(pl.ch, pl.tint, pl.mode));
-    // 뼈대 복제 + 스킨 메시
+    return rigHuman(look, { C, geo, mat: charMat(tintTex(pl.ch, pl.tint, pl.mode)), clipSet: clips, getR: k => rclips[k], prop: pl.prop, rng: pl.rng, atk: pl.atk, k: pl.k || 1, norm: C.norm, sitDrop: 0.36 });
+  };
+  // 공용: 뼈대 복제 + 스킨 메시 + 손 무기 + 애니메이션 상태
+  function rigHuman(look, Q) {
+    const C = Q.C;
     const rig = THREE.SkeletonUtils.clone(C.scene);
     const bones = [];
     const names = C.skeleton.bones.map(b => b.name);
@@ -425,41 +649,43 @@ const A3D = (() => {
     for (const n of names) bones.push(byName.get(n));
     if (bones.some(b => !b)) return null;
     const skel = new THREE.Skeleton(bones, C.skeleton.boneInverses.map(m => m.clone()));
-    const mesh = new THREE.SkinnedMesh(geo, mat);
+    const mesh = new THREE.SkinnedMesh(Q.geo, Q.mat);
     mesh.frustumCulled = false; mesh.castShadow = !look.lod; mesh.receiveShadow = false;
     // 원래 스킨 메시가 붙어 있던 자리(보통 리그 루트 바로 아래)에 붙인다
     rig.add(mesh); mesh.bind(skel, C.bindMatrix);
+    let wmesh = null;
+    if (Q.wgeo) { wmesh = new THREE.SkinnedMesh(Q.wgeo, Q.wmat); wmesh.frustumCulled = false; wmesh.castShadow = !look.lod; rig.add(wmesh); wmesh.bind(skel, C.bindMatrix); }
     let wpn = null;
-    if (pl.prop && R3D.weaponGeo) { // 손 뼈(handslot.r)에 절차적 무기 (활·석궁·머스킷·창·장창·투석끈)
-      const pg = R3D.weaponGeo(pl.prop), hand = [...byName.values()].find(b => /^handslot\.?r$/i.test(b.name));
+    if (Q.prop && R3D.weaponGeo) { // 손 뼈(handslot.r)에 절차적 무기 (활·석궁·머스킷·창·장창·투석끈)
+      const pg = R3D.weaponGeo(Q.prop), hand = [...byName.values()].find(b => /^handslot\.?r$/i.test(b.name));
       if (pg && hand) {
         rig.updateMatrixWorld(true); const pm = new THREE.Mesh(pg, R3D.mats.vc); pm.castShadow = !look.lod;
-        pm.scale.setScalar(0.62 / C.norm / hand.getWorldScale(new THREE.Vector3()).x * (pl.prop === 'bow' ? 1.7 : 1));
+        pm.scale.setScalar(0.62 / Q.norm / hand.getWorldScale(new THREE.Vector3()).x * (Q.prop === 'bow' ? 1.7 : 1) * (Q.real ? 0.8 : 1));
         // 겨누기·공격: KayKit 석궁과 같은 규약(손 슬롯 +X = 앞) → 무기 +Y(개머리→총구/창끝)를 앞으로, 석궁 활대는 가로
         const fwd = new THREE.Quaternion();
-        if (pl.prop === 'bow') fwd.setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI / 2); // 활대 세로, 앞면이 앞
-        else if (pl.prop !== 'sling') fwd.setFromRotationMatrix(W_FWD);
+        if (Q.prop === 'bow') fwd.setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI / 2); // 활대 세로, 앞면이 앞
+        else if (Q.prop !== 'sling') fwd.setFromRotationMatrix(W_FWD);
         pm.quaternion.copy(fwd); hand.add(pm);
         // 서 있기·걷기·말 타기: 창·장창·머스킷·활은 손 방향과 상관없이 몸 기준으로 세워 든다 (손 뼈에 붙은 채 매 프레임 보정)
-        const up = W_UP[pl.prop] || null;
+        const up = W_UP[Q.prop] || null;
         wpn = { pm, hand, fwd, up };
       }
     }
     const inner = new THREE.Group(); inner.add(rig);
-    const k = (pl.k || 1) * 1.2, y0 = C.baseY * C.norm * k; // 1.2: 둥근 절차 모델과 비슷한 화면 크기
-    inner.scale.setScalar(C.norm * k); inner.position.y = y0;
+    const k = Q.k * 1.2, y0 = C.baseY * Q.norm * k; // 1.2: 둥근 절차 모델과 비슷한 화면 크기
+    inner.scale.setScalar(Q.norm * k); inner.position.y = y0;
     const group = new THREE.Group(); group.add(inner);
-    const o = Object.assign({ scale: 1 }, look || {});
+    const o = Object.assign({ scale: 1 }, look);
     group.scale.setScalar(o.scale || 1);
     const mixer = new THREE.AnimationMixer(rig);
     const act = {};
-    for (const k in clips) { act[k] = mixer.clipAction(clips[k]); }
+    for (const kk in Q.clipSet) { act[kk] = mixer.clipAction(Q.clipSet[kk]); }
     // 원거리 병종: 조준(반복) / 쏘기(한 번) — 클립이 없으면 근접 공격 자세로
-    const rk = pl.rng && (pl.rng === 't' ? (rclips.throw && 'throw') : (rclips['aim' + pl.rng] && pl.rng));
-    if (rk === 'throw') act.shoot = mixer.clipAction(rclips.throw);
-    else if (rk) { act.aim = mixer.clipAction(rclips['aim' + rk]); act.shoot = mixer.clipAction(rclips['shoot' + rk]); }
+    const rk = Q.rng && (Q.rng === 't' ? (Q.getR('throw') && 'throw') : (Q.getR('aim' + Q.rng) && Q.rng));
+    if (rk === 'throw') act.shoot = mixer.clipAction(Q.getR('throw'));
+    else if (rk) { act.aim = mixer.clipAction(Q.getR('aim' + rk)); act.shoot = mixer.clipAction(Q.getR('shoot' + rk)); }
     if (act.die) { act.die.setLoop(THREE.LoopOnce, 1); act.die.clampWhenFinished = true; }
-    const atk = act[pl.atk] || act.atk;
+    const atk = act[Q.atk] || act.atk;
     atk.setLoop(THREE.LoopRepeat, Infinity);
     let cur = null, last = performance.now(), fl = false;
     const go = (name, fade) => {
@@ -473,8 +699,9 @@ const A3D = (() => {
     const ATK_D = atk.getClip().duration;
     go('idle', 0);
     act.idle.time = Math.random() * act.idle.getClip().duration;
+    const sitY = y0 - (Q.sitDrop * k);
     return {
-      group, key: A.humanKey(look), look: o, asset: true, mesh,
+      group, key: A.humanKey(look), look: o, asset: true, real: !!Q.real, mesh,
       pose(p) {
         const now = performance.now(); let dt = Math.min(0.1, (now - last) / 1000); last = now;
         let st;
@@ -484,13 +711,13 @@ const A3D = (() => {
         else if (p.moving) st = 'run';
         else st = 'idle';
         go(st, st === 'atk' || st === 'shoot' ? 0.06 : 0.16);
-        inner.position.y = p.sit ? y0 - 0.36 * k : y0; // 앉은 자세: 엉덩이를 안장 높이(그룹 원점)에 맞춤
+        inner.position.y = p.sit ? sitY : y0; // 앉은 자세: 엉덩이를 안장 높이(그룹 원점)에 맞춤
         if (st === 'atk') {
-          const k = 1 - Math.min(1, p.swing);
-          atk.paused = false; atk.time = ATK_D * (0.22 + 0.5 * k); atk.paused = true;
+          const kk = 1 - Math.min(1, p.swing);
+          atk.paused = false; atk.time = ATK_D * (0.22 + 0.5 * kk); atk.paused = true;
         } else if (st === 'shoot') { // 쏘는 순간(swing 1) → 끝(0)
-          const D = act.shoot.getClip().duration, k = 1 - Math.min(1, p.swing);
-          act.shoot.paused = false; act.shoot.time = D * (0.15 + 0.8 * k); act.shoot.paused = true;
+          const D = act.shoot.getClip().duration, kk = 1 - Math.min(1, p.swing);
+          act.shoot.paused = false; act.shoot.time = D * (0.15 + 0.8 * kk); act.shoot.paused = true;
         } else if (st === 'run') act.run.timeScale = 1.15;
         if (p.yaw !== undefined) group.rotation.y = p.yaw;
         mixer.update(dt);
@@ -501,11 +728,10 @@ const A3D = (() => {
           } else wpn.pm.quaternion.copy(wpn.fwd);
         }
       },
-      flash(on) { if (on === fl) return; fl = on; mesh.material = on ? R3D.mats.flash : mat; },
+      flash(on) { if (on === fl) return; fl = on; mesh.material = on ? R3D.mats.flash : Q.mat; if (wmesh) wmesh.material = on ? R3D.mats.flash : Q.wmat; },
       dispose() { mixer.stopAllAction(); mixer.uncacheRoot(rig); },
     };
-  };
-
+  }
   // ---------- 불러오기 ----------
   const FILES = [
     ['props.glb', g => ingestProps(g)],
@@ -524,7 +750,11 @@ const A3D = (() => {
     const loader = new THREE.GLTFLoader();
     // 사실적 환경 모델(real3d.js, assets/real)도 같은 줄에서 불러온다 (캐릭터 다음). 실패해도 KayKit/절차적 모델로 계속
     const RL = typeof RA !== 'undefined' && RA.files ? (RA.begin(), RA.files) : [];
-    const ALL = FILES.concat(RL.map(([f, use]) => [f, use, true, 'real']));
+    // 사실적 인물(real/chars): KayKit 다음, 환경 모델 앞. 하나라도 되면 다 끝난 뒤 한 번에 바꿔 끼운다(실패한 몸은 KayKit 그대로)
+    const RC = /[?&]noreal(chars)?\b/.test(location.search) ? [] : RNAMES.map(nm => ['real/chars/' + nm + '.glb', g => ingestChar(RCK(nm), g), true, 'rchar']);
+    let rcLeft = RC.length;
+    const rcDone = () => { if (--rcLeft === 0 && RNAMES.some(nm => CH[RCK(nm)])) { A.realChars = true; A.ver++; } };
+    const ALL = FILES.concat(RC, RL.map(([f, use]) => [f, use, true, 'real']));
     const prog = new Array(ALL.length).fill(0);
     let n = 0, failed = false, realLeft = RL.length;
     const upd = () => showUI(`🏰 3D 모델 불러오는 중… ${Math.round(prog.reduce((a, b) => a + b, 0) / ALL.length * 100)}%`);
@@ -543,14 +773,16 @@ const A3D = (() => {
       const i = next++; if (i >= ALL.length) return;
       const [f, use, , kind] = ALL[i];
       loader.load(BASE + f, gltf => {
-        try { use(gltf); prog[i] = 1; } catch (e) { console.warn('asset ingest failed', f, e); if (kind === 'real') RA.fail(f, e); else { failed = true; A.err = String(e); } }
+        try { use(gltf); prog[i] = 1; } catch (e) { console.warn('asset ingest failed', f, e); if (kind === 'real') RA.fail(f, e); else if (kind !== 'rchar') { failed = true; A.err = String(e); } }
         if (kind === 'real') realDone();
+        else if (kind === 'rchar') rcDone();
         else if (i > 0) { charsLeft.delete(f); if (!charsLeft.size && !failed && clips) { A.chars = true; A.ver++; } }
         upd();
         if (++n === ALL.length) { A.ok = !failed; finish(); } else one();
       }, e => { if (e.total) { prog[i] = e.loaded / e.total * 0.95; A.bytes = Math.max(A.bytes, 0); } upd(); }, e => {
         console.warn('asset load failed', f, e && e.message);
         if (kind === 'real') { RA.fail(f, e); realDone(); }
+        else if (kind === 'rchar') rcDone();
         else if (optional.has(f)) { charsLeft.delete(f); if (!charsLeft.size && !failed && clips) { A.chars = true; A.ver++; } }
         else { failed = true; A.err = String(e && e.message || e); }
         if (++n === ALL.length) { A.ok = !failed; finish(); } else one();

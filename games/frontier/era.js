@@ -106,8 +106,9 @@ function rulerAge() { return S && S.ruler ? S.year - S.ruler.born : 0; }
 function townLabel(t) { return `${t.name} ${eraCur().town} Lv${townLevel(t)}`; }
 // 외형: kind = player | ally | bandit | grunt | officer | boss  (f: 진영)
 function eraLook(kind, f, era) {
-  const L = ERAS[era === undefined ? S.era : era].looks[kind];
-  return Object.assign({}, typeof L === 'function' ? L(f || eraCur().factions[0]) : L);
+  const e = era === undefined ? S.era : era, L = ERAS[e].looks[kind];
+  // role/era: 3D 사실적 인물(assets3d.js realPlan)이 몸·진영색을 고르는 데 쓴다
+  return Object.assign({ role: kind, era: e }, typeof L === 'function' ? L(f || eraCur().factions[0]) : L);
 }
 function eraVillager() { const v = eraCur().looks.villager; return { body: v.cols[ri(v.cols.length)], hat: v.hat, legs: v.legs }; }
 function warFaction(w) { const E = ERAS[w && w.era !== undefined ? w.era : S.era] || eraCur(); return E.factions[((w && w.faction) | 0) % E.factions.length]; }

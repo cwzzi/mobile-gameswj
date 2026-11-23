@@ -6,6 +6,7 @@
 // 전투가 바뀌면(B 객체가 다르면) b3Reset()이 지형/거점/장애물을 새로 만들고, 전투가 끝나면 b3Cleanup()이 정리·dispose 한다.
 let B3 = null;
 const B3_MULT = 1.35;          // 오픈월드 모델보다 크게(군중 속에서도 읽히도록)
+const B3_NEAR = 24;            // 낮음 품질: 사실적 인물로 그리는 가까운 졸병·아군 수 (나머지는 KayKit 저해상도)
 const B3_PITCH = 56 * Math.PI / 180;
 const B3_N = 22;
 
@@ -387,6 +388,15 @@ function drawBattle3D() {
   let gi = 0, ti = { officer: 0, boss: 0, charge: 0 };
   const pose = { walk: 0, moving: false, swing: 0, yaw: 0 };
   const AV = typeof A3D !== 'undefined' ? A3D.ver : 0, BL = S3.blobs; BL.begin();
+  // 낮음 품질 + 사실적 인물: 영웅에게 가까운 B3_NEAR 명만 사실적 몸, 나머지 졸병은 KayKit 저해상도 (삼각형·그리기 호출↓)
+  // 순위 경계에서 깜빡이지 않게 조금 여유(+6)를 둔다
+  const lodOn = !!(typeof A3D !== 'undefined' && A3D.realChars && R3D.quality && R3D.quality() === 'low');
+  let cut = Infinity, cutHi = Infinity;
+  if (lodOn) {
+    const ds = S3.lodD || (S3.lodD = []); ds.length = 0;
+    for (const u of B.units) if (u.kind === 'grunt' || u.kind === 'ally') ds.push((u.x - H.x) ** 2 + (u.y - H.y) ** 2);
+    if (ds.length > B3_NEAR) { ds.sort((a, b) => a - b); cut = ds[B3_NEAR - 1]; cutHi = ds[Math.min(ds.length - 1, B3_NEAR + 5)]; }
+  }
   for (const u of B.units) {
     const x = u.x / T, z = u.y / T;
     if (!b3View(x, z, 2.2)) continue;
@@ -395,8 +405,12 @@ function drawBattle3D() {
       const lk = Object.assign({}, enemyLook(u)); lk.scale = (lk.scale || 1) * B3_MULT;
       if (u.kind === 'grunt' || u.kind === 'ally') lk.lod = 1;
       u._l3 = lk; u._k3 = R3D.human.key(lk) + (lk.lod ? '|lo' : ''); u._v3 = AV;
+      const kk = Object.assign({}, lk, { noreal: 1 }); if (u.team === 1 && A3D.foeTint) kk.body = A3D.foeTint(lk.body); u._l3k = kk; u._k3k = R3D.human.key(kk) + '|lo';
     }
-    const r = b3Use(u._k3, u._l3, u), g = r.m.group;
+    let far = false;
+    if (lodOn && u._l3.lod) { const d2 = (u.x - H.x) ** 2 + (u.y - H.y) ** 2; far = u._far ? d2 > cut : d2 > cutHi; }
+    u._far = far;
+    const r = far ? b3Use(u._k3k, u._l3k, u) : b3Use(u._k3, u._l3, u), g = r.m.group;
     const mv = Math.abs(u.walk - r.lw) > 1e-4; r.lw = u.walk;
     let sw = 0, fy;
     if (u.windup > 0) { sw = 1; fy = R3D.yaw(u.wdir); }

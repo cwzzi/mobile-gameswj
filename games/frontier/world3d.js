@@ -1209,7 +1209,7 @@ function drawWorld3D() {
   for (const v of villagers) {
     const x = v.x / T, z = v.y / T; if (!w3dInView(x, z, 1)) continue;
     let lk = W3.look.get(v);
-    if (!lk) { lk = { body: v.body, legs: v.legs || '#4a3a2a', hat: v.hat === undefined ? (rand() > 0.5 ? 'band' : null) : (v.hat && rand() > 0.4 ? v.hat : null), helm: '#e8d8b0', hair: ['#3a2414', '#6a4a2a', '#222'][ri(3)], scale: 1.1, lod: 1 }; W3.look.set(v, lk); }
+    if (!lk) { lk = { body: v.body, legs: v.legs || '#4a3a2a', hat: v.hat === undefined ? (rand() > 0.5 ? 'band' : null) : (v.hat && rand() > 0.4 ? v.hat : null), helm: '#e8d8b0', hair: ['#3a2414', '#6a4a2a', '#222'][ri(3)], scale: 1.1, lod: 1, role: 'villager' }; W3.look.set(v, lk); }
     const r = w3dHuman(v, lk);
     const moved = r.lx !== null && (Math.abs(x - r.lx) + Math.abs(z - r.lz)) > 1e-4;
     r.m.pose({ walk: v.walk, moving: moved, yaw: w3dFaceMove(r, x, z, dt) });
