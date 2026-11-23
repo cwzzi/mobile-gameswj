@@ -18,8 +18,9 @@ const BUILD = {
   quarry: { name: '채석장', icon: '⛏️', cost: { wood: 20 },              desc: '근처(2칸) 산에서 돌을 자동 채석 · 바닥나지 않음', place: '산 가까이에 지어요', tech: 'masonry' },
   mine:   { name: '금광',   icon: '💰', cost: { wood: 20, stone: 15 },   desc: '근처(2칸) 금맥에서 금을 자동 채굴 · 금맥은 점점 줄어요', place: '금맥 가까이에 지어요', tech: 'mining' },
   barracks: { name: '병영', icon: '⚔️', cost: { wood: 20, stone: 6 },   desc: '보병 훈련 (곤봉 전사·창병·철갑 검사·장창병) · 군대 정원 +3', tech: 'tools', mil: true },
-  range:  { name: '궁술장', icon: '🎯', cost: { wood: 18, gold: 6 },    desc: '원거리병 훈련 (투석병·궁수·석궁병·머스킷병) · 정원 +3', tech: 'sling', mil: true },
-  stable: { name: '마구간', icon: '🐴', cost: { wood: 22, gold: 10 },   desc: '기병 훈련 (기마 전사·기사) · 정원 +3', tech: 'husbandry', mil: true },
+  range:  { name: '궁술장', icon: '🎯', cost: { wood: 18, gold: 6 },    desc: '원거리병 훈련 (투석병·궁수·석궁병·머스킷병·소총병) · 정원 +3', tech: 'sling', mil: true },
+  stable: { name: '마구간', icon: '🐴', cost: { wood: 22, gold: 10 },   desc: '기병 훈련 (기마 전사·기사·경기병) · 정원 +3', tech: 'husbandry', mil: true },
+  factory: { name: '공장', icon: '🏭', cost: { wood: 30, stone: 30, gold: 20 }, desc: '마을 금 수입 +4 · 연구 점수 +0.4/초 · 야포 제작 · 정원 +3', tech: 'steam', mil: true },
 };
 // 자원 생산 건물: 근처 타일 종류, 반경, 산출 자원, 1회 산출량, 분당 생산량 공식(n = 근처 자원 타일 수)
 const RES_DEF = {
@@ -38,7 +39,7 @@ function resTiles(type, bx, by) {
   }
   return out;
 }
-function prodRate(type, n) { return Math.round(RES_DEF[type].perMin(n) * eraCur().prod); }
+function prodRate(type, n) { return Math.round(RES_DEF[type].perMin(n) * eraCur().prod * (1 + techBonus('prod'))); }
 function resRate(b) { const d = RES_DEF[b.type]; if (!d) return 0; return prodRate(b.type, resTiles(b.type, b.x, b.y).length); }
 function resStatus(townId) {
   const parts = [];
@@ -187,7 +188,7 @@ function spawnCamp(avoidX, avoidY, minD) {
 function townLevel(t) { return Math.min(eraCur().maxLv, 5, 1 + Math.floor(t.pop / 10)); }
 function townRadius(t) { return 3 + townLevel(t) + (eraCur().radius || 0); }
 function townCap(t) { return 6 + 5 * S.buildings.filter(b => b.town === t.id && b.type === 'house').length; }
-function townIncome(t) { return Math.round((Math.ceil(t.pop / 3) + 3 * S.buildings.filter(b => b.town === t.id && b.type === 'market').length) * (eraCur().income + techBonus('income'))); }
+function townIncome(t) { const n = k => S.buildings.filter(b => b.town === t.id && b.type === k).length; return Math.round((Math.ceil(t.pop / 3) + 3 * n('market') + 4 * n('factory')) * (eraCur().income + techBonus('income'))); }
 function recomputeOwner() {
   owner.fill(-1); ownedCount = 0;
   for (const t of S.towns) {
@@ -492,7 +493,7 @@ function openBuild() {
     const cnt = k => S.buildings.filter(b => b.town === t.id && b.type === k).length;
     const E = eraCur(), lvCap = townLevel(t) >= E.maxLv && t.pop >= E.maxLv * 10;
     html += `<h2>${t.name} ${E.town} <span style="font-size:13px;color:#b8c2b0">Lv${townLevel(t)}/${E.maxLv}</span></h2>`;
-    html += `<div class="sub">인구 ${t.pop}/${cap} · 영토 반경 ${townRadius(t)} · 수입 ${townIncome(t)}🪙/5초<br>집 ${cnt('house')} · 농장 ${cnt('farm')} · 학당 ${cnt('school')} · 망루 ${cnt('tower')} · 시장 ${cnt('market')}${cnt('barracks') + cnt('range') + cnt('stable') ? ` · 군사 ${cnt('barracks') + cnt('range') + cnt('stable')}` : ''}${resStatus(t.id) ? '<br>' + resStatus(t.id) : ''}<br>${lvCap ? `<b style="color:var(--accent)">${E.name}의 한계 Lv${E.maxLv}</b> — 시대가 발전하면 더 커집니다` : '인구가 10 늘 때마다 레벨업 → 영토 확장'}</div>`;
+    html += `<div class="sub">인구 ${t.pop}/${cap} · 영토 반경 ${townRadius(t)} · 수입 ${townIncome(t)}🪙/5초<br>집 ${cnt('house')} · 농장 ${cnt('farm')} · 학당 ${cnt('school')} · 망루 ${cnt('tower')} · 시장 ${cnt('market')}${cnt('barracks') + cnt('range') + cnt('stable') ? ` · 군사 ${cnt('barracks') + cnt('range') + cnt('stable')}` : ''}${cnt('factory') ? ` · 공장 ${cnt('factory')}` : ''}${resStatus(t.id) ? '<br>' + resStatus(t.id) : ''}<br>${lvCap ? `<b style="color:var(--accent)">${E.name}의 한계 Lv${E.maxLv}</b> — 시대가 발전하면 더 커집니다` : '인구가 10 늘 때마다 레벨업 → 영토 확장'}</div>`;
     const locked = [];
     for (const k in BUILD) {
       const B = BUILD[k];
@@ -542,7 +543,7 @@ function updateWorld(dt) {
   p.moving = mv.l > 0.08;
   if (p.moving) {
     const onForest = tileAt(p.x / T, p.y / T) === FOREST;
-    const sp = (p.mounted ? 250 * (1 + techBonus('horse')) : typeof evTP === 'function' && evTP() ? evTPSpeed() : 130) * (onForest ? 0.7 : 1) * Math.max(0.4, mv.l);
+    const sp = (p.mounted ? 250 * (1 + techBonus('horse')) : typeof evTP === 'function' && evTP() ? evTPSpeed() : 130 * (1 + techBonus('move'))) * (onForest ? 0.7 : 1) * Math.max(0.4, mv.l);
     moveEnt(p, mv.x * sp * dt, mv.y * sp * dt, 9);
     p.dir = Math.atan2(mv.y, mv.x); p.walk = (p.walk || 0) + dt * sp / 9;
     p.dustT = (p.dustT || 0) - dt;
@@ -668,7 +669,7 @@ function updateWorld(dt) {
 }
 // 마을 사람 할 일: 마을 건물(농장·집·시장·학당·병영…)이나 마을 우물가로 가서 한동안 일하거나, 그냥 거닌다
 // v.act (일하는 중) → world3d 가 일하는 몸짓(VWORK_ANIM)이나 서 있는 자세로 그린다. 말 걸면 역할(VROLE)에 맞는 말을 한다 (event.js)
-const VJOB = { farm: 'farm', house: 'chores', market: 'trade', school: 'study', barracks: 'smith', range: 'fletch', stable: 'groom' };
+const VJOB = { farm: 'farm', house: 'chores', market: 'trade', school: 'study', barracks: 'smith', range: 'fletch', stable: 'groom', factory: 'smith' };
 const VWORK_ANIM = { farm: 1, chores: 1, smith: 1, fletch: 1, water: 1 };
 function villagerPlan(v, t) {
   v.task = null; v.fx = v.fy = undefined;

@@ -30,6 +30,14 @@ const TECHS = [
   { id: 'printing', era: 3, name: '인쇄술', icon: '📰', cost: 220, eff: { income: 0.2 }, desc: '세금 +20%' },
   { id: 'standing', era: 3, name: '상비군', icon: '🎖️', cost: 260, eff: { armyCap: 0.5 }, desc: '군대 정원 +50%' },
   { id: 'cannon', era: 3, name: '대포', icon: '💣', cost: 280, req: ['musket'], eff: { arrow: 2 }, desc: '망루 피해 +2' },
+  { id: 'steam', era: 3, name: '증기기관', icon: '♨️', cost: 360, res: { stone: 40, gold: 90 }, req: ['printing', 'cannon'], key: true, bld: ['factory'], desc: '석탄으로 끓인 증기가 기계를 돌린다 · 공장' },
+  // 근대
+  { id: 'breech', era: 4, name: '후장식 소총', icon: '🪖', cost: 300, unit: ['rifle'], desc: '소총병 (멀리·빠르게 쏘는 전열 보병)' },
+  { id: 'steel', era: 4, name: '강철', icon: '🔩', cost: 320, unit: ['hussar'], eff: { armyAtk: 0.2 }, desc: '경기병(군도) · 군대 공격력 +20%' },
+  { id: 'fieldgun', era: 4, name: '야포', icon: '🧨', cost: 360, req: ['breech', 'steel'], unit: ['gun'], eff: { arrow: 2 }, desc: '야포 (공장에서 제작 · 포탄이 터지는 범위 공격) · 망루 피해 +2' },
+  { id: 'railway', era: 4, name: '철도', icon: '🚂', cost: 340, req: ['steel'], eff: { move: 0.2, horse: 0.2, income: 0.15 }, desc: '마을 사이 철길과 기차 · 이동 속도 +20% · 세금 +15%' },
+  { id: 'telegraph', era: 4, name: '전신', icon: '📡', cost: 300, eff: { research: 0.3 }, desc: '전선으로 소식을 나른다 · 연구 속도 +30%' },
+  { id: 'industry', era: 4, name: '공업화', icon: '⚙️', cost: 420, res: { stone: 40, gold: 80 }, req: ['railway'], eff: { prod: 0.35, armyCap: 0.3 }, desc: '자원 생산 +35% · 군대 정원 +30%' },
 ];
 const TECH = {}; for (const t of TECHS) TECH[t.id] = t;
 
@@ -47,6 +55,10 @@ const UNITS = {
   knight: { name: '기사', icon: '🏇', role: 'cav', armor: true, hp: 2.8, atk: 1.8, sp: 1.6, bld: 'stable', tech: 'chivalry', cost: { wood: 4, gold: 28 }, time: 12 },
   pike:   { name: '장창병', icon: '🔱', role: 'melee', armor: true, hp: 2.6, atk: 1.6, sp: 0.9, bld: 'barracks', tech: 'pike', cost: { wood: 8, stone: 4, gold: 20 }, time: 9 },
   musket: { name: '머스킷병', icon: '🔫', role: 'ranged', proj: 'ball', range: 230, reload: 3.2, hp: 1.4, atk: 2.6, sp: 0.95, bld: 'range', tech: 'musket', cost: { wood: 6, stone: 4, gold: 24 }, time: 10 },
+  // 근대: 소총병(전열 보병) · 경기병(군도) · 야포(포탄 범위 공격, aoe = 폭발 반경 px)
+  rifle:  { name: '소총병', icon: '💂', role: 'ranged', proj: 'bullet', range: 260, reload: 2.3, hp: 1.7, atk: 3.0, sp: 1, bld: 'range', tech: 'breech', cost: { wood: 4, stone: 6, gold: 28 }, time: 10 },
+  hussar: { name: '경기병', icon: '🐴', role: 'cav', hp: 2.6, atk: 2.4, sp: 1.9, bld: 'stable', tech: 'steel', cost: { wood: 4, gold: 32 }, time: 12 },
+  gun:    { name: '야포', icon: '🛞', role: 'ranged', proj: 'shell', aoe: 46, range: 330, reload: 5.5, hp: 1.5, atk: 3.4, sp: 0.7, bld: 'factory', tech: 'fieldgun', cost: { wood: 10, stone: 14, gold: 36 }, time: 14 },
 };
 // 시대별 적 군단 구성 [병종, 비율] · 산적(약탈자) 구성 · 그 시대 민병의 기본 병종
 const ENEMY_MIX = [
@@ -54,11 +66,15 @@ const ENEMY_MIX = [
   [['spear', 5], ['archer', 3], ['rider', 2]],
   [['sword', 4], ['xbow', 3], ['knight', 2], ['spear', 1]],
   [['pike', 4], ['musket', 4], ['knight', 2]],
+  [['rifle', 6], ['hussar', 2], ['gun', 1]],
 ];
-const BANDIT_MIX = [[['club', 3], ['sling', 1]], [['club', 2], ['archer', 1]], [['club', 2], ['xbow', 1]], [['sword', 2], ['musket', 1]]];
-const ERA_BASIC = ['club', 'spear', 'sword', 'pike'];
-const PROJ = { stone: { sp: 330, col: '#9a9a90' }, arrow: { sp: 430, col: '#5a3a20' }, bolt: { sp: 500, col: '#3a3a40' }, ball: { sp: 720, col: '#222' } };
-const MIL_BLD = ['barracks', 'range', 'stable'];
+const BANDIT_MIX = [[['club', 3], ['sling', 1]], [['club', 2], ['archer', 1]], [['club', 2], ['xbow', 1]], [['sword', 2], ['musket', 1]], [['sword', 2], ['rifle', 1]]];
+const ERA_BASIC = ['club', 'spear', 'sword', 'pike', 'rifle'];
+// shell(포탄)은 곧게 날지 않고 목표 지점으로 포물선을 그리며 떨어져 터진다 (fireShot · battle.js fireBattleShot)
+const PROJ = { stone: { sp: 330, col: '#9a9a90' }, arrow: { sp: 430, col: '#5a3a20' }, bolt: { sp: 500, col: '#3a3a40' }, ball: { sp: 720, col: '#222' }, bullet: { sp: 980, col: '#2a2420' }, shell: { sp: 420, col: '#18181a' } };
+const PROJ_ROUND = { stone: 1, ball: 1, bullet: 1, shell: 1 }; // 둥근 탄 (선이 아니라 점으로 그림)
+const PROJ_GUN = { ball: 1, bullet: 1 };                      // 총: 총구 불꽃 + 연기
+const MIL_BLD = ['barracks', 'range', 'stable', 'factory'];
 const SOLDIER_VIS = 24; // 오픈월드에 실제로 보이는 병사 수 상한 (나머지는 예비대)
 
 function pickMix(mix) { let s = 0; for (const m of mix) s += m[1]; let r = rand() * s; for (const m of mix) { r -= m[1]; if (r <= 0) return m[0]; } return mix[0][0]; }
@@ -90,6 +106,9 @@ function unitLook(ut, side, era, f) {
     case 'knight': Object.assign(L, { hat: 'helm', helm: '#b0b4bc', weapon: 'spear', armor: true, kit: 'knight', cape: side === 'ally' ? '#c0392b' : '#3a1a1a', mount: side === 'ally' ? '#e8e0d0' : '#3a2a22' }); break;
     case 'pike': Object.assign(L, { hat: 'helm', helm: '#b0b4bc', weapon: 'pike', armor: true, kit: 'spear' }); break;
     case 'musket': Object.assign(L, { hat: 'band', helm: base.band, weapon: 'musket', kit: 'gunner' }); break;
+    case 'rifle': Object.assign(L, { hat: 'shako', helm: '#1a1a1e', weapon: 'rifle', kit: 'gunner' }); break;
+    case 'hussar': Object.assign(L, { hat: 'kepi', helm: '#1a1a1e', weapon: 'sword', kit: 'knight', cape: side === 'ally' ? '#2a3a6a' : '#2a1a1a', mount: side === 'ally' ? '#6a4a30' : '#2a2018' }); break;
+    case 'gun': Object.assign(L, { hat: 'kepi', helm: '#1a1a1e', weapon: 'rammer', kit: 'gunner' }); break;
     default: Object.assign(L, { hat: 'band', helm: base.band, weapon: 'club' });
   }
   unitLookCache.set(key, L);
@@ -276,11 +295,11 @@ function renderArmyPanel() {
     const nb = S.buildings.filter(b => b.type === U.bld).length;
     const inq = S.buildings.reduce((a, b) => a + (b.q ? b.q.filter(x => x === k).length : 0), 0);
     const err = !nb ? `${BUILD[U.bld].icon}${BUILD[U.bld].name} 필요` : tot + q >= cap ? '정원 가득' : !canAfford(U.cost) ? '자원 부족' : '';
-    const role = U.role === 'ranged' ? '원거리' : U.role === 'cav' ? '기병' : U.armor ? '중보병' : '보병';
+    const role = U.proj === 'shell' ? '포병' : U.role === 'ranged' ? '원거리' : U.role === 'cav' ? '기병' : U.armor ? '중보병' : '보병';
     h += `<button class="opt" data-u="${k}" ${err ? 'disabled' : ''}><span class="ic">${U.icon}</span><span>${U.name} 훈련 <span style="font-size:12px;opacity:.8">${role} · ${U.time}초</span><small>${costText(U.cost)} · 보유 ${S.army[k] | 0}${inq ? ` · 대기 ${inq}` : ''}${err ? ' · ' + err : ''}</small></span></button>`;
   }
   if (locked.length) h += `<div class="lockbox">🔒 ${locked.join(' · ')}</div>`;
-  if (!S.buildings.some(b => MIL_BLD.includes(b.type))) h += `<div class="lockbox">영토 안에서 <b>건설</b> → ⚔️ 병영 · 🎯 궁술장 · 🐴 마구간을 지으면 병사를 훈련할 수 있어요</div>`;
+  if (!S.buildings.some(b => MIL_BLD.includes(b.type))) h += `<div class="lockbox">영토 안에서 <b>건설</b> → ⚔️ 병영 · 🎯 궁술장 · 🐴 마구간${techHas('steam') ? ' · 🏭 공장' : ''}을 지으면 병사를 훈련할 수 있어요</div>`;
   h += `<button class="close" data-a="close">닫기</button>`;
   $('armyPanel').innerHTML = h;
 }
@@ -320,8 +339,16 @@ function playerHurt(n, frac) {
 }
 function fireShot(x, y, tx, ty, team, kind, dmg) {
   const P = PROJ[kind] || PROJ.arrow, d = Math.hypot(tx - x, ty - y) || 1;
+  if (kind === 'shell') { // 야포: 목표 지점(조금 흩어짐)으로 포물선 → 떨어지면 폭발 (바닥에 경고 원)
+    const ex = tx + rr(-14, 14), ey = ty + rr(-12, 12), dur = 0.5 + d / P.sp;
+    shots.push({ x, y, x0: x, y0: y, tx: ex, ty: ey, vx: (ex - x) / dur, vy: (ey - y) / dur, team, kind, dmg, life: dur, dur, R: 40 });
+    emit(x + (tx - x) / d * 16, y - 12 + (ty - y) / d * 16, 10, { color: ['#f2f0ea', '#d8d6d0', '#bdbab2'], kind: 'smoke', smin: 20, smax: 70, ang: Math.atan2(ty - y, tx - x), spread: 0.9, lmin: .9, lmax: 1.8, zmin: 6, zmax: 10, grow: 14 });
+    emit(x + (tx - x) / d * 18, y - 12 + (ty - y) / d * 18, 5, { color: ['#fff2a0', '#ffb030'], kind: 'spark', smin: 60, smax: 160, ang: Math.atan2(ty - y, tx - x), spread: 0.5, lmin: .08, lmax: .16 });
+    if (dist2(x, y, S.player.x, S.player.y) < (T * 10) ** 2) shake(2.5);
+    return;
+  }
   shots.push({ x, y, vx: (tx - x) / d * P.sp, vy: (ty - y) / d * P.sp, team, kind, dmg, life: d / P.sp + 0.25 });
-  if (kind === 'ball') { // 머스킷: 총구 불꽃 + 자욱한 연기
+  if (PROJ_GUN[kind]) { // 머스킷·소총: 총구 불꽃 + 자욱한 연기
     emit(x + (tx - x) / d * 14, y - 14 + (ty - y) / d * 14, 7, { color: ['#eee', '#bbb', '#d8d4cc'], kind: 'smoke', smin: 10, smax: 40, lmin: .7, lmax: 1.4, zmin: 4, zmax: 7, grow: 12 });
     emit(x + (tx - x) / d * 16, y - 14 + (ty - y) / d * 16, 4, { color: ['#fff2a0', '#ffb030'], kind: 'spark', smin: 60, smax: 140, ang: Math.atan2(ty - y, tx - x), spread: 0.35, lmin: .06, lmax: .12 });
   }
@@ -402,6 +429,7 @@ function updateArmyWorld(dt) {
   for (let i = shots.length - 1; i >= 0; i--) {
     const q = shots[i]; q.life -= dt;
     q.x += q.vx * dt; q.y += q.vy * dt;
+    if (q.kind === 'shell') { if (q.life <= 0) { shellBurst(q); shots.splice(i, 1); } continue; }
     let hit = false;
     if (q.team === 1) {
       if (dist2(q.x, q.y + 12, p.x, p.y) < 14 * 14) { playerHurt(q.dmg, 0.07); hit = true; }
@@ -416,6 +444,19 @@ function updateArmyWorld(dt) {
     }
   }
 }
+// 야포 포탄이 떨어짐: 반경 안 적(아군 포탄)/영주·병사(적 포탄)에게 피해 + 흙먼지·연기·불꽃
+function shellBurst(q) {
+  const R = q.R || 40, p = S.player;
+  if (q.team === 1) {
+    if (dist2(q.tx, q.ty, p.x, p.y) < R * R) playerHurt(q.dmg, 0.14);
+    for (let k = soldiers.length - 1; k >= 0; k--) { const s = soldiers[k]; if (dist2(q.tx, q.ty, s.x, s.y) < R * R) soldierHurt(s, q.dmg); }
+  } else for (let k = bandits.length - 1; k >= 0; k--) { const b = bandits[k]; if (dist2(q.tx, q.ty, b.x, b.y) < R * R) { b.hp -= q.dmg; b.hit = 0.15; if (b.hp <= 0) killBandit(b); } }
+  emit(q.tx, q.ty, 12, { color: ['#5a4630', '#6a5438', '#3a3024'], kind: 'dot', smin: 60, smax: 200, up: 100, grav: 420, lmin: .35, lmax: .7, zmin: 2, zmax: 3.5 });
+  emit(q.tx, q.ty - 6, 7, { color: ['#a89a88', '#8a8070', '#c8c0b0'], kind: 'smoke', smin: 16, smax: 60, lmin: .8, lmax: 1.5, zmin: 6, zmax: 10, grow: 14 });
+  emit(q.tx, q.ty, 1, { color: 'rgba(255,190,90,.9)', kind: 'ring', smin: 0, smax: 0, zmin: 8, zmax: 8, grow: 120, lmin: .3, lmax: .3 });
+  emit(q.tx, q.ty - 4, 6, { color: ['#fff2a0', '#ffb030', '#ff7a20'], kind: 'spark', smin: 80, smax: 220, lmin: .12, lmax: .3 });
+  const d2 = dist2(q.tx, q.ty, p.x, p.y); if (d2 < (T * 8) ** 2) shake(d2 < (T * 2) ** 2 ? 7 : 4);
+}
 // 적(산적·적 군단) 한 명의 공격: 대상이 사거리 안이면 때리거나 쏜다. 반환: 대상 쪽으로 더 다가갈지
 function foeStrike(b, tgt, d) {
   const U = UNITS[b.ut] || UNITS.club, p = S.player;
@@ -423,7 +464,7 @@ function foeStrike(b, tgt, d) {
     const R = U.range * 0.75;
     if (d <= R && b.atk <= 0) {
       b.atk = U.reload * rr(1.5, 2.0); b.swing = 0.25;
-      fireShot(b.x, b.y - 14, tgt.x, tgt.y - 12, 1, U.proj, U.proj === 'ball' ? 2 : 1);
+      fireShot(b.x, b.y - 14, tgt.x, tgt.y - 12, 1, U.proj, U.proj === 'shell' ? 3 : PROJ_GUN[U.proj] ? 2 : 1);
     }
     return d > R * 0.7;
   }
@@ -447,7 +488,8 @@ function drawUnit2D(g, x, y, lk, o) {
 function drawShots2D(g, list) {
   for (const q of list || shots) {
     const P = PROJ[q.kind] || PROJ.arrow, a = Math.atan2(q.vy, q.vx);
-    if (q.kind === 'stone' || q.kind === 'ball') { g.fillStyle = P.col; g.beginPath(); g.arc(q.x, q.y, q.kind === 'ball' ? 2.4 : 2.8, 0, 7); g.fill(); }
+    if (q.kind === 'shell') { const k = 1 - q.life / q.dur; g.globalAlpha = 0.35; g.strokeStyle = '#ff5a1e'; g.lineWidth = 1.5; g.beginPath(); g.ellipse(q.tx, q.ty, q.R * (0.3 + 0.7 * k), q.R * (0.3 + 0.7 * k) * 0.6, 0, 0, 7); g.stroke(); g.globalAlpha = 1; g.fillStyle = P.col; g.beginPath(); g.arc(q.x, q.y - Math.sin(k * Math.PI) * 60, 3.6, 0, 7); g.fill(); }
+    else if (PROJ_ROUND[q.kind]) { g.fillStyle = P.col; g.beginPath(); g.arc(q.x, q.y, q.kind === 'stone' ? 2.8 : 2.4, 0, 7); g.fill(); }
     else { g.strokeStyle = P.col; g.lineWidth = 1.8; g.beginPath(); g.moveTo(q.x, q.y); g.lineTo(q.x - Math.cos(a) * 11, q.y - Math.sin(a) * 11); g.stroke(); }
   }
 }
@@ -455,7 +497,21 @@ function drawShots2D(g, list) {
 function drawShots3D(g, list, pr, ks, h, dy) {
   for (const q of list) {
     const P = PROJ[q.kind] || PROJ.arrow, a = Math.atan2(q.vy, q.vx);
+    if (q.kind === 'shell') { // 바닥 경고 원 + 포물선으로 나는 포탄
+      const k = clamp(1 - q.life / q.dur, 0, 1), Rr = q.R || 40;
+      R3D.project(q.tx / T, 0.03, (q.ty + dy) / T, pr);
+      if (pr.vis) { const rx = Rr / T * R3D.ppu(q.tx / T, 0, (q.ty + dy) / T); g.globalAlpha = 0.15 + 0.3 * k; g.fillStyle = q.team === 1 ? '#ff3a24' : '#ffb040'; g.beginPath(); g.ellipse(pr.x, pr.y, rx, rx * 0.6, 0, 0, 7); g.fill();
+        g.globalAlpha = 0.85; g.strokeStyle = g.fillStyle; g.lineWidth = 2 * ks; g.beginPath(); g.ellipse(pr.x, pr.y, rx * (0.3 + 0.7 * k), rx * 0.6 * (0.3 + 0.7 * k), 0, 0, 7); g.stroke(); g.globalAlpha = 1; }
+      R3D.project(q.x / T, h + Math.sin(k * Math.PI) * 3.2, (q.y + dy) / T, pr); if (!pr.vis) continue;
+      g.fillStyle = '#18181a'; g.beginPath(); g.arc(pr.x, pr.y, 4.2 * ks, 0, 7); g.fill();
+      continue;
+    }
     R3D.project(q.x / T, h, (q.y + dy) / T, pr); if (!pr.vis) continue;
+    if (q.kind === 'bullet') { // 총알: 짧은 빛줄기 (예광)
+      const x2 = pr.x, y2 = pr.y; R3D.project((q.x - Math.cos(a) * 22) / T, h, (q.y + dy - Math.sin(a) * 22) / T, pr);
+      g.strokeStyle = 'rgba(255,226,150,.9)'; g.lineWidth = 1.8 * ks; g.lineCap = 'round'; g.beginPath(); g.moveTo(pr.x, pr.y); g.lineTo(x2, y2); g.stroke();
+      continue;
+    }
     if (q.kind === 'stone' || q.kind === 'ball') { g.fillStyle = q.kind === 'ball' ? '#111' : '#8a8a80'; g.beginPath(); g.arc(pr.x, pr.y, (q.kind === 'ball' ? 3 : 3.6) * ks, 0, 7); g.fill(); }
     else {
       const x2 = pr.x, y2 = pr.y;

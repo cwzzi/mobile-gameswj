@@ -93,6 +93,27 @@ const ERAS = [
       { name: '흑철 총독군', color: '#2a2a2a', plume: '#ffcc33', boss: '총독 카스펠' },
       { name: '붉은 깃발 반란군', color: '#8a1a1a', plume: '#111', boss: '반란수괴 도르함' },
     ] },
+  { id: 'modern', name: '근대', icon: '🏭', title: '대군주', accent: '#46c8b4', town: '시', bandit: '마적단',
+    maxLv: 5, radius: 1, prod: 1.75, income: 1.8, townCost: 1.6, diff: 1.8, banditHp: 7, atk: 3, hp: 8, arrow: 3,
+    need: { tech: 'steam', towns: 4 },
+    flavor: '증기와 강철의 시대. 공장 굴뚝이 연기를 뿜고, 철길이 도시와 도시를 잇습니다. 대군주는 군도와 육혈포를 차고 앞장섭니다.',
+    perks: ['🏭 공장 · 🚂 철도 · 💂 소총병 · 🛞 야포 (🔬 연구로)', '망루 피해 ×3 (속사포) · 영토 반경 +1', '생산 ×1.75 · 세금 ×1.8 · 공격력 +3'],
+    start: { age: 30, desc: '마을 4곳 · 인구 130' },
+    looks: {
+      player: { body: '#1e2a48', trim: '#f2c14e', legs: '#14141c', cape: '#8a1a1a', hat: 'crown', weapon: 'sword', tint: '#26355e' },
+      ally: { body: '#2a4a8a', trim: '#e8e0c8', legs: '#1a2030', hat: 'shako', helm: '#1a1a1e', plume: '#c22', weapon: 'rifle', kit: 'gunner' },
+      bandit: { body: '#4a3a2a', trim: '#2a1a12', legs: '#2a2420', hat: 'hood', helm: '#2a2018', weapon: 'sword', tint: '#4a3a2a' },
+      grunt: f => ({ body: f.color, trim: '#e0d0a0', legs: '#1a1a1a', hat: 'shako', helm: '#1a1a1e', plume: f.plume, weapon: 'rifle', kit: 'gunner' }),
+      officer: f => ({ body: f.color, trim: '#e0b040', legs: '#111', hat: 'kepi', helm: '#1a1a1e', plume: f.plume, weapon: 'sword', cape: '#2a1a1a', kit: 'knight', scale: 1.25 }),
+      boss: f => ({ body: shadeHex(f.color, 0.8), trim: '#f0c040', legs: '#111', hat: 'helm', helm: '#c0a040', plume: f.plume, weapon: 'glaive', armor: true, cape: '#1a0e1a', kit: 'knight', scale: 1.55 }),
+      villager: { cols: ['#3a3a44', '#6a4a30', '#2a3a5a', '#d8d0c0', '#5a2a2a'], hat: 'band', legs: '#2a2a30' },
+    },
+    factions: [
+      { name: '강철 증기군단', color: '#3a3e46', plume: '#ffcc33', boss: '강철 원수 볼크' },
+      { name: '남부 연방군', color: '#7a6a50', plume: '#c22', boss: '연방 장군 하일러' },
+      { name: '흑기 혁명군', color: '#2a1a1a', plume: '#c22', boss: '혁명위원장 도민' },
+      { name: '쌍두독수리 제국군', color: '#6a2a5a', plume: '#ffd54a', boss: '대원수 아델하르트' },
+    ] },
 ];
 const RULER_NAMES = ['한결', '다온', '이안', '윤슬', '도하', '서진', '하람', '지온', '태율', '라온', '새솔', '가온', '시우', '누리', '해솔', '온유', '다솜', '로운', '휘연', '예솔', '무진', '아람', '세온', '라희', '바다', '진솔', '하율', '은결'];
 const DYNASTY_NAMES = ['청람', '백운', '금빛', '은하', '단목', '소야', '미르', '가람', '새벽', '해든', '초록', '별바라기', '너울', '마루'];
@@ -118,11 +139,11 @@ function buildUnlocked(k) { return !BUILD[k].tech || techHas(BUILD[k].tech); }
 function eraStats() {
   const pop = S.towns.reduce((a, t) => a + t.pop, 0);
   const cnt = k => S.buildings.filter(b => b.type === k).length;
-  return { pop, towns: S.towns.length, wars: S.warsWon, schools: cnt('school'), markets: cnt('market') };
+  return { pop, towns: S.towns.length, wars: S.warsWon, schools: cnt('school'), markets: cnt('market'), factories: cnt('factory') };
 }
 function devRate() {
   const s = eraStats();
-  return S.towns.length ? 0.7 + s.pop * 0.02 + s.towns * 0.2 + s.schools * 0.6 + s.markets * 0.3 : 0;
+  return S.towns.length ? 0.7 + s.pop * 0.02 + s.towns * 0.2 + s.schools * 0.6 + s.markets * 0.3 + s.factories * 0.4 : 0;
 }
 // 다음 시대 조건별 진행 [{k, label, cur, need, f, txt}] — 핵심 기술 + 마을 수
 function eraReqs() {
@@ -349,7 +370,11 @@ function eraNewGame(opts, home) {
     { towns: [[22, { house: 3, farm: 1, school: 1, lumber: 1, barracks: 1 }]], res: [60, 30, 60], lv: 3, wars: 0, army: { club: 3, sling: 2 } },
     { towns: [[32, { house: 6, farm: 2, school: 2, market: 1, tower: 1, lumber: 1, quarry: 1, barracks: 1, range: 1 }], [14, { house: 2, farm: 1, school: 1 }]], res: [120, 80, 150], lv: 5, wars: 1, army: { spear: 4, archer: 3, rider: 1 } },
     { towns: [[45, { house: 8, farm: 2, school: 2, market: 2, tower: 2, lumber: 1, quarry: 1, mine: 1, barracks: 1, range: 1, stable: 1 }], [25, { house: 4, farm: 1, school: 1, market: 1 }], [15, { house: 2, farm: 1, school: 1 }]], res: [220, 150, 260], lv: 7, wars: 3, army: { sword: 5, xbow: 3, knight: 2 } },
+    // 근대: 첫 근대 기술(후장식 소총)은 미리 연구된 채로 (소총병으로 시작)
+    { towns: [[58, { house: 9, farm: 2, school: 3, market: 2, tower: 2, lumber: 1, quarry: 1, mine: 1, barracks: 1, range: 1, stable: 1, factory: 1 }], [35, { house: 5, farm: 1, school: 1, market: 1, factory: 1 }], [22, { house: 3, farm: 1, school: 1 }], [15, { house: 2, farm: 1 }]],
+      res: [320, 240, 380], lv: 9, wars: 5, army: { rifle: 6, pike: 2, knight: 2 }, techs: ['breech'] },
   ][era];
+  if (plan.techs) for (const id of plan.techs) if (!S.techs.includes(id)) S.techs.push(id);
   const spots = [home];
   for (let k = 0; k < 6000 && spots.length < plan.towns.length; k++) {
     const a = rand() * Math.PI * 2, d = rr(12, 17), x = Math.round(home.x + Math.cos(a) * d), y = Math.round(home.y + Math.sin(a) * d);

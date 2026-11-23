@@ -295,7 +295,7 @@ function w3dInit() {
   // 가짜 빛 (빛무리 · 빛웅덩이) + 등불/횃불 기둥 (시대별 모양)
   const glows = R3D.glows(scene, 220), pools = R3D.pools(scene, 140);
   const lamps = {};
-  for (const k of ['torch', 'lantern', 'lamp']) {
+  for (const k of ['torch', 'lantern', 'lamp', 'gas']) {
     const m = new THREE.InstancedMesh(w3dLampGeo(k), R3D.mats.vc, 160);
     m.instanceMatrix.setUsage(THREE.DynamicDrawUsage); m.frustumCulled = false; m.count = 0; m.castShadow = true; scene.add(m); lamps[k] = m;
   }
@@ -771,6 +771,30 @@ function w3dBuildingGeo(type) {
       G.push({ g: box(0.1, 0.09, 0.02), c: '#fff', p: [-0.24, 0.22, 0.255] });
       G.push({ g: box(0.1, 0.09, 0.02), c: '#fff', p: [0.24, 0.22, 0.255] });
     }
+    else if (type === 'factory') { // 공장 (근대): 붉은 벽돌 공장 + 톱니 지붕 + 높은 굴뚝 둘 (연기: W3_STACKS)
+      const brick = '#9a4632', brick2 = '#7e3826', slate = '#4a4e56';
+      P.push({ g: box(0.94, 0.04, 0.82), c: '#6a6458', p: [0, 0.02, 0] });
+      P.push({ g: box(0.78, 0.32, 0.46), c: brick, p: [-0.04, 0.2, -0.08] });
+      P.push({ g: box(0.8, 0.03, 0.48), c: '#d8c8a8', p: [-0.04, 0.36, -0.08] });
+      for (let k = 0; k < 3; k++) { // 톱니 지붕 (북쪽으로 유리, 남쪽은 슬레이트)
+        const x = -0.3 + k * 0.26;
+        P.push({ g: box(0.25, 0.03, 0.46), c: slate, p: [x + 0.01, 0.44, -0.08], r: [0, 0, 0.55] });
+        P.push({ g: box(0.02, 0.16, 0.46), c: '#7a8a96', p: [x + 0.12, 0.44, -0.08] });
+      }
+      for (const x of [-0.32, -0.14, 0.04, 0.22]) { P.push({ g: box(0.1, 0.14, 0.02), c: '#2a2a30', p: [x, 0.21, 0.155] }); G.push({ g: box(0.08, 0.12, 0.02), c: '#fff', p: [x, 0.21, 0.158] }); P.push({ g: box(0.12, 0.025, 0.03), c: '#d8c8a8', p: [x, 0.29, 0.16] }); }
+      P.push({ g: box(0.16, 0.2, 0.02), c: '#3a2a1e', p: [0.36, 0.1, 0.155] }); // 문
+      P.push({ g: box(0.24, 0.26, 0.3), c: brick2, p: [0.4, 0.13, -0.12] }); // 보일러실
+      P.push({ g: w3dPrism(0.32, 0.1, 0.26), c: slate, p: [0.4, 0.26, -0.12] });
+      for (const [x, z, r, h] of W3_STACKS.factory.map(a => [a[0], a[2], a[3], a[1]])) {
+        P.push({ g: cyl(r * 0.8, r, h, 8), c: brick2, p: [x, h / 2, z] });
+        P.push({ g: cyl(r * 0.95, r * 0.95, 0.04, 8), c: '#3a3230', p: [x, h - 0.02, z] });
+        P.push({ g: cyl(r * 1.02, r * 1.02, 0.03, 8), c: '#d8c8a8', p: [x, h * 0.62, z] });
+      }
+      P.push({ g: ico(0.13, 0), c: '#1e1c1c', p: [-0.32, 0.05, 0.28], s: [1.4, 0.5, 1] }); // 석탄 더미
+      P.push({ g: box(0.16, 0.1, 0.12), c: '#5a4a3a', p: [0.08, 0.05, 0.3] });
+      P.push({ g: cyl(0.05, 0.05, 0.14, 8), c: '#3a3a40', p: [-0.1, 0.07, 0.3], r: [0, 0, Math.PI / 2] }); // 기계 부품
+      P.push({ g: cyl(0.05, 0.05, 0.14, 8), c: '#3a3a40', p: [-0.1, 0.07, 0.36], r: [0, 0, Math.PI / 2] });
+    }
     if (!P.length && typeof w3dResBldGeo === 'function') return w3dResBldGeo(type); // tap-to-act / resource buildings
     return { main: R3D.merge(P), glow: G.length ? R3D.merge(G) : null, flag };
   });
@@ -858,8 +882,10 @@ function w3dPalisadeGeo() {
 // ---------- 모습 ----------
 const W3_HS = 1.4; // 말 크기
 const W3_WIN = new THREE.Color('#ff9a44'), W3_FIRE = new THREE.Color('#ff7a26');
-const W3_WINB = { house: 1, school: 1, market: 1, barracks: 1, lumber: 1, mine: 1, stable: 1 }; // 밤에 창/문간 불이 켜지는 건물
-const W3_BSCALE = { school: [1.25, 1.35, 1.25], house: [1.25, 1.4, 1.25], tower: [1.15, 1.45, 1.15], market: [1.2, 1.35, 1.2], farm: [1, 1.3, 1] };
+const W3_WINB = { house: 1, school: 1, market: 1, barracks: 1, lumber: 1, mine: 1, stable: 1, factory: 1 }; // 밤에 창/문간 불이 켜지는 건물
+const W3_BSCALE = { school: [1.25, 1.35, 1.25], house: [1.25, 1.4, 1.25], tower: [1.15, 1.45, 1.15], market: [1.2, 1.35, 1.2], farm: [1, 1.3, 1], factory: [1.4, 1.55, 1.4] };
+// 굴뚝 [x, 높이, z, 반지름] (건물 자리 기준, W3_BSCALE 곱하기 전) → 연기 (w3dSmoke)
+const W3_STACKS = { factory: [[0.3, 0.92, -0.26, 0.065], [0.13, 0.7, -0.3, 0.05]] };
 const W3_LOOK = {
   player: { body: '#2b5fb8', trim: '#f2c14e', cape: '#c0392b', hat: 'crown', weapon: 'sword', armor: true, scale: 1.45 * 1.1 },
   bandit: { body: '#7a2a22', trim: '#2a1a12', legs: '#2a2420', hat: 'hood', helm: '#3a2a22', weapon: 'club', scale: 1.45, tint: '#8a2a20', lod: 1 },
@@ -905,7 +931,7 @@ function w3dHuman(obj, look) { const key = R3D.human.key(look); return w3dUse(ob
 
 // ---------- 등불 · 횃불 (시대별) ----------
 function w3dLampGeo(k) {
-  const { box, cyl, cone } = R3D.prim;
+  const { box, cyl, cone, ico } = R3D.prim;
   return R3D.cached('lamp|' + k, () => {
     if (k === 'torch') return R3D.merge([
       { g: cyl(0.03, 0.045, 0.9, 5), c: '#5a3a20', p: [0, 0.45, 0] },
@@ -917,6 +943,14 @@ function w3dLampGeo(k) {
       { g: box(0.24, 0.04, 0.04), c: '#4a3420', p: [0.09, 0.98, 0] },
       { g: box(0.11, 0.15, 0.11), c: '#ffd890', p: [0.18, 0.86, 0] },
       { g: cone(0.095, 0.07, 4), c: '#2a2420', p: [0.18, 0.97, 0], r: [0, Math.PI / 4, 0] },
+    ]);
+    if (k === 'gas') return R3D.merge([ // 가스 가로등 (근대): 높은 무쇠 기둥 + 유리 등갓
+      { g: cyl(0.075, 0.1, 0.16, 6), c: '#1c2024', p: [0, 0.08, 0] },
+      { g: cyl(0.026, 0.038, 1.5, 6), c: '#22272c', p: [0, 0.82, 0] },
+      { g: box(0.2, 0.025, 0.025), c: '#22272c', p: [0, 1.42, 0] },
+      { g: cyl(0.1, 0.06, 0.2, 6), c: '#fff0c4', p: [0, 1.66, 0] },
+      { g: cone(0.12, 0.1, 6), c: '#1c2024', p: [0, 1.81, 0] },
+      { g: ico(0.025, 0), c: '#1c2024', p: [0, 1.88, 0] },
     ]);
     return R3D.merge([ // 가로등 (근세)
       { g: cyl(0.03, 0.045, 1.35, 6), c: '#2a2e34', p: [0, 0.675, 0] },
@@ -931,6 +965,7 @@ const W3_LAMP = [ // 시대별: 모양, 불빛 높이/옆 위치, 색, 세기
   { k: 'lantern', y: 0.86, dx: 0.18, col: new THREE.Color('#ff8a30'), i: 3.0 },
   { k: 'lantern', y: 0.86, dx: 0.18, col: new THREE.Color('#ff9438'), i: 3.3 },
   { k: 'lamp', y: 1.43, dx: 0, col: new THREE.Color('#ffa048'), i: 3.6 },
+  { k: 'gas', y: 1.66, dx: 0, col: new THREE.Color('#ffd89a'), i: 4.0 },
 ];
 // 마을 둘레 등불 자리 (마을 레벨·시대·건물이 바뀔 때만 다시 계산)
 function w3dTownLamps(t, m) {
@@ -1121,7 +1156,9 @@ function drawWorld3D() {
   // 동적 오브젝트
   const bars = [], labels = [], lights = [], coins = [];
   const BL = W3.blobs; BL.begin();
-  const LE = W3_LAMP[clamp(S.era | 0, 0, 3)], lampN = { torch: 0, lantern: 0, lamp: 0 };
+  const smoke = w3dSmokeBegin(); // 굴뚝·기차 연기 (근대)
+  w3dRail(dt, tm, smoke, lights); // 철도 · 기차 (근대 + 🚂 철도)
+  const LE = W3_LAMP[clamp(S.era | 0, 0, ERAS.length - 1)], lampN = { torch: 0, lantern: 0, lamp: 0, gas: 0 };
   const litFrac = clamp(0.3 + S.era * 0.14 + S.towns.reduce((s, t) => s + t.pop, 0) / 300, 0.2, 0.95);
   for (const t of S.towns) {
     const x = t.x + 0.5, z = t.y + 0.5;
@@ -1181,6 +1218,7 @@ function drawWorld3D() {
     });
     r.m.group.position.set(x, 0, z); r.m.group.scale.set(...r.m.sc); if (r.m.ry !== undefined) r.m.group.rotation.y = r.m.ry;
     if (r.m.flag) w3dWave(r.m.flag, tm);
+    if (W3_STACKS[b.type] && !rb && !ab) { const sc = r.m.sc; for (const st of W3_STACKS[b.type]) smoke.push(x + st[0] * sc[0], st[1] * sc[1], z + st[2] * sc[2], 1, 0.32, b.x * 7 + b.y + st[0]); }
     if (b.type === 'tower') lights.push({ x, y: 1.75, z: z + 0.3, col: LE.col, k: 2.6, glow: 0.7, pool: 1.7, fire: S.era === 0, real: true, r: 5 });
     else if (W3_WINB[b.type] && hash2(b.x * 3 + 1, b.y * 5 + 2) < litFrac) lights.push({ x: x + 0.05, y: 0.45, z: z + 0.5, col: W3_WIN, k: 1.5, glow: 0.42, pool: 0.95 });
   }
@@ -1303,6 +1341,8 @@ function drawWorld3D() {
   } else W3.ring.visible = false;
 
   BL.end();
+  w3dSmokeEnd(smoke, tm);
+  w3dFieldGuns(W3.fguns, [bandits, soldiers], dt);
   for (const k in W3.lamps) { const m = W3.lamps[k]; m.count = lampN[k]; m.visible = lampN[k] > 0; m.instanceMatrix.needsUpdate = true; }
   const L = w3dLighting(lights);
   R3D.render(W3.scene, W3.cam);
@@ -1447,12 +1487,12 @@ function w3dEvent(dt, tm, BL) {
 }
 
 // ---------- 사실적 건물 · 마을 (real3d.js) ----------
-const W3_RHOUSE = ['hut_tribal', 'house_ancient', 'house_medieval', 'house_earlymodern'];
+const W3_RHOUSE = ['hut_tribal', 'house_ancient', 'house_medieval', 'house_earlymodern', 'house_earlymodern']; // 근대: 근세 집 그대로 (공장·철도·가로등이 시대를 보여 준다)
 // 시대별 집 크기: 폭(타일) · 높이 배율 (사람이 크게 그려지는 게임이라 낮은 집은 조금 높여 읽히게)
 const W3_RHFIT = { hut_tribal: [0.98, 1.12], house_ancient: [1.06, 1.3], house_medieval: [1.0, 1.1], house_earlymodern: [1.04, 1.06] };
 function w3dRealBld(b) {
   if (!w3dRealOK()) return null;
-  if (b.type === 'house') { const k = W3_RHOUSE[clamp(S.era | 0, 0, 3)]; return RA.has(k) ? k : null; }
+  if (b.type === 'house') { const k = W3_RHOUSE[clamp(S.era | 0, 0, ERAS.length - 1)]; return RA.has(k) ? k : null; }
   if (b.type === 'farm') return RA.has('farm_field') ? 'farm_field' : null;
   if (b.type === 'tower') { const k = S.era >= 2 ? 'tower_stone' : 'tower_wood'; return RA.has(k) ? k : null; } // 부족·고대 = 통나무 망루, 중세+ = 돌 망루
   if (W3_RBFIT[b.type]) return RA.has(b.type) ? b.type : null;
@@ -1495,7 +1535,7 @@ function w3dRealTown(lv, era) {
     const b = RA.box('castle_keep'); // 깃대: 가장 높은 탑 위 (상자 가운데)
     fx = (b.min.x + b.max.x) / 2 * s; fz += (b.min.z + b.max.z) / 2 * s;
   } else {
-    const hk = W3_RHOUSE[clamp(era, 0, 3)], f = W3_RHFIT[hk] || [1, 1], s = RA.fit(hk, 1.3 + lv * 0.1);
+    const hk = W3_RHOUSE[clamp(era, 0, ERAS.length - 1)], f = W3_RHFIT[hk] || [1, 1], s = RA.fit(hk, 1.3 + lv * 0.1);
     const hm = RA.group(hk, true); hm.scale.set(s, s * f[1], s); hm.position.z = -0.12; g.add(hm);
     top = RA.height(hk) * s * f[1]; fz = -0.12;
   }
@@ -1506,7 +1546,7 @@ function w3dRealTown(lv, era) {
       list.push({ x: Math.sin(a) * R, z: Math.cos(a) * R, ry: a, s: sp, sx: Math.PI * 2 * R / n / (4.01 * sp) * 1.05, sy: 0.95 + hash2(k, lv) * 0.12 });
     }
     const pi = RA.inst('palisade', list, { shadow: true }); if (pi) { g.add(pi); disp.push(pi); }
-  } else if (era >= 2 && RA.has('wall_stone')) { // 돌 성벽 (네모, 앞쪽 가운데 성문 자리 비움)
+  } else if (era >= 2 && era <= 3 && RA.has('wall_stone')) { // 돌 성벽 (네모, 앞쪽 가운데 성문 자리 비움) — 근대 도시는 성벽을 헐었다
     const hs = 1.36, sw = 0.088 + lv * 0.004, side = hs * 2 + 0.2, n = Math.max(3, Math.round(side / (8 * sw)) | 1), seg = side / n, list = [];
     for (let k = 0; k < n; k++) {
       const u = -side / 2 + (k + 0.5) * seg, sx = seg / (8 * sw) * 1.02;
@@ -1519,16 +1559,23 @@ function w3dRealTown(lv, era) {
   }
   if (RA.has('well')) { const w = RA.group('well', true); w.scale.setScalar(0.17); w.position.set(0.92, 0, 0.8); w.rotation.y = -0.5; g.add(w); }
   if (era <= 2 && RA.has('campfire')) { const c = RA.group('campfire', false); c.scale.setScalar(0.24); c.position.set(-0.88, 0, 0.82); g.add(c); camp = [-0.88, 0.82]; }
+  let stacks = null;
+  if (era >= 4) { // 근대: 성 뒤 벽돌 공장 (굴뚝 연기)
+    const fg = w3dBuildingGeo('factory'), fx0 = -1.1, fz0 = -0.95, fs = 0.8, sc = W3_BSCALE.factory;
+    const fm = new THREE.Mesh(fg.main, R3D.mats.vc); fm.castShadow = fm.receiveShadow = true; fm.position.set(fx0, 0, fz0); fm.scale.set(sc[0] * fs, sc[1] * fs, sc[2] * fs); g.add(fm);
+    if (fg.glow) { const gm = new THREE.Mesh(fg.glow, R3D.mats.glow); gm.position.copy(fm.position); gm.scale.copy(fm.scale); g.add(gm); }
+    stacks = W3_STACKS.factory.map(st => [fx0 + st[0] * sc[0] * fs, st[1] * sc[1] * fs, fz0 + st[2] * sc[2] * fs]);
+  }
   const pole = new THREE.Mesh(w3dPoleGeo(), R3D.mats.vc); pole.position.set(fx, top - 0.06, fz); pole.castShadow = true; g.add(pole);
-  return { group: g, top: top + 0.6, flag: [fx + 0.02, top + 0.53, fz], camp, dispose() { for (const d of disp) d.userData.dispose(); } };
+  return { group: g, top: top + 0.6, flag: [fx + 0.02, top + 0.53, fz], camp, stacks, dispose() { for (const d of disp) d.userData.dispose(); } };
 }
 function w3dRealTownDraw(t, x, z, col, AV, labels, lights, LE, lampN, tm) {
-  if (!RA.has(W3_RHOUSE[clamp(S.era | 0, 0, 3)])) return false;
+  if (!RA.has(W3_RHOUSE[clamp(S.era | 0, 0, ERAS.length - 1)])) return false;
   const r = w3dUse(t, 'rtown|' + col + '|' + AV, () => { const group = new THREE.Group(), flag = w3dFlag(col); group.add(flag.mesh); return { group, flag, body: null, key: '' }; });
   const m = r.m, lv = townLevel(t), key = lv + '|' + S.era;
   if (m.key !== key) {
     if (m.body) { m.group.remove(m.body.group); m.body.dispose(); }
-    m.body = w3dRealTown(lv, clamp(S.era | 0, 0, 3)); m.group.add(m.body.group);
+    m.body = w3dRealTown(lv, clamp(S.era | 0, 0, ERAS.length - 1)); m.group.add(m.body.group);
     m.flag.mesh.position.set(...m.body.flag); m.top = m.body.top; m.key = key;
   }
   m.group.position.set(x, 0, z); w3dWave(m.flag, tm);
@@ -1538,6 +1585,7 @@ function w3dRealTownDraw(t, x, z, col, AV, labels, lights, LE, lampN, tm) {
     if (lampN[LE.k] < 160) { w3dM4.makeTranslation(lx, 0, lz); LM.setMatrixAt(lampN[LE.k]++, w3dM4); }
     lights.push({ x: lx + LE.dx, y: LE.y, z: lz, col: LE.col, k: LE.i, glow: 0.6, pool: 1.6, fire: LE.fire, real: true, r: 5 });
   }
+  if (m.body.stacks && W3.smokeSrc) for (const st of m.body.stacks) W3.smokeSrc.push(x + st[0], st[1], z + st[2], 1, 0.36, t.id * 5 + st[0]);
   if (m.body.camp) lights.push({ x: x + m.body.camp[0], y: 0.28, z: z + m.body.camp[1], col: W3_FIRE, k: 3.4, glow: 0.75, pool: 1.9, fire: true, real: true, r: 5 });
   lights.push({ x, y: Math.min(1.6, m.top * 0.4), z: z + 0.7, col: W3_WIN, k: 0.8, glow: 0, pool: 2.0 + lv * 0.2, real: true, r: 4 + lv * 0.5 });
   return true;
@@ -1608,4 +1656,224 @@ function w3dResBldGeo(type) {
     G.push({ g: box(0.06, 0.06, 0.02), c: '#fff', p: [0, 0.38, 0.1] });
   }
   return { main: R3D.merge(P), glow: G.length ? R3D.merge(G) : null, flag: null };
+}
+
+// ---------- 근대: 굴뚝 연기 · 야포 · 철도와 기차 ----------
+// 모두 공용 인스턴스 몇 개(연기 1 · 야포 1 · 침목 1 · 레일 1 · 교각 1 · 역 1) + 기차 메시 몇 개라 가볍다.
+// 연기: 상태를 따로 두지 않고 시간(tm)으로 각 굴뚝의 연기 덩이 6개 위치를 계산 (올라가며 커지고 바람에 밀리다 사라짐)
+const W3_PUFF_N = 160, W3_PUFF_K = 6;
+function w3dSmokeInit() {
+  if (W3.puffs) return;
+  const m = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(1, 1), new THREE.MeshLambertMaterial({ color: 0xffffff, transparent: true, opacity: 0.5, depthWrite: false }), W3_PUFF_N);
+  m.instanceMatrix.setUsage(THREE.DynamicDrawUsage); m.frustumCulled = false; m.count = 0; m.renderOrder = 2;
+  m.setColorAt(0, new THREE.Color(1, 1, 1)); W3.scene.add(m); W3.puffs = m;
+  const fg = new THREE.InstancedMesh(w3dFieldGunGeo(), R3D.mats.vc, 24);
+  fg.instanceMatrix.setUsage(THREE.DynamicDrawUsage); fg.frustumCulled = false; fg.count = 0; fg.castShadow = true; W3.scene.add(fg); W3.fguns = fg;
+}
+// 굴뚝 목록: [x, y, z, 종류(1 공장 검은 연기 · 2 기차 흰 김), 크기, 씨앗] 여섯 개씩
+function w3dSmokeBegin() { w3dSmokeInit(); const a = W3.smokeSrc || (W3.smokeSrc = []); a.length = 0; return a; }
+const w3dPC = new THREE.Color();
+function w3dSmokeEnd(src, tm) {
+  const m = W3.puffs; let n = 0;
+  for (let i = 0; i < src.length && n < W3_PUFF_N - W3_PUFF_K; i += 6) {
+    const x = src[i], y = src[i + 1], z = src[i + 2], kind = src[i + 3], sz = src[i + 4], seed = src[i + 5];
+    if (!w3dInView(x + 0.6, z, 2.2)) continue;
+    const rise = kind === 2 ? 0.9 : 1.7, spd = kind === 2 ? 0.55 : 0.24;
+    for (let j = 0; j < W3_PUFF_K; j++) {
+      const ph = ((tm * spd + j / W3_PUFF_K + seed * 0.1371) % 1 + 1) % 1;
+      const fade = ph < 0.12 ? ph / 0.12 : ph > 0.7 ? Math.max(0, (1 - ph) / 0.3) : 1;
+      const s = sz * (0.32 + ph * 1.5) * fade, wob = Math.sin(seed * 3 + j * 1.7 + tm * 0.8) * 0.08;
+      w3dM4.makeScale(s, s * 0.82, s); w3dM4.setPosition(x + ph * ph * 1.1 + wob, y + ph * rise, z - ph * 0.35 + wob * 0.5);
+      m.setMatrixAt(n, w3dM4);
+      const c = kind === 2 ? 0.92 - ph * 0.08 : 0.2 + ph * 0.36; w3dPC.setRGB(c, c * 0.98, c * 0.95); m.setColorAt(n, w3dPC);
+      n++;
+    }
+  }
+  m.count = n; m.visible = n > 0; m.instanceMatrix.needsUpdate = true; if (m.instanceColor) m.instanceColor.needsUpdate = true;
+}
+// 야포 (+x 가 포구). 바퀴 둘 · 방패판 · 가는 포신 · 포가 — battleEra.js 도 같은 모양을 쓴다
+function w3dFieldGunGeo() {
+  const { box, cyl, ico } = R3D.prim;
+  return R3D.cached('fieldgun', () => {
+    const P = [
+      { g: cyl(0.045, 0.07, 1.15, 8), c: '#2e3236', p: [0.38, 0.44, 0], r: [0, 0, -Math.PI / 2 + 0.06] },
+      { g: cyl(0.085, 0.085, 0.24, 8), c: '#26292c', p: [-0.16, 0.42, 0], r: [0, 0, Math.PI / 2] },
+      { g: box(0.04, 0.42, 0.62), c: '#4a5048', p: [0.08, 0.52, 0] },
+      { g: box(0.9, 0.08, 0.12), c: '#4a3a28', p: [-0.55, 0.2, 0], r: [0, 0, 0.32] },
+      { g: box(0.2, 0.06, 0.16), c: '#3a2e22', p: [-0.98, 0.05, 0] },
+      { g: cyl(0.03, 0.03, 0.66, 6), c: '#26292c', p: [-0.02, 0.36, 0], r: [Math.PI / 2, 0, 0] },
+    ];
+    for (const zz of [-0.3, 0.3]) {
+      P.push({ g: new THREE.TorusGeometry(0.34, 0.03, 4, 14), c: '#5a3e24', p: [-0.02, 0.36, zz] });
+      P.push({ g: cyl(0.06, 0.06, 0.08, 8), c: '#2e2a26', p: [-0.02, 0.36, zz], r: [Math.PI / 2, 0, 0] });
+      for (let k = 0; k < 3; k++) P.push({ g: box(0.66, 0.025, 0.02), c: '#6a4a2c', p: [-0.02, 0.36, zz], r: [0, 0, k * Math.PI / 3] });
+    }
+    P.push({ g: box(0.3, 0.2, 0.22), c: '#4a5a3a', p: [-0.6, 0.1, 0.42] }); // 탄약 상자
+    P.push({ g: ico(0.06, 0), c: '#2a2a2a', p: [-0.42, 0.06, 0.5] });
+    return R3D.merge(P);
+  });
+}
+// 오픈월드 야포병 옆에 대포 (적 군단·산적·내 병사 중 ut === 'gun')
+function w3dFieldGuns(m, lists) {
+  if (!m) return;
+  let n = 0;
+  for (const L of lists) for (const u of L) {
+    if (u.ut !== 'gun' || n >= 24) continue;
+    const f = u.face || 1, x = u.x / T + f * 0.62, z = u.y / T + 0.12;
+    if (!w3dInView(x, z, 1.2)) continue;
+    const k = Math.max(0, u.swing || 0) / 0.25 * 0.12;
+    w3dQ.setFromAxisAngle(w3dUp, f > 0 ? 0 : Math.PI); w3dV.set(x - f * k, 0, z); w3dSc.setScalar(0.85);
+    w3dM4.compose(w3dV, w3dQ, w3dSc); m.setMatrixAt(n++, w3dM4);
+  }
+  m.count = n; m.visible = n > 0; m.instanceMatrix.needsUpdate = true;
+}
+
+// 철도: 마을들을 최소 신장 트리로 잇고, 칸 격자 위 최단 경로(물 = 다리, 산은 크게 돌아감)를 부드럽게 다듬어 침목·레일을 깐다.
+// 🚂 철도 연구 + 근대 + 마을 2곳 이상일 때. 마을이 바뀔 때만 다시 만든다. 가장 긴 철길 3개에 기차가 오간다
+function w3dRailPath(a, b) {
+  const N = W * H, dist = new Float32Array(N).fill(1e9), prev = new Int32Array(N).fill(-1), done = new Uint8Array(N);
+  const occ = new Uint8Array(N); for (const bb of S.buildings) occ[bb.y * W + bb.x] = 1; for (const t of S.towns) occ[t.y * W + t.x] = 2;
+  const cost = i => { const t = S.tiles[i]; let c = t === WATER ? 5 : t === FOREST ? 2.2 : t === MOUNTAIN || t === GOLD ? 40 : 1; if (occ[i] === 1) c += 6; else if (occ[i] === 2) c += 30; return c; };
+  const s0 = a.y * W + a.x, g0 = b.y * W + b.x;
+  const heap = [[0, s0]]; dist[s0] = 0;
+  const push = e => { heap.push(e); let i = heap.length - 1; while (i) { const p = (i - 1) >> 1; if (heap[p][0] <= heap[i][0]) break; [heap[p], heap[i]] = [heap[i], heap[p]]; i = p; } };
+  const pop = () => { const top = heap[0], last = heap.pop(); if (heap.length) { heap[0] = last; let i = 0; for (;;) { const l = i * 2 + 1, r = l + 1; let m = i; if (l < heap.length && heap[l][0] < heap[m][0]) m = l; if (r < heap.length && heap[r][0] < heap[m][0]) m = r; if (m === i) break; [heap[m], heap[i]] = [heap[i], heap[m]]; i = m; } } return top; };
+  const D8 = [[1, 0, 1], [-1, 0, 1], [0, 1, 1], [0, -1, 1], [1, 1, 1.414], [1, -1, 1.414], [-1, 1, 1.414], [-1, -1, 1.414]];
+  while (heap.length) {
+    const [d, i] = pop(); if (done[i]) continue; done[i] = 1; if (i === g0) break;
+    const x = i % W, y = (i / W) | 0;
+    for (const [dx, dy, k] of D8) {
+      const nx = x + dx, ny = y + dy; if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue;
+      const j = ny * W + nx; if (done[j]) continue;
+      const nd = d + k * (j === g0 ? 1 : cost(j)); if (nd < dist[j]) { dist[j] = nd; prev[j] = i; push([nd, j]); }
+    }
+  }
+  if (prev[g0] < 0) return null;
+  const pts = []; for (let i = g0; i >= 0; i = prev[i]) { pts.push([i % W + 0.5, ((i / W) | 0) + 0.5]); if (i === s0) break; }
+  return pts.reverse();
+}
+function w3dRailSmooth(pts) {
+  for (let it = 0; it < 3; it++) { // 차이킨 다듬기
+    const o = [pts[0]];
+    for (let i = 0; i < pts.length - 1; i++) { const a = pts[i], b = pts[i + 1]; o.push([a[0] * 0.75 + b[0] * 0.25, a[1] * 0.75 + b[1] * 0.25], [a[0] * 0.25 + b[0] * 0.75, a[1] * 0.25 + b[1] * 0.75]); }
+    o.push(pts[pts.length - 1]); pts = o;
+  }
+  return pts;
+}
+// 폴리라인 → 일정 간격 표본 [{x, z, a(진행 방향 각), s(누적 길이)}]
+function w3dRailSample(pts, step) {
+  const out = []; let acc = 0, need = 0;
+  for (let i = 0; i < pts.length - 1; i++) {
+    const a = pts[i], b = pts[i + 1], L = Math.hypot(b[0] - a[0], b[1] - a[1]); if (L < 1e-6) continue;
+    const ang = Math.atan2(b[1] - a[1], b[0] - a[0]);
+    while (need <= acc + L) { const f = (need - acc) / L; out.push({ x: a[0] + (b[0] - a[0]) * f, z: a[1] + (b[1] - a[1]) * f, a: ang, s: need }); need += step; }
+    acc += L;
+  }
+  return out;
+}
+function w3dRailBuild() {
+  const R = W3.rail;
+  if (R.group) { W3.scene.remove(R.group); R.group.traverse(o => { if (o.isInstancedMesh) o.dispose(); }); }
+  R.group = new THREE.Group(); W3.scene.add(R.group); R.routes = [];
+  const T0 = S.towns; if (T0.length < 2) return;
+  // 최소 신장 트리 (프림)
+  const inT = [0], edges = [];
+  while (inT.length < T0.length) {
+    let best = null, bd = 1e9;
+    for (const i of inT) for (let j = 0; j < T0.length; j++) { if (inT.includes(j)) continue; const d = Math.hypot(T0[i].x - T0[j].x, T0[i].y - T0[j].y); if (d < bd) { bd = d; best = [i, j]; } }
+    inT.push(best[1]); edges.push(best);
+  }
+  const ties = [], rails = [], posts = [], stations = [];
+  for (const [i, j] of edges) {
+    let pts = w3dRailPath(T0[i], T0[j]); if (!pts || pts.length < 4) continue;
+    pts = w3dRailSmooth(pts);
+    // 마을 한가운데(성)까지 들어가지 않게 양 끝을 잘라 역을 둔다
+    const all = w3dRailSample(pts, 0.25), cut = 1.7;
+    const L = all.length ? all[all.length - 1].s : 0; if (L < cut * 2 + 1) continue;
+    const smp = all.filter(p => p.s >= cut && p.s <= L - cut);
+    if (smp.length < 4) continue;
+    for (const p of smp) p.s -= cut;
+    smp.forEach((p, k) => {
+      ties.push(p);
+      if (k % 2 === 0 && k + 2 < smp.length) rails.push([p, smp[k + 2]]);
+      if (k % 3 === 0 && tileAt(Math.floor(p.x), Math.floor(p.z)) === WATER) posts.push(p);
+    });
+    for (const e of [smp[0], smp[smp.length - 1]]) stations.push(e);
+    R.routes.push({ pts: smp, L: smp[smp.length - 1].s });
+  }
+  const D = new THREE.Object3D(), mk = (geo, n) => { const m = new THREE.InstancedMesh(geo, R3D.mats.vc, Math.max(1, n)); m.count = n; m.receiveShadow = true; R.group.add(m); return m; };
+  const { box, cyl } = R3D.prim;
+  const tieG = R3D.cached('rtie', () => R3D.merge([{ g: box(0.08, 0.035, 0.36), c: '#5a4632', p: [0, 0.018, 0] }]));
+  const railG = R3D.cached('rrail', () => R3D.merge([{ g: box(1, 0.035, 0.026), c: '#8a8e94', p: [0.5, 0.055, 0.11] }, { g: box(1, 0.035, 0.026), c: '#8a8e94', p: [0.5, 0.055, -0.11] }, { g: box(1, 0.012, 0.5), c: '#6e6a5e', p: [0.5, 0.004, 0] }]));
+  const postG = R3D.cached('rpost', () => R3D.merge([{ g: cyl(0.04, 0.05, 0.8, 5), c: '#4a3a2a', p: [0, -0.38, 0.14] }, { g: cyl(0.04, 0.05, 0.8, 5), c: '#4a3a2a', p: [0, -0.38, -0.14] }, { g: box(0.08, 0.06, 0.42), c: '#5a4632', p: [0, -0.02, 0] }]));
+  const stG = R3D.cached('rstation', () => R3D.merge([ // 작은 간이역: 승강장 + 지붕 + 벽돌 대합실
+    { g: box(1.1, 0.08, 0.34), c: '#b8ae98', p: [0, 0.04, 0.36] },
+    { g: box(0.5, 0.3, 0.26), c: '#9a4632', p: [0.15, 0.23, 0.42] }, { g: w3dPrism(0.36, 0.12, 0.56).rotateY(Math.PI / 2), c: '#3e4248', p: [0.15, 0.38, 0.42] },
+    { g: box(0.9, 0.025, 0.3), c: '#3e4248', p: [-0.1, 0.42, 0.34] },
+    { g: cyl(0.015, 0.015, 0.36, 4), c: '#22272c', p: [-0.5, 0.24, 0.24] }, { g: cyl(0.015, 0.015, 0.36, 4), c: '#22272c', p: [-0.2, 0.24, 0.24] },
+    { g: box(0.16, 0.08, 0.02), c: '#f2ead6', p: [0.15, 0.48, 0.28] },
+  ]));
+  const tm = mk(tieG, ties.length), rm = mk(railG, rails.length), pm = mk(postG, posts.length), sm = mk(stG, stations.length);
+  sm.castShadow = true;
+  ties.forEach((p, k) => { D.position.set(p.x, 0, p.z); D.rotation.set(0, -p.a, 0); D.scale.set(1, 1, 1); D.updateMatrix(); tm.setMatrixAt(k, D.matrix); });
+  rails.forEach(([a, b], k) => { const L = Math.hypot(b.x - a.x, b.z - a.z); D.position.set(a.x, 0, a.z); D.rotation.set(0, -Math.atan2(b.z - a.z, b.x - a.x), 0); D.scale.set(L + 0.01, 1, 1); D.updateMatrix(); rm.setMatrixAt(k, D.matrix); });
+  posts.forEach((p, k) => { D.position.set(p.x, 0, p.z); D.rotation.set(0, -p.a, 0); D.scale.set(1, 1, 1); D.updateMatrix(); pm.setMatrixAt(k, D.matrix); });
+  stations.forEach((p, k) => { D.position.set(p.x, 0, p.z); D.rotation.set(0, -p.a, 0); D.scale.set(1, 1, 1); D.updateMatrix(); sm.setMatrixAt(k, D.matrix); });
+  for (const m of [tm, rm, pm, sm]) { m.instanceMatrix.needsUpdate = true; m.computeBoundingSphere && m.computeBoundingSphere(); m.frustumCulled = false; }
+  // 기차: 가장 긴 철길 3개
+  const locoG = R3D.cached('rloco', () => R3D.merge([
+    { g: box(0.62, 0.06, 0.26), c: '#1e1e22', p: [0, 0.12, 0] },
+    { g: cyl(0.11, 0.11, 0.38, 10), c: '#22262a', p: [0.1, 0.27, 0], r: [0, 0, Math.PI / 2] },
+    { g: cyl(0.115, 0.115, 0.03, 10), c: '#c8a040', p: [0.02, 0.27, 0], r: [0, 0, Math.PI / 2] },
+    { g: cyl(0.04, 0.055, 0.14, 8), c: '#18181a', p: [0.22, 0.43, 0] },
+    { g: cyl(0.03, 0.03, 0.06, 6), c: '#c8a040', p: [0.08, 0.4, 0] },
+    { g: box(0.2, 0.26, 0.26), c: '#7a1e1a', p: [-0.18, 0.3, 0] }, { g: box(0.24, 0.03, 0.3), c: '#1e1e22', p: [-0.18, 0.44, 0] },
+    { g: box(0.1, 0.07, 0.02), c: '#ffe8b0', p: [-0.16, 0.34, 0.131] }, { g: box(0.1, 0.07, 0.02), c: '#ffe8b0', p: [-0.16, 0.34, -0.131] },
+    { g: box(0.06, 0.08, 0.28), c: '#7a1e1a', p: [0.31, 0.15, 0], r: [0, 0, 0.5] }, // 배장기
+    { g: cyl(0.03, 0.03, 0.02, 6), c: '#fff2c0', p: [0.3, 0.3, 0], r: [0, 0, Math.PI / 2] },
+    ...[-0.2, 0.0, 0.18].flatMap(x => [{ g: cyl(0.075, 0.075, 0.03, 10), c: '#8a1e1a', p: [x, 0.08, 0.12], r: [Math.PI / 2, 0, 0] }, { g: cyl(0.075, 0.075, 0.03, 10), c: '#8a1e1a', p: [x, 0.08, -0.12], r: [Math.PI / 2, 0, 0] }]),
+  ]));
+  const carG = R3D.cached('rcar', () => R3D.merge([
+    { g: box(0.52, 0.05, 0.26), c: '#1e1e22', p: [0, 0.12, 0] },
+    { g: box(0.5, 0.22, 0.26), c: '#3a5a3a', p: [0, 0.26, 0] }, { g: box(0.54, 0.03, 0.3), c: '#2a2a2e', p: [0, 0.385, 0], s: [1, 1, 1] },
+    ...[-0.16, 0, 0.16].flatMap(x => [{ g: box(0.09, 0.07, 0.02), c: '#f2e2b0', p: [x, 0.29, 0.131] }, { g: box(0.09, 0.07, 0.02), c: '#f2e2b0', p: [x, 0.29, -0.131] }]),
+    ...[-0.17, 0.17].flatMap(x => [{ g: cyl(0.06, 0.06, 0.03, 8), c: '#2a2a2e', p: [x, 0.07, 0.12], r: [Math.PI / 2, 0, 0] }, { g: cyl(0.06, 0.06, 0.03, 8), c: '#2a2a2e', p: [x, 0.07, -0.12], r: [Math.PI / 2, 0, 0] }]),
+  ]));
+  R.trains = [...R.routes].sort((a, b) => b.L - a.L).slice(0, 3).filter(r => r.L > 3).map((r, k) => {
+    const meshes = [new THREE.Mesh(locoG, R3D.mats.vc), new THREE.Mesh(carG, R3D.mats.vc), new THREE.Mesh(carG, R3D.mats.vc)];
+    for (const m of meshes) { m.castShadow = true; R.group.add(m); }
+    return { r, meshes, seed: k * 3.7 + 1.3 };
+  });
+}
+// 철길 위 누적 길이 s 의 점 (표본 사이 보간)
+function w3dRailAt(r, s, o) {
+  const P = r.pts, st = P.length > 1 ? P[1].s - P[0].s : 0.25;
+  const i = clamp(Math.floor(s / st), 0, P.length - 2), a = P[i], b = P[i + 1], f = clamp((s - a.s) / (b.s - a.s || 1), 0, 1);
+  o.x = a.x + (b.x - a.x) * f; o.z = a.z + (b.z - a.z) * f; o.a = Math.atan2(b.z - a.z, b.x - a.x); return o;
+}
+const w3dRP = { x: 0, z: 0, a: 0 }, W3_TRAIN_LIGHT = new THREE.Color('#ffe6a8');
+function w3dRail(dt, tm, smoke, lights) {
+  const R = W3.rail || (W3.rail = { key: null, group: null, routes: [], trains: [] });
+  const on = S.era >= 4 && techHas('railway') && S.towns.length >= 2;
+  const key = on ? S.towns.map(t => t.x + ',' + t.y).join(';') : ''; // 마을이 바뀔 때만 (건물 하나 지을 때마다 경로를 다시 찾지 않게)
+  if (key !== R.key) {
+    R.key = key;
+    if (on) w3dRailBuild(); else if (R.group) { W3.scene.remove(R.group); R.group = null; R.routes = []; R.trains = []; }
+  }
+  if (!R.group) return;
+  const SP = 2.2, GAP = 0.75;
+  for (const tr of R.trains) {
+    const L = tr.r.L, u = (tm * SP + tr.seed * 7) % (2 * (L + 2)), fwd = u < L + 2, head = clamp(fwd ? u - 1 : 2 * (L + 2) - u - 1, 0, L);
+    const dir = fwd ? 1 : -1; // 기관차가 늘 앞장선다
+    tr.meshes.forEach((m, k) => {
+      const s = clamp(head - dir * k * GAP, 0, L); w3dRailAt(tr.r, s, w3dRP);
+      const vis = w3dInView(w3dRP.x, w3dRP.z, 1); m.visible = vis; if (!vis) return;
+      m.position.set(w3dRP.x, 0.04, w3dRP.z); m.rotation.set(0, -w3dRP.a + (dir < 0 ? Math.PI : 0), 0); m.scale.setScalar(1.25);
+      if (k === 0) {
+        const ca = Math.cos(w3dRP.a) * dir, sa = Math.sin(w3dRP.a) * dir;
+        smoke.push(w3dRP.x + ca * 0.28, 0.64, w3dRP.z + sa * 0.28, 2, 0.16, tr.seed);
+        lights.push({ x: w3dRP.x + ca * 0.36, y: 0.32, z: w3dRP.z + sa * 0.36, col: W3_TRAIN_LIGHT, k: 2.2, glow: 0.4, pool: 0.9 });
+      }
+    });
+  }
 }

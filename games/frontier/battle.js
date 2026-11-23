@@ -137,7 +137,7 @@ function battleMusou() {
   if (!B || B.over) return;
   const H = B.hero; if (H.mg < 100 || H.musouT > 0) return;
   H.mg = 0; H.musouT = 2.2; H.musouTick = 0; H.inv = 2.6; H.atkT = 0; H.dashT = 0;
-  banner('필살 · 회천난무', '', 1.2); shake(6);
+  banner(S.era >= 4 ? '필살 · 회천연발' : '필살 · 회천난무', '', 1.2); shake(6);
   emit(H.x, H.y - 14, 40, { color: ['#ffe58a', '#fff', '#ffb02e'], kind: 'spark', smin: 100, smax: 300, lmin: .3, lmax: .7 });
 }
 holdBtn($('bAtk'), () => { bAtkHeld = true; battleAttack(); }, () => { bAtkHeld = false; });
@@ -225,6 +225,7 @@ function updateBattle(dt) {
       H.musouTick = 0.12;
       const n = hitArea(H.x, H.y, 100, 0, 7, base * 1.1, 160, 120);
       if (n) shake(3);
+      if (S.era >= 4) heroPistol(H, H.dir * 0.37 + rand() * 0.5, base * 0.7); // 근대: 돌면서 사방으로 육혈포 연사
       for (let i = 0; i < 4; i++) { const a = rand() * 7; emit(H.x + Math.cos(a) * 60, H.y - 10 + Math.sin(a) * 40, 1, { color: ['#ffe58a', '#ffb02e', '#fff'], kind: 'spark', smin: 150, smax: 250, ang: a + 1.6, spread: 0.2, lmin: .2, lmax: .35 }); }
     }
     if (H.musouT <= 0) {
@@ -252,6 +253,7 @@ function updateBattle(dt) {
         const n = hitArea(H.x, H.y - 4, c.r, H.dir, c.arc, base * c.m, c.kb, c.launch || 0);
         if (n) { B.hitstop = H.combo === 4 ? 0.07 : 0.035; shake(H.combo === 4 ? 7 : 3); }
         if (H.combo === 4) emit(H.x, H.y - 6, 1, { color: 'rgba(255,255,255,.8)', kind: 'ring', smin: 0, smax: 0, zmin: 10, zmax: 10, grow: 200, lmin: .3, lmax: .3 });
+        if (H.combo === 4 && S.era >= 4) for (const k of [-0.22, 0, 0.22]) heroPistol(H, H.dir + k, base * 0.9); // 근대: 마무리에 육혈포 세 발
       }
       if (H.atkT <= 0) { H.comboWin = 0.35; if ((H.comboQ || bAtkHeld)) startCombo(); }
     } else if (mv.l > 0.08) {
@@ -423,14 +425,30 @@ function specialAI(u, dt, t, H) {
   return false;
 }
 // 조준 끝 → 투사체 발사
+// 군주의 육혈포 (근대): 아군 총알 + 총구 불꽃·연기
+function heroPistol(H, a, dmg) {
+  const P = PROJ.bullet;
+  B.shots.push({ x: H.x + Math.cos(a) * 14, y: H.y + Math.sin(a) * 14, vx: Math.cos(a) * P.sp, vy: Math.sin(a) * P.sp, team: 0, kind: 'bullet', dmg, life: 300 / P.sp, hero: true });
+  emit(H.x + Math.cos(a) * 18, H.y + Math.sin(a) * 18, 3, { color: ['#eee', '#ccc'], kind: 'smoke', smin: 10, smax: 40, lmin: .4, lmax: .8, zmin: 3, zmax: 5, grow: 10 });
+  if (B.eraFx) B.eraFx.fl.push({ x: H.x + Math.cos(a) * 18, y: H.y + Math.sin(a) * 18, t: 0.08, t0: 0.08, s: 0.9 });
+}
 function fireBattleShot(u) {
   const U = UNITS[u.ut], t = u.aimT, P = PROJ[U.proj] || PROJ.arrow;
   u.swing = 0.25; u.atkT = U.reload * rr(0.9, 1.3); u.windup = 0; u.aimT = null;
   const tx = t && !t.dead ? t.x : u.x + Math.cos(u.wdir) * U.range, ty = t && !t.dead ? t.y : u.y + Math.sin(u.wdir) * U.range;
   const a = Math.atan2(ty - u.y, tx - u.x);
   const dmg = u.team === 1 ? U.atk * 0.8 * Math.sqrt(B.diff) : U.atk * (u.trained ? 1.5 : 1);
-  B.shots.push({ x: u.x + Math.cos(a) * 12, y: u.y + Math.sin(a) * 12, vx: Math.cos(a) * P.sp, vy: Math.sin(a) * P.sp, team: u.team, kind: U.proj, dmg, life: U.range / P.sp + 0.35 });
-  if (U.proj === 'ball') {
+  u.gdir = a; u.gkick = 1;
+  if (U.proj === 'shell' && B.eraFx && typeof USE3D !== 'undefined' && USE3D) { // 야포: 포물선 포탄 → 떨어진 곳 범위 피해 + 구덩이 (battleEra.js)
+    const ex = tx + rr(-22, 22), ey = ty + rr(-18, 18), mx = u.x + Math.cos(a) * 30, my = u.y + Math.sin(a) * 30, d = Math.hypot(ex - mx, ey - my);
+    B.eraFx.balls.push({ x0: mx, y0: my, tx: ex, ty: ey, t: 0, dur: 0.5 + d / 620, team: u.team, R: U.aoe || 46, dmg: u.team === 1 ? 2.2 * Math.sqrt(B.diff) : dmg, hit: false });
+    B.eraFx.fl.push({ x: mx, y: my, t: 0.18, t0: 0.18, s: 2.2 });
+    emit(mx, my - 8, 10, { color: ['#f2f0ea', '#d8d6d0', '#bdbab2'], kind: 'smoke', smin: 20, smax: 80, ang: a, spread: 0.9, lmin: 0.9, lmax: 1.8, zmin: 6, zmax: 10, grow: 14, drag: 2.4 });
+    if (dist2(u.x, u.y, B.hero.x, B.hero.y) < 500 * 500) shake(2.5);
+    return;
+  }
+  B.shots.push({ x: u.x + Math.cos(a) * 12, y: u.y + Math.sin(a) * 12, vx: Math.cos(a) * P.sp, vy: Math.sin(a) * P.sp, team: u.team, kind: U.proj === 'shell' ? 'ball' : U.proj, dmg, life: U.range / P.sp + 0.35 });
+  if (U.proj === 'ball' || U.proj === 'bullet') {
     emit(u.x + Math.cos(a) * 16, u.y + Math.sin(a) * 16, 6, { color: ['#eee', '#bbb', '#ffd54a'], kind: 'smoke', smin: 10, smax: 50, lmin: .6, lmax: 1.3, zmin: 4, zmax: 8, grow: 14 });
     if (B.eraFx) B.eraFx.fl.push({ x: u.x + Math.cos(a) * 18, y: u.y + Math.sin(a) * 18, t: 0.1, t0: 0.1, s: 1.1 }); // 총구 불꽃
   }
@@ -443,7 +461,7 @@ function updateShots(dt, H) {
       if (dist2(q.x, q.y, H.x, H.y) < 16 * 16) { if (H.inv <= 0) hurtHero(q.dmg, q.x - q.vx * 0.05, q.y - q.vy * 0.05); hit = true; }
       else for (const a of B.units) { if (a.team !== 0 || a.dead || a.z > 0) continue; if (dist2(q.x, q.y, a.x, a.y) < (a.r + 4) ** 2) { hurtAlly(a, q.dmg); hit = true; break; } }
     } else {
-      for (const e of B.units) { if (e.team !== 1 || e.dead) continue; if (dist2(q.x, q.y, e.x, e.y) < (e.r + 4) ** 2) { damageUnit(e, q.dmg, q.x - q.vx * 0.05, q.y - q.vy * 0.05, 50, 0, true); hit = true; break; } }
+      for (const e of B.units) { if (e.team !== 1 || e.dead) continue; if (dist2(q.x, q.y, e.x, e.y) < (e.r + 4) ** 2) { damageUnit(e, q.dmg, q.x - q.vx * 0.05, q.y - q.vy * 0.05, q.hero ? 90 : 50, 0, !q.hero); hit = true; break; } }
     }
     if (hit) emit(q.x, q.y - 12, 3, { color: ['#fff', '#ddd'], kind: 'spark', smin: 40, smax: 120, lmin: .1, lmax: .2 });
     if (hit || q.life <= 0) B.shots.splice(i, 1);

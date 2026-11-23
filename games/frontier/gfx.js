@@ -171,6 +171,15 @@ function buildSprites() {
     g.fillStyle = '#e0c060'; g.fillRect(34, 24, 7, 7); g.fillStyle = '#c8a848'; g.fillRect(35, 21, 5, 4);
     g.strokeStyle = '#a07a4a'; g.lineWidth = 1.2; g.beginPath(); g.moveTo(1, 26); g.lineTo(5, 26); g.moveTo(1, 30); g.lineTo(5, 30); g.stroke();
   });
+  SPR.factory = sprite(44, 50, 22, 46, g => { // 공장 (근대): 벽돌 건물 + 톱니 지붕 + 굴뚝 둘
+    g.fillStyle = 'rgba(0,0,0,.22)'; g.beginPath(); g.ellipse(22, 46, 20, 4, 0, 0, 7); g.fill();
+    g.fillStyle = vgrad(g, 26, 45, '#a8503a', '#7a3424'); g.fillRect(3, 26, 36, 19);
+    g.fillStyle = '#4a4e56'; for (let k = 0; k < 3; k++) { g.beginPath(); g.moveTo(3 + k * 12, 26); g.lineTo(3 + k * 12, 19); g.lineTo(15 + k * 12, 26); g.closePath(); g.fill(); }
+    g.fillStyle = vgrad(g, 4, 44, '#9a4632', '#6a2c1e'); g.fillRect(29, 4, 5, 22); g.fillRect(22, 11, 4, 15);
+    g.fillStyle = '#2a2a30'; g.fillRect(28.5, 3, 6, 2); g.fillRect(21.5, 10, 5, 2);
+    g.fillStyle = '#ffe9a0'; for (const x of [7, 15, 23]) g.fillRect(x, 31, 5, 6);
+    g.fillStyle = '#3a2412'; g.fillRect(31, 34, 6, 11);
+  });
   SPR.castle = [1, 2, 3, 4, 5].map(lv => {
     const w = 44 + lv * 8, h = 40 + lv * 8;
     return sprite(w + 8, h + 10, (w + 8) / 2, h + 4, g => {
@@ -288,10 +297,13 @@ function drawHuman(g, x, y, o) {
     } else if (o.weapon === 'xbow') { // 석궁: 개머리 + 가로 활
       g.fillStyle = C('#6b4a2a'); g.fillRect(-4, -1.5, 18, 3);
       g.strokeStyle = C('#4a4a50'); g.lineWidth = 2; g.beginPath(); g.moveTo(12, -8); g.quadraticCurveTo(16, 0, 12, 8); g.stroke();
-    } else if (o.weapon === 'musket') { // 머스킷: 긴 총열
+    } else if (o.weapon === 'musket' || o.weapon === 'rifle') { // 머스킷 · 소총(+총검): 긴 총열
       g.fillStyle = C('#6b4a2a'); g.fillRect(-6, -1.8, 12, 3.6);
       g.fillStyle = C('#3a3a40'); g.fillRect(4, -1.1, 22, 2.2);
       g.fillStyle = C('#c9a040'); g.fillRect(2, -2, 2, 4);
+      if (o.weapon === 'rifle') { g.fillStyle = C('#dfe5ea'); g.fillRect(25, -0.7, 9, 1.4); }
+    } else if (o.weapon === 'rammer') { // 야포 꽂을대
+      g.fillStyle = C('#7a5a34'); g.fillRect(-10, -0.9, 34, 1.8); g.fillStyle = C('#3a3028'); g.fillRect(22, -2.2, 5, 4.4);
     } else if (o.weapon === 'pike') { // 장창: 아주 긴 창
       g.fillStyle = C('#7a5230'); g.fillRect(-16, -1, 52, 2);
       g.fillStyle = C('#dfe5ea'); g.beginPath(); g.moveTo(36, -2.4); g.lineTo(43, 0); g.lineTo(36, 2.4); g.closePath(); g.fill();
@@ -334,6 +346,10 @@ function drawHuman(g, x, y, o) {
     g.fillStyle = C(o.helm || '#c22'); g.fillRect(-6.6, -32, 13.2, 2.4); g.fillRect(-face * 6 - 1, -32, 2, 6);
   } else if (hat === 'hood') {
     g.fillStyle = C(o.helm || '#4a3a2a'); g.beginPath(); g.arc(0, -29, 7.4, Math.PI * 0.95, Math.PI * 2.05); g.fill();
+  } else if (hat === 'shako' || hat === 'kepi') { // 근대 군모: 샤코(높은 원통) / 케피(낮은 모자)
+    const hh = hat === 'shako' ? 9 : 5;
+    g.fillStyle = C(o.helm || '#1a1a1e'); g.fillRect(-5.6, -33 - hh, 11.2, hh + 1); g.fillRect(face > 0 ? 1 : -9, -33, 8, 1.6);
+    if (hat === 'shako') { g.fillStyle = C('#d8b24a'); g.fillRect(-5.6, -42, 11.2, 1.4); g.fillStyle = C(o.plume || '#c22'); g.beginPath(); g.arc(face * 1.5, -43.5, 1.8, 0, 7); g.fill(); }
   }
   if (!behind) weapon();
   g.restore();
