@@ -253,15 +253,15 @@ function b3Scenery() {
   scen.add(st); sown.push(st);
 }
 const B3_TREEK = new THREE.Color(1.5, 1.72, 1.36);
-const B3_RHOUSE = ['hut_tribal', 'house_ancient', 'house_medieval', 'house_earlymodern'];
+const B3_RHOUSE = ['hut_tribal', 'house_ancient', 'house_medieval', 'house_earlymodern', 'house_earlymodern'];
 function b3RealScenery(scen, sown) {
-  const low = R3D.quality && R3D.quality() === 'low', era = clamp(B.era | 0, 0, 3);
+  const low = R3D.quality && R3D.quality() === 'low', era = clamp(B.era | 0, 0, ERAS.length - 1);
   const items = { tree_broadleaf_a: [], tree_broadleaf_b: [], tree_conifer: [], rock_a: [], rock_b: [] };
   // 노을 역광이라 나무가 시커멓게 보이지 않게 밝고 푸르게
   const tint = (o, k) => { const c = new THREE.Color(); const v = 0.86 + (o.v % 4) * 0.06; c.setRGB(v, v, v); if (W3_RTINT[k]) c.multiply(W3_RTINT[k]).multiply(B3_TREEK); else c.multiplyScalar(1.6); return c; };
   // 건물 자리(아군 거점 뒤 집, 적 본진 뒤 성채) 근처의 나무·바위는 그리지 않는다
   const all = [B.allyBase, ...B.bases], hq = B.bases.find(b => b.hq), bld = [];
-  const ae = clamp(S.era | 0, 0, 3); // 아군 거점은 내 시대
+  const ae = clamp(S.era | 0, 0, ERAS.length - 1); // 아군 거점은 내 시대
   bld.push({ x: B.allyBase.x / T - 0.3, z: B.allyBase.y / T - 4.1, k: B3_RHOUSE[ae], s: ae === 0 ? 0.3 : 0.23, r: 1.9 });
   if (hq) {
     const k = era >= 2 && RA.has('castle_keep') ? 'castle_keep' : B3_RHOUSE[era];

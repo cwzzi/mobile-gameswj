@@ -237,7 +237,7 @@ const A3D = (() => {
   const mb = new THREE.Matrix4(), mbi = new THREE.Matrix4(), mbone = new THREE.Matrix4();
   const wq = new THREE.Quaternion(), W_FWD = new THREE.Matrix4().makeBasis(new THREE.Vector3(0, 0, 1), new THREE.Vector3(1, 0, 0), new THREE.Vector3(0, 1, 0));
   const qE = (x, y) => new THREE.Quaternion().setFromEuler(new THREE.Euler(x, y, 0));
-  const W_UP = { spear: qE(0.12, 0), pike: qE(0.08, 0), musket: qE(-0.25, 0), bow: qE(0, 0) }; // 몸 기준 세운 각도 (+x = 앞으로 기울임)
+  const W_UP = { spear: qE(0.12, 0), pike: qE(0.08, 0), musket: qE(-0.25, 0), rifle: qE(-0.22, 0), rammer: qE(0.1, 0), bow: qE(0, 0) }; // 몸 기준 세운 각도 (+x = 앞으로 기울임)
   // gltf → 템플릿: 뼈대 + 부위별 지오메트리(모두 같은 스켈레톤에 스키닝)
   function ingestChar(name, gltf) {
     const scene = gltf.scene; scene.updateMatrixWorld(true);
@@ -465,7 +465,8 @@ const A3D = (() => {
       if (era <= 0) { rc = 'ruler_tribal'; w = ['2H_Axe']; atk = 'atk2'; }
       else if (era === 1) { rc = 'ruler_king'; tint = '#b07a2a'; mode = 'red'; prop = 'spear'; }
       else if (era === 2) { rc = 'ruler_king'; w = ['1H_Sword', 'Badge_Shield']; }
-      else { rc = 'ruler_emperor'; w = ['2H_Sword']; atk = 'atk2'; }
+      else if (era === 3) { rc = 'ruler_emperor'; w = ['2H_Sword']; atk = 'atk2'; }
+      else { rc = 'ruler_emperor'; tint = '#26355e'; mode = 'purple'; w = ['1H_Sword']; gear = ['revolver', 'sash']; } // 근대: 남색 군복 · 군도 + 왼손 육혈포
       k = 1.08;
     } else if (role === 'villager') { rc = 'villager'; tint = o.body || null; mode = 'beige'; }
     else if (role === 'officer' || role === 'boss') {
@@ -482,6 +483,9 @@ const A3D = (() => {
         case 'archer': rc = 'soldier_archer'; prop = 'bow'; rng = '1'; break;
         case 'xbow': rc = 'soldier_archer'; prop = 'xbow'; rng = '2'; break;
         case 'musket': rc = 'soldier_archer'; prop = 'musket'; rng = '2'; break;
+        case 'rifle': rc = 'soldier_archer'; prop = 'rifle'; rng = '2'; break;
+        case 'gun': rc = 'soldier_archer'; prop = 'rammer'; rng = '2'; break;
+        case 'hussar': rc = 'soldier_sword'; w = ['1H_Sword']; break;
         case 'spear': case 'pike': case 'rider': rc = 'soldier_spear'; prop = ut === 'pike' ? 'pike' : 'spear'; break;
         case 'knight': rc = 'soldier_sword'; prop = 'spear'; break;
         case 'club': if (o.side === 'bandit') { rc = 'soldier_archer'; w = ['1H_Axe']; } else melee('club'); break;
@@ -499,7 +503,7 @@ const A3D = (() => {
       mode = rc === 'soldier_archer' ? 'green' : rc === 'soldier_sword' ? 'white' : 'beige';
     }
     w = w.filter(n => CH[KW[n]] && CH[KW[n]].parts[n]);
-    return { rc, tint, mode, w, prop, rng, atk, k, lod: !!o.lod, gear: gear && !o.lod ? gear : null };
+    return { rc, tint, mode, w, prop, rng, atk, k, lod: !!o.lod, gear: gear && (!o.lod || gear.every(g => GEAR_LOD[g])) ? gear : null };
   }
   // 시대별 병사 차림 [시대][병종] → rc: 몸 · w: KayKit 무기/방패 · prop: 절차적 무기 · gear: 덧붙일 장비(GEAR)
   //   부족: 갑옷 없는 몸 + 가죽 머리띠·깃털·털 목도리 + 몽둥이 / 고대: 청동 볏 투구 + 둥근 방패
@@ -509,7 +513,10 @@ const A3D = (() => {
     { spear: { gear: ['crest', 'shield'] }, rider: { gear: ['crest'] }, archer: { rc: 'villager', gear: ['cap'] } },
     {},
     { musket: { rc: 'villager', gear: ['tricorn', 'belt'] }, pike: { gear: ['morion'] } },
+    // 근대: 소총병 = 샤코 모자 + 흰 띠, 야포병 = 케피 모자, 경기병 = 케피 + 군도 (방패 없음)
+    { rifle: { rc: 'villager', gear: ['shako', 'belt'] }, gun: { rc: 'villager', gear: ['kepi', 'belt'] }, hussar: { w: ['1H_Sword'], gear: ['kepi'] }, musket: { rc: 'villager', gear: ['shako', 'belt'] } },
   ];
+  const GEAR_LOD = { shako: 1, kepi: 1, belt: 1 }; // 군중(lod)에서도 붙이는 가벼운 장비 (근대 군복은 모자가 있어야 읽힌다)
   // 장비 조각: [뼈, R3D.merge 조각들] — 좌표는 그 뼈의 쉬는 자세 위치 기준(m, +Y 위, +Z 앞). 쉬는 자세에서 머리·가슴 뼈는 회전이 없다
   const GEAR = {
     band: () => ['head', [
@@ -543,6 +550,27 @@ const A3D = (() => {
       { g: new THREE.CylinderGeometry(0.27, 0.27, 0.03, 14), c: '#b8862e', p: [0, 0, 0.07], r: [Math.PI / 2, 0, 0] },
       { g: new THREE.CylinderGeometry(0.2, 0.2, 0.034, 14), c: '#8a3a1e', p: [0, 0, 0.072], r: [Math.PI / 2, 0, 0] },
       { g: new THREE.SphereGeometry(0.06, 8, 4, 0, Math.PI * 2, 0, Math.PI / 2), c: '#d8aa48', p: [0, 0, 0.09], r: [Math.PI / 2, 0, 0] },
+    ]],
+    shako: () => ['head', [ // 샤코: 높은 원통 모자 + 챙 + 금줄 + 붉은 방울
+      { g: new THREE.CylinderGeometry(0.112, 0.1, 0.17, 10), c: '#16161a', p: [0, 0.29, -0.005] },
+      { g: new THREE.BoxGeometry(0.17, 0.014, 0.075), c: '#0e0e10', p: [0, 0.215, 0.105], r: [0.25, 0, 0] },
+      { g: new THREE.CylinderGeometry(0.114, 0.114, 0.018, 10), c: '#d8b24a', p: [0, 0.36, -0.005] },
+      { g: new THREE.IcosahedronGeometry(0.032, 0), c: '#c8281e', p: [0, 0.4, 0.05] },
+      { g: new THREE.BoxGeometry(0.03, 0.04, 0.012), c: '#d8b24a', p: [0, 0.3, 0.108] },
+    ]],
+    kepi: () => ['head', [ // 케피: 낮고 앞으로 기운 군모
+      { g: new THREE.CylinderGeometry(0.098, 0.11, 0.11, 10), c: '#1c2638', p: [0, 0.255, -0.012], r: [-0.18, 0, 0] },
+      { g: new THREE.BoxGeometry(0.16, 0.014, 0.07), c: '#0e0e10', p: [0, 0.205, 0.1], r: [0.2, 0, 0] },
+      { g: new THREE.CylinderGeometry(0.112, 0.112, 0.016, 10), c: '#c8a040', p: [0, 0.215, -0.004] },
+    ]],
+    sash: () => ['chest', [ // 대군주 금색 견장·띠
+      { g: new THREE.BoxGeometry(0.05, 0.5, 0.03), c: '#d8b24a', p: [0, 0.03, 0.145], r: [0, 0, 0.6] },
+      { g: new THREE.BoxGeometry(0.12, 0.03, 0.1), c: '#d8b24a', p: [0.15, 0.2, 0.0] }, { g: new THREE.BoxGeometry(0.12, 0.03, 0.1), c: '#d8b24a', p: [-0.15, 0.2, 0.0] },
+    ]],
+    revolver: () => ['handslotl', [ // 육혈포 (왼손)
+      { g: new THREE.BoxGeometry(0.03, 0.05, 0.2), c: '#2a2c30', p: [0, 0.02, 0.08] },
+      { g: new THREE.CylinderGeometry(0.028, 0.028, 0.05, 6), c: '#3a3c42', p: [0, 0.03, 0.0], r: [Math.PI / 2, 0, 0] },
+      { g: new THREE.BoxGeometry(0.03, 0.1, 0.045), c: '#5a3a22', p: [0, -0.04, -0.03], r: [0.35, 0, 0] },
     ]],
     morion: () => ['head', [
       { g: new THREE.SphereGeometry(0.13, 10, 4, 0, Math.PI * 2, 0, Math.PI * 0.5), c: '#a8aeb6', p: [0, 0.2, -0.01], s: [1, 1.05, 1.15] },
