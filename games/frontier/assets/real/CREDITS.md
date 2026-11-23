@@ -52,3 +52,25 @@ The files here are the downscaled game copies; the originals (12 MB) are kept ou
 - `rock_a` / `rock_b` simplified with meshoptimizer: 1400 → 349 and 1199 → 299 triangles.
 - Ground textures → 512 px (ORM 256 px).
 - Current sizes (KB): bush 52 · campfire 68 · castle_keep 158 · farm_field 95 · house_ancient 105 · house_earlymodern 211 · house_medieval 170 · hut_tribal 92 · palisade 76 · rock_a 47 · rock_b 43 · tree_broadleaf_a 221 · tree_broadleaf_b 204 · tree_conifer 149 · wall_stone 112 · well 52. Total with ground ≈ 2.2 MB.
+
+## Batch 2: remaining buildings, mountain, ground scatter
+
+Same pipeline and conventions as batch 1. Textures are 512 px (256 px for the scatter props). Base colour has been brightened and saturated to suit the game's lighting. Roughness is a constant 0.85, so there is no ORM map. All sources are CC0 1.0 from Poly Haven.
+
+| file | tris | KB | size (m) | Poly Haven sources (CC0) |
+|---|---|---|---|---|
+| school.glb | 798 | 170.1 | 11.0 × 9.05 × 8.9 | [medieval_wall_01](https://polyhaven.com/a/medieval_wall_01), [clay_roof_tiles](https://polyhaven.com/a/clay_roof_tiles), [stone_wall](https://polyhaven.com/a/stone_wall), [medieval_wood](https://polyhaven.com/a/medieval_wood) |
+| market.glb | 1642 | 208.8 | 12.0 × 9.0 × 2.87 | [rough_linen](https://polyhaven.com/a/rough_linen), [white_sandstone_blocks_02](https://polyhaven.com/a/white_sandstone_blocks_02), [raw_plank_wall](https://polyhaven.com/a/raw_plank_wall), [weathered_planks](https://polyhaven.com/a/weathered_planks), [medieval_wood](https://polyhaven.com/a/medieval_wood) |
+| tower_wood.glb | 442 | 124.7 | 5.0 × 5.03 × 11.11 | [bark_brown_02](https://polyhaven.com/a/bark_brown_02), [weathered_planks](https://polyhaven.com/a/weathered_planks), [raw_plank_wall](https://polyhaven.com/a/raw_plank_wall), [reed_roof_04](https://polyhaven.com/a/reed_roof_04), [medieval_wood](https://polyhaven.com/a/medieval_wood) |
+| tower_stone.glb | 384 | 146.1 | 6.3 × 6.3 × 15.6 | [castle_wall_varriation](https://polyhaven.com/a/castle_wall_varriation), [grey_roof_tiles](https://polyhaven.com/a/grey_roof_tiles), [rough_linen](https://polyhaven.com/a/rough_linen), [medieval_wood](https://polyhaven.com/a/medieval_wood) |
+| lumber.glb | 756 | 132.4 | 11.09 × 7.74 × 4.83 | [bark_brown_02](https://polyhaven.com/a/bark_brown_02), [roof_slates_02](https://polyhaven.com/a/roof_slates_02), [raw_plank_wall](https://polyhaven.com/a/raw_plank_wall), [weathered_planks](https://polyhaven.com/a/weathered_planks), [medieval_wood](https://polyhaven.com/a/medieval_wood) |
+| quarry.glb | 649 | 165.2 | 12.59 × 9.81 × 6.97 | [rocky_trail](https://polyhaven.com/a/rocky_trail), [white_sandstone_blocks_02](https://polyhaven.com/a/white_sandstone_blocks_02), [bark_brown_02](https://polyhaven.com/a/bark_brown_02), [weathered_planks](https://polyhaven.com/a/weathered_planks), [rough_linen](https://polyhaven.com/a/rough_linen) |
+| mine.glb | 686 | 159.3 | 11.45 × 14.79 × 4.34 | [rocky_trail](https://polyhaven.com/a/rocky_trail), [bark_brown_02](https://polyhaven.com/a/bark_brown_02), [raw_plank_wall](https://polyhaven.com/a/raw_plank_wall), [medieval_wood](https://polyhaven.com/a/medieval_wood) |
+| barracks.glb | 815 | 170.7 | 13.51 × 9.97 × 8.07 | [stone_wall](https://polyhaven.com/a/stone_wall), [medieval_wall_01](https://polyhaven.com/a/medieval_wall_01), [clay_roof_tiles](https://polyhaven.com/a/clay_roof_tiles), [rough_linen](https://polyhaven.com/a/rough_linen), [medieval_wood](https://polyhaven.com/a/medieval_wood) |
+| range.glb | 1108 | 154.9 | 10.14 × 11.95 × 3.13 | [roof_slates_02](https://polyhaven.com/a/roof_slates_02), [raw_plank_wall](https://polyhaven.com/a/raw_plank_wall), [weathered_planks](https://polyhaven.com/a/weathered_planks), [reed_roof_04](https://polyhaven.com/a/reed_roof_04), [bark_brown_02](https://polyhaven.com/a/bark_brown_02), [medieval_wood](https://polyhaven.com/a/medieval_wood) |
+| stable.glb | 408 | 125.0 | 12.15 × 10.35 × 5.82 | [raw_plank_wall](https://polyhaven.com/a/raw_plank_wall), [reed_roof_04](https://polyhaven.com/a/reed_roof_04), [stone_wall](https://polyhaven.com/a/stone_wall), [bark_brown_02](https://polyhaven.com/a/bark_brown_02), [medieval_wood](https://polyhaven.com/a/medieval_wood) |
+| mountain_a.glb | 3900 | 248.7 | 28.0 × 14.48 × 28.86 | [mountainside](https://polyhaven.com/a/mountainside) (model, decimated) |
+| scatter_grass.glb | 28 | 59.0 | 1.1 × 1.02 × 0.45 | [grass_medium_01](https://polyhaven.com/a/grass_medium_01) (model, rendered to cards) |
+| scatter_flowers.glb | 28 | 33.8 | 1.06 × 0.98 × 0.35 | [flower_gazania](https://polyhaven.com/a/flower_gazania) (model, rendered to cards) |
+
+Notes: `window` material appears on school, tower_wood (lantern), tower_stone (slits), mine (tunnel mouth), barracks and stable (stall interiors). Scatter props use alpha MASK; their back faces are real reversed faces with up-facing normals, so they light like the ground.
