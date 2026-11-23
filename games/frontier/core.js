@@ -28,6 +28,18 @@ function josa(word, pair) {
 // 조사만 필요할 때 (이름을 <b>로 감쌀 때): josaP('마을', '이가') → '이'
 const josaP = (word, pair) => josa(word, pair).slice(String(word).length);
 
+// 모델 스타일 (☰ "모델 스타일"): 'real' = 실사 섞임(건물·나무·인물 사실적 모델, 기본) / 'cute' = 귀여운(KayKit·절차적 모델만, assets/real 안 받음 → 가볍다)
+// localStorage 'frontier-style'. 주소 ?noreal → 귀여운, ?real → 실사 (저장값보다 우선)
+const STYLE = (() => {
+  if (/[?&]noreal\b/.test(location.search)) return 'cute';
+  if (/[?&]real\b/.test(location.search)) return 'real';
+  try { return localStorage.getItem('frontier-style') === 'cute' ? 'cute' : 'real'; } catch (e) { return 'real'; }
+})();
+const REAL_ON = STYLE === 'real';
+function setStyle(st) { try { localStorage.setItem('frontier-style', st === 'cute' ? 'cute' : 'real'); } catch (e) {} }
+// 조용히(절전): 30fps · 해상도 1x · 낮음 품질 (post3d.js 가 정하고 main.js 루프가 프레임을 건너뛴다)
+let QUIET = false;
+
 let MODE = 'world'; // 'world' | 'battle'
 let paused = false;
 
@@ -36,7 +48,7 @@ const cv = $('game'), ctx = cv.getContext('2d');
 let VW = 0, VH = 0, DPR = 1, ZOOM = 1;
 const resizeHooks = [];
 function resize() {
-  DPR = Math.min(2.5, window.devicePixelRatio || 1);
+  DPR = Math.min(QUIET ? 1.5 : 2.5, window.devicePixelRatio || 1);
   VW = innerWidth; VH = innerHeight;
   cv.width = Math.round(VW * DPR); cv.height = Math.round(VH * DPR);
   ZOOM = clamp(Math.min(VW, VH) / (11 * T), 0.9, 2.2);
@@ -61,9 +73,15 @@ function promoteTouch(id) {
 function inputDown(id, x, y, ts) {
   pendTouch.set(id, { x, y, t: ts || performance.now() });
 }
+// 화면 오른쪽 끌기 = 시선 돌리기 (lookHook 이 있을 때만, 예: 3인칭 사람 찾기). lookHook(dx, dy) 는 CSS px 이동량
+let lookHook = null;
 function inputMove(id, x, y) {
   const e = pendTouch.get(id);
-  if (e && Math.hypot(x - e.x, y - e.y) > TAP_MOVE) promoteTouch(id);
+  if (e && e.look) { if (lookHook) lookHook(x - e.lx, y - e.ly); e.lx = x; e.ly = y; return; }
+  if (e && Math.hypot(x - e.x, y - e.y) > TAP_MOVE) {
+    promoteTouch(id);
+    if (lookHook && pendTouch.has(id)) { e.look = true; e.lx = x; e.ly = y; return; }
+  }
   if (id === joy.id) {
     if (Math.hypot(x - joy.sx, y - joy.sy) > TAP_MOVE) joy.moved = true;
     let dx = x - joy.ox, dy = y - joy.oy; const d = Math.hypot(dx, dy);

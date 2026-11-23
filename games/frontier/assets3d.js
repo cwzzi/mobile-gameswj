@@ -708,7 +708,7 @@ const A3D = (() => {
         if (p.swing > 0 && act.shoot) st = p.aim && act.aim ? 'aim' : 'shoot';
         else if (p.swing > 0) st = 'atk';
         else if (p.sit) st = 'sit';
-        else if (p.moving) st = 'run';
+        else if (p.moving) st = p.slow && act.walk ? 'walk' : 'run'; // slow: 걷기 (마을 사람 · 3인칭 천천히)
         else st = 'idle';
         go(st, st === 'atk' || st === 'shoot' ? 0.06 : 0.16);
         inner.position.y = p.sit ? sitY : y0; // 앉은 자세: 엉덩이를 안장 높이(그룹 원점)에 맞춤
@@ -751,7 +751,7 @@ const A3D = (() => {
     // 사실적 환경 모델(real3d.js, assets/real)도 같은 줄에서 불러온다 (캐릭터 다음). 실패해도 KayKit/절차적 모델로 계속
     const RL = typeof RA !== 'undefined' && RA.files ? (RA.begin(), RA.files) : [];
     // 사실적 인물(real/chars): KayKit 다음, 환경 모델 앞. 하나라도 되면 다 끝난 뒤 한 번에 바꿔 끼운다(실패한 몸은 KayKit 그대로)
-    const RC = /[?&]noreal(chars)?\b/.test(location.search) ? [] : RNAMES.map(nm => ['real/chars/' + nm + '.glb', g => ingestChar(RCK(nm), g), true, 'rchar']);
+    const RC = (typeof REAL_ON !== 'undefined' && !REAL_ON) || /[?&]noreal(chars)?\b/.test(location.search) ? [] : RNAMES.map(nm => ['real/chars/' + nm + '.glb', g => ingestChar(RCK(nm), g), true, 'rchar']);
     let rcLeft = RC.length;
     const rcDone = () => { if (--rcLeft === 0 && RNAMES.some(nm => CH[RCK(nm)])) { A.realChars = true; A.ver++; } };
     const ALL = FILES.concat(RC, RL.map(([f, use]) => [f, use, true, 'real']));

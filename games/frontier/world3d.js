@@ -980,7 +980,8 @@ function w3dLighting(src) {
   const ph = ((S.time / DAY_LEN) + 0.08) % 1, K = w3dKey(ph), d = dayInfo();
   const night = clamp(d.dark / 0.6, 0, 1), dusk = d.dusk * (1 - night), on = K.on;
   W3.scene.background.copy(K.fog); W3.scene.fog.color.copy(K.fog);
-  W3.scene.fog.near = W3.dist * lerp(1.0, 0.8, on); W3.scene.fog.far = W3.dist * lerp(2.3, 1.95, on);
+  const FD = W3.fogD || W3.dist; // 3인칭이면 짧게 (먼 곳은 안개 속으로 → 그릴 청크도 줄어듦)
+  W3.scene.fog.near = FD * lerp(1.0, 0.8, on); W3.scene.fog.far = FD * lerp(2.3, 1.95, on);
   // 해(낮) / 달(밤): 동→남→서로 돌고, 낮게 뜰수록 그림자가 길다
   const day = ph < 0.5, a = (day ? ph : ph - 0.5) * 2 * Math.PI;
   w3dSunDir.set(Math.cos(a) * 0.8, 0.24 + Math.max(0, Math.sin(a)) * 1.0, 0.55).normalize();
@@ -1048,15 +1049,19 @@ function drawWorld3D() {
   const cam = W3.cam, D = W3.dist;
   cam.position.set(W3.tx + sx, Math.sin(W3_PITCH) * D, W3.tz + Math.cos(W3_PITCH) * D + sz);
   cam.lookAt(W3.tx + sx, 0, W3.tz + sz);
+  // 3인칭 (사람 찾기 등 '장면 속으로'): 위에서 내려다보는 시점 → 영주 어깨 뒤 낮은 시점으로 부드럽게
+  const ek = typeof EVCAM !== 'undefined' ? EVCAM.k : 0;
+  const hk = w3dTPCam(cam, px, pz, ek);
   cam.updateMatrixWorld();
   W3.pm.multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse); W3.frustum.setFromProjectionMatrix(W3.pm);
 
   // 그림자 카메라: 화면 중심보다 조금 북쪽(위), 1단위 격자에 맞춰 흔들림 방지
-  const scx = Math.round(W3.tx), scz = Math.round(W3.tz - 2);
+  let scx = Math.round(W3.tx), scz = Math.round(W3.tz - 2);
+  if (ek > 0.5) { scx = Math.round(px + Math.sin(EVCAM.yaw) * 7); scz = Math.round(pz - Math.cos(EVCAM.yaw) * 7); } // 3인칭: 앞쪽 위주
   W3.sun.target.position.set(scx, 0, scz); W3.sun.position.copy(w3dSunDir).multiplyScalar(45).add(W3.sun.target.position);
   W3.sun.target.updateMatrixWorld();
   { // 그림자 범위를 화면에 맞게 좁혀 해상도를 높인다
-    const sh = clamp(Math.round(W3.dist * 0.55), 10, 21), sc = W3.sun.shadow.camera;
+    const sh = ek > 0.5 ? 12 : clamp(Math.round(W3.dist * 0.55), 10, 21), sc = W3.sun.shadow.camera;
     if (sc.right !== sh) { sc.left = -sh; sc.right = sh; sc.top = sh; sc.bottom = -sh; sc.updateProjectionMatrix(); }
   }
 
@@ -1212,7 +1217,14 @@ function drawWorld3D() {
     if (!lk) { lk = { body: v.body, legs: v.legs || '#4a3a2a', hat: v.hat === undefined ? (rand() > 0.5 ? 'band' : null) : (v.hat && rand() > 0.4 ? v.hat : null), helm: '#e8d8b0', hair: ['#3a2414', '#6a4a2a', '#222'][ri(3)], scale: 1.1, lod: 1, role: 'villager' }; W3.look.set(v, lk); }
     const r = w3dHuman(v, lk);
     const moved = r.lx !== null && (Math.abs(x - r.lx) + Math.abs(z - r.lz)) > 1e-4;
-    r.m.pose({ walk: v.walk, moving: moved, yaw: w3dFaceMove(r, x, z, dt) });
+    // 일하는 몸짓: 농사·집안일·대장일·물 긷기(v.act) / 벌목·채석·채굴 일꾼(v.ph 1) → 공격 동작을 천천히 반복 (괭이질·망치질처럼)
+    const work = !moved && ((v.job && v.ph === 1) || (v.act && VWORK_ANIM[v.act]));
+    let face;
+    if (v.talkT > 0) face = Math.atan2(p.x - v.x, p.y - v.y);
+    else if (!moved && v.act && v.fx !== undefined) face = Math.atan2(v.fx - v.x, v.fy - v.y);
+    else if (work && v.job && v.ti) face = Math.atan2((v.ti % W + .5) * T - v.x, (((v.ti / W) | 0) + .5) * T - v.y);
+    const wph = v.wph === undefined ? (v.wph = rand()) : v.wph;
+    r.m.pose({ walk: v.walk, moving: moved, slow: true, swing: work ? 1 - ((tm * (v.act === 'water' ? 0.45 : 0.75) + wph) % 1) : 0, yaw: w3dFaceMove(r, x, z, dt, face) });
     r.m.group.position.set(x, 0, z); BL.add(x, z, 0.3);
   }
   for (const b of bandits) {
@@ -1243,11 +1255,20 @@ function drawWorld3D() {
       r.m.pose({ walk: p.walk, moving: p.moving, swing: sw, yaw }); r.m.group.position.set(px, 0, pz); BL.add(px, pz, 0.42);
     }
     r.m.flash(p.hurt > 0.15);
-    bars.push({ x: px, y: p.mounted ? 2.7 : 2.05, z: pz, f: p.hp / heroMaxHp(), col: '#4c4' });
+    if (ek < 0.5) bars.push({ x: px, y: p.mounted ? 2.7 : 2.05, z: pz, f: p.hp / heroMaxHp(), col: '#4c4' });
     W3.slash.visible = swing > 0;
     if (swing > 0) {
-      W3.slash.position.set(px, (p.mounted ? 1.4 : 0.75), pz); W3.slash.scale.setScalar(1.4); W3.slash.rotation.y = -(p.dir || 0);
+      W3.slash.position.set(px, (p.mounted ? 1.4 : 0.75) * hk, pz); W3.slash.scale.setScalar(1.4 * hk); W3.slash.rotation.y = -(p.dir || 0);
       W3.slash.material.opacity = Math.min(1, swing * 5);
+    }
+  }
+  w3dEvent(dt, tm, BL); // 사람 찾기: 잃어버린 사람 + 희미한 빛기둥
+  { // 3인칭: 사람·말을 작게 (집·나무 크기에 맞춰). 풀에서 다시 꺼낸 것도 있으니 매 프레임 맞춘다
+    for (const [, r] of W3.dyn) {
+      if (r.seen !== W3.frame) continue;
+      const m = r.m, gp = m.group;
+      if (m.look && m.pose) { gp.scale.setScalar((m.look.scale || 1) * hk); gp.position.y *= hk; }
+      else if (r.pk.startsWith('horse|')) gp.scale.setScalar(W3_HS * hk);
     }
   }
   for (const [o, r] of W3.dyn) if (r.seen !== W3.frame) w3dDrop(o, r);
@@ -1299,7 +1320,7 @@ function drawWorld3D() {
   drawShots3D(g, shots, pr, ks, 0.85, 14);
   for (const c of coins) { R3D.project(c.x + 0.25, c.y, c.z, pr); g.fillStyle = '#ffd34d'; g.strokeStyle = '#7a5200'; g.lineWidth = 1; g.beginPath(); g.arc(pr.x, pr.y, 3.5 * ks, 0, 7); g.fill(); g.stroke(); }
   for (const b of bars) {
-    R3D.project(b.x, b.y, b.z, pr); if (!pr.vis) continue;
+    R3D.project(b.x, b.y * hk, b.z, pr); if (!pr.vis) continue;
     const w = 28 * ks, hgt = 5 * ks;
     g.fillStyle = 'rgba(0,0,0,.6)'; rrect(g, pr.x - w / 2, pr.y, w, hgt, hgt / 2); g.fill();
     g.fillStyle = b.col; rrect(g, pr.x - w / 2 + 1, pr.y + 1, (w - 2) * clamp(b.f, 0, 1), hgt - 2, (hgt - 2) / 2); g.fill();
@@ -1310,9 +1331,11 @@ function drawWorld3D() {
     R3D.project(q.x / T, 0.35, q.y / T, pr); if (!pr.vis) continue;
     const a = clamp(q.life / q.max, 0, 1);
     g.globalAlpha = q.kind === 'smoke' ? a * 0.45 : a;
-    g.fillStyle = q.color; const sz = q.size * pk;
+    if (ek > 0.3 && q.kind === 'smoke') continue; // 3인칭: 땅 높이에 붙여 그리는 연기·흙먼지는 눈앞에서 커다란 얼룩이 되므로 생략
+    const qk = ek > 0.001 ? Math.min(pk, R3D.ppu(q.x / T, 0.35, q.y / T) / T) : pk; // 3인칭: 가까운 것만 크게 (원근)
+    g.fillStyle = q.color; const sz = q.size * qk;
     if (q.kind === 'spark') { g.strokeStyle = q.color; g.lineWidth = sz * 0.6; g.beginPath(); g.moveTo(pr.x, pr.y); g.lineTo(pr.x - q.vx * 0.04 * pk, pr.y - q.vy * 0.04 * pk); g.stroke(); }
-    else if (q.kind === 'ring') { g.strokeStyle = q.color; g.lineWidth = 3 * a; g.beginPath(); g.arc(pr.x, pr.y, sz, 0, 7); g.stroke(); }
+    else if (q.kind === 'ring') { if (ek > 0.5) continue; g.strokeStyle = q.color; g.lineWidth = 3 * a; g.beginPath(); g.arc(pr.x, pr.y, sz, 0, 7); g.stroke(); }
     else { g.beginPath(); g.arc(pr.x, pr.y, sz, 0, 7); g.fill(); }
   }
   g.globalAlpha = 1;
@@ -1332,6 +1355,68 @@ function drawWorld3D() {
   $('hint').style.display = act ? 'block' : 'none';
 }
 
+
+// ---------- 3인칭 시점 (event.js 의 EVCAM: k 0 = 위에서 · 1 = 어깨 뒤, yaw = 바라보는 방향, 0 = 북쪽(-z)) ----------
+const W3_TP = { hk: 0.6, back: 1.65, up: 1.5, side: 0.32, ahead: 4, lookY: 0.8, fov: 56, fovP: 70, far: 44, fogD: 15 };
+function w3dTPBlock(ptx, ptz, x, z) { // 숲 칸 · 건물 칸 · 마을 중심 (영주가 서 있는 칸은 빼고)
+  const tx = Math.floor(x), tz = Math.floor(z), t = tileAt(tx, tz);
+  if (tx === ptx && tz === ptz) return false;
+  if (t === FOREST || t === MOUNTAIN || t === GOLD) return true;
+  for (const b of S.buildings) if (b.x === tx && b.y === tz) return true;
+  for (const tw of S.towns) if (Math.abs(x - tw.x - 0.5) < 1.1 && Math.abs(z - tw.y - 0.5) < 1.1) return true;
+  return false;
+}
+const w3dTA = new THREE.Vector3(), w3dTB = new THREE.Vector3(), w3dLA = new THREE.Vector3(), w3dLB = new THREE.Vector3();
+function w3dTPCam(cam, px, pz, k) {
+  if (k <= 0.001) {
+    if (W3.tpOn) { W3.tpOn = false; W3.fogD = 0; cam.fov = 42; cam.near = 1; cam.far = W3.dist * 3; cam.updateProjectionMatrix(); }
+    return 1;
+  }
+  W3.tpOn = true;
+  const e = k * k * (3 - 2 * k), P = W3_TP, yaw = EVCAM.yaw;
+  const fx = Math.sin(yaw), fz = -Math.cos(yaw), rx = Math.cos(yaw), rz = Math.sin(yaw);
+  // 카메라와 영주 사이에 숲·건물이 있으면 카메라를 영주 쪽으로 당긴다 (나무 속에 카메라가 박히지 않게)
+  let bk = P.back;
+  const ptx = Math.floor(px), ptz = Math.floor(pz);
+  for (let d = 0.35; d <= P.back + 0.3; d += 0.2) if (w3dTPBlock(ptx, ptz, px - fx * d + rx * P.side * d / P.back, pz - fz * d + rz * P.side * d / P.back)) { bk = Math.max(0.8, d - 0.3); break; }
+  W3.tpBack = W3.tpBack === undefined || k < 0.05 ? bk : W3.tpBack + (bk - W3.tpBack) * (bk < W3.tpBack ? 0.35 : 0.06);
+  const B = W3.tpBack, sd = P.side * B / P.back, pf = (P.back - B) / P.back; // pf: 당겨진 정도 → 조금 높이고 더 내려다봐서 영주가 화면에 남게
+  w3dTA.copy(cam.position); w3dLA.set(W3.tx, 0, W3.tz);
+  w3dTB.set(px - fx * B + rx * sd, P.up + pf * 0.45, pz - fz * B + rz * sd);
+  const ah = P.ahead * (1 - 0.7 * pf);
+  w3dLB.set(px + fx * ah + rx * P.side * 0.5, P.lookY - pf * 1.4, pz + fz * ah + rz * P.side * 0.5);
+  // 높이는 늦게 내려오고(위에서 다가가는 느낌) 가로 위치는 먼저 따라간다
+  const eh = e * e * (3 - 2 * e);
+  cam.position.set(lerp(w3dTA.x, w3dTB.x, e), lerp(w3dTA.y, w3dTB.y, eh), lerp(w3dTA.z, w3dTB.z, e));
+  w3dLA.lerp(w3dLB, e); cam.lookAt(w3dLA);
+  cam.fov = lerp(42, cam.aspect < 1 ? P.fovP : P.fov, e); cam.near = lerp(1, 0.08, e); cam.far = lerp(W3.dist * 3, P.far, e); cam.updateProjectionMatrix();
+  W3.fogD = lerp(W3.dist, P.fogD, e);
+  return lerp(1, P.hk, e);
+}
+// 사람 찾기: 잃어버린 사람(EV.who) + 희미한 빛기둥
+function w3dEvent(dt, tm, BL) {
+  const ev = typeof EV !== 'undefined' ? EV : null, who = ev && ev.who;
+  const show = who && (ev.phase === 'search' || ev.phase === 'found');
+  if (W3.evBeam) W3.evBeam.visible = false;
+  if (!show) return;
+  const x = who.x / T, z = who.y / T;
+  if (ev.phase === 'search') {
+    if (!W3.evBeam) {
+      const g = new THREE.CylinderGeometry(0.1, 0.16, 4, 8, 1, true); g.translate(0, 2, 0);
+      const m = new THREE.ShaderMaterial({ uniforms: { uA: { value: 0.15 } }, transparent: true, depthWrite: false, side: THREE.DoubleSide, toneMapped: false, fog: false,
+        blending: THREE.AdditiveBlending, vertexShader: 'varying float vY; void main() { vY = position.y / 4.0; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+        fragmentShader: 'uniform float uA; varying float vY; void main() { gl_FragColor = vec4(vec3(1.0, 0.92, 0.7) * uA * (1.0 - vY) * (1.0 - vY), 1.0); }' });
+      W3.evBeam = new THREE.Mesh(g, m); W3.evBeam.renderOrder = 6; W3.evBeam.frustumCulled = false; W3.scene.add(W3.evBeam);
+    }
+    W3.evBeam.visible = true; W3.evBeam.position.set(x, 0, z);
+    W3.evBeam.material.uniforms.uA.value = 0.09 + 0.05 * Math.sin(tm * 2.2);
+  }
+  if (!w3dInView(x, z, 1)) return;
+  const r = w3dHuman(who, who.look);
+  const p = S.player, near = dist2(p.x, p.y, who.x, who.y) < (T * 6) ** 2;
+  r.m.pose({ walk: 0, moving: false, yaw: w3dFaceMove(r, x, z, dt, near ? Math.atan2(p.x - who.x, p.y - who.y) : who.yaw) });
+  r.m.group.position.set(x, 0, z); BL.add(x, z, 0.24);
+}
 
 // ---------- 사실적 건물 · 마을 (real3d.js) ----------
 const W3_RHOUSE = ['hut_tribal', 'house_ancient', 'house_medieval', 'house_earlymodern'];

@@ -189,6 +189,7 @@ void main() {
     if (T.shadow && L.shadow.mapSize.x !== T.shadow) { L.shadow.mapSize.set(T.shadow, T.shadow); if (L.shadow.map) { L.shadow.map.dispose(); L.shadow.map = null; } }
   }
   function apply(tier) {
+    if (F.quiet) tier = 'low'; // 조용히(절전): 항상 낮음
     F.tier = tier;
     const T = TIERS[tier];
     F.on = T.post && F.hdr;
@@ -200,7 +201,7 @@ void main() {
     // 톤매핑·그림자 방식이 바뀌면 재질 다시 컴파일
     for (const s of scenes) s.traverse(o => { const ms = o.material; if (!ms) return; for (const m of Array.isArray(ms) ? ms : [ms]) m.needsUpdate = true; });
     for (const m of extraMats) m.needsUpdate = true;
-    R3D.pr = Math.min(T.pr, window.devicePixelRatio || 1);
+    R3D.pr = F.quiet ? 1 : Math.min(T.pr, window.devicePixelRatio || 1);
     renderer.setPixelRatio(R3D.pr); renderer.setSize(VW, VH, false);
     if (!F.on) freeTargets();
     for (const f of F.onChange) try { f(tier, T); } catch (e) { console.warn(e); }
@@ -217,6 +218,27 @@ void main() {
   };
   F.lights = () => TIERS[F.tier].lights;
 
+  // ---------- 조용히(절전) ----------
+  // localStorage 'frontier-quiet' = '1' 켬 | '0' 끔 | 없음(자동: 약한 GPU면 켬). 켜면 30fps(main.js) · 해상도 1x · 낮음 품질
+  const LSQ = 'frontier-quiet';
+  F.quiet = false; F.quietPref = null; F.weak = '';
+  function setQuiet(on, store) {
+    F.quiet = !!on; QUIET = F.quiet;
+    if (store) { F.quietPref = F.quiet; try { localStorage.setItem(LSQ, F.quiet ? '1' : '0'); } catch (e) {} }
+    if (typeof resize === 'function') resize(); // 2D 덧그림 캔버스 해상도도 낮춤
+    apply(F.setting === 'auto' ? (F.hdr ? 'medium' : 'low') : (F.setting !== 'low' && !F.hdr) ? 'low' : F.setting);
+  }
+  F.setQuiet = on => setQuiet(on, true);
+  F.quietAuto = () => { F.quietPref = null; try { localStorage.removeItem(LSQ); } catch (e) {} setQuiet(!!F.weak, false); };
+  // 약한 GPU 이름 (소프트웨어 렌더러 · 오래된 내장/모바일 GPU)
+  const WEAK_GPU = /swiftshader|llvmpipe|softpipe|software|microsoft basic|intel\(r\) (hd|gma)|intel hd graphics [2-5]\d{2,3}\b|mali-(4|t[6-8])|adreno \(tm\) [1-5]\d\d\b|powervr sgx|videocore/i;
+  function gpuName() {
+    try {
+      const gl = renderer.getContext(), ext = gl.getExtension('WEBGL_debug_renderer_info');
+      return String(ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER) || '');
+    } catch (e) { return ''; }
+  }
+
   // ---------- 자동 품질 ----------
   let fAcc = 0, fN = 0, warm = 2, fastT = 0, downFromHigh = false, slowLow = 0;
   F.tick = dt => {
@@ -226,7 +248,10 @@ void main() {
     const avg = fAcc / fN; fAcc = 0; fN = 0;
     F.avgMs = Math.round(avg * 1000 * 10) / 10;
     const slow = avg > 1 / 38;
-    if (F.setting === 'auto') {
+    if (F.setting === 'auto' && !F.quiet) {
+      if (slow && F.tier === 'low' && F.quietPref === null) { // 낮음으로도 느리다 = 약한 GPU → 조용히 켬 (저장은 안 함: 자동 판단)
+        if (++slowLow >= 2) { F.weak = 'slow'; setQuiet(true, false); return; }
+      }
       if (slow) {
         if (F.tier === 'high') { downFromHigh = true; apply('medium'); return; }
         if (F.tier === 'medium') { apply('low'); return; }
@@ -249,6 +274,14 @@ void main() {
     { const mq = /[?&]gfx=(high|medium|low|auto)\b/.exec(location.search); if (mq) s = mq[1]; }
     if (!NAMES[s]) s = 'auto';
     F.setting = s;
+    F.gpu = gpuName();
+    let q = null;
+    try { const v = localStorage.getItem(LSQ); if (v === '1' || v === '0') q = v === '1'; } catch (e) {}
+    { const mq = /[?&]quiet=(0|1)\b/.exec(location.search); if (mq) q = mq[1] === '1'; }
+    F.quietPref = q;
+    if (WEAK_GPU.test(F.gpu) || !F.hdr) F.weak = 'gpu';
+    F.quiet = q !== null ? q : (s === 'auto' && !!F.weak); QUIET = F.quiet;
+    if (F.quiet && typeof resize === 'function') resize();
     apply(s === 'auto' ? (F.hdr ? 'medium' : 'low') : (s !== 'low' && !F.hdr) ? 'low' : s);
     R3D.onResize.push(() => { built = ''; });
   };

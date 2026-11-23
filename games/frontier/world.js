@@ -537,11 +537,12 @@ function updateWorld(dt) {
   S.time += dt;
   const p = S.player;
   let mv = moveInput();
+  if (typeof evMove === 'function') mv = evMove(mv, dt); // 3인칭(사람 찾기): 카메라 기준 이동
   if (auto) { if (mv.l > 0.08 || joy.active) auto = null; else mv = autoStep(dt) || mv; }
   p.moving = mv.l > 0.08;
   if (p.moving) {
     const onForest = tileAt(p.x / T, p.y / T) === FOREST;
-    const sp = (p.mounted ? 250 * (1 + techBonus('horse')) : 130) * (onForest ? 0.7 : 1) * Math.max(0.4, mv.l);
+    const sp = (p.mounted ? 250 * (1 + techBonus('horse')) : typeof evTP === 'function' && evTP() ? 85 : 130) * (onForest ? 0.7 : 1) * Math.max(0.4, mv.l);
     moveEnt(p, mv.x * sp * dt, mv.y * sp * dt, 9);
     p.dir = Math.atan2(mv.y, mv.x); p.walk = (p.walk || 0) + dt * sp / 9;
     p.dustT = (p.dustT || 0) - dt;
@@ -566,7 +567,7 @@ function updateWorld(dt) {
     t.taxT += dt;
     if (t.taxT > 5) { t.taxT = 0; const g = townIncome(t); S.gold += g; floatText((t.x + .5) * T, t.y * T - 30, `+${g}🪙`, '#ffe27a'); }
     // 마을 사람
-    const want = Math.min(5, Math.ceil(t.pop / 6));
+    const want = Math.min(typeof evTP === 'function' && evTP() ? 8 : 5, Math.ceil(t.pop / 5));
     const have = villagers.filter(v => v.town === t.id).length;
     if (have < want) { const vl = eraVillager(); villagers.push({ town: t.id, x: (t.x + .5) * T + rr(-20, 20), y: (t.y + 1.5) * T, tx: 0, ty: 0, t: 0, walk: 0, body: vl.body, hat: vl.hat, legs: vl.legs }); }
   }
@@ -576,10 +577,13 @@ function updateWorld(dt) {
     if (v.job) { if (!workerStep(v, dt)) villagers.splice(i, 1); continue; }
     const t = townById(v.town);
     if (!t) { villagers.splice(i, 1); continue; }
+    if (v.talkT > 0) { v.talkT -= dt; continue; } // 영주와 이야기 중: 멈춰 선다
     v.t -= dt;
-    if (v.t <= 0) { v.t = rr(2, 5); const r = townRadius(t) - 1; v.tx = (t.x + .5 + rr(-r, r)) * T; v.ty = (t.y + .5 + rr(-r, r)) * T; }
+    if (v.work > 0) { v.work -= dt; if (v.work <= 0) { v.act = null; v.t = 0; } continue; } // 일하는 중 (농사·대장일·물 긷기…)
+    if (v.t <= 0) villagerPlan(v, t);
     const d = Math.hypot(v.tx - v.x, v.ty - v.y);
     if (d > 4) { const sp = 30 * dt; if (moveEnt(v, (v.tx - v.x) / d * sp, (v.ty - v.y) / d * sp, 5)) { v.walk += dt * 8; v.face = v.tx > v.x ? 1 : -1; } else v.t = 0; }
+    else if (v.task) { v.act = v.task; v.task = null; v.work = rr(5, 10); }
   }
 
   for (const h of S.horses) {
@@ -657,10 +661,30 @@ function updateWorld(dt) {
   // 전쟁
   if (S.towns.length) {
     if (S.war) { if (S.war.field && !bandits.some(b => b.war)) spawnWarband(); }
-    else { S.warT += dt; if (S.warT > S.nextWar) startWarEvent(); }
+    else { S.warT += dt; if (S.warT > S.nextWar && !(typeof evBusy === 'function' && evBusy())) startWarEvent(); }
   }
 
   if (!S.won && ownedCount >= GOAL_TILES) { S.won = true; banner('👑 개척왕', `영토 ${GOAL_TILES}칸 달성! 계속 플레이할 수 있어요`, 5); save(); }
+}
+// 마을 사람 할 일: 마을 건물(농장·집·시장·학당·병영…)이나 마을 우물가로 가서 한동안 일하거나, 그냥 거닌다
+// v.act (일하는 중) → world3d 가 일하는 몸짓(VWORK_ANIM)이나 서 있는 자세로 그린다. 말 걸면 역할(VROLE)에 맞는 말을 한다 (event.js)
+const VJOB = { farm: 'farm', house: 'chores', market: 'trade', school: 'study', barracks: 'smith', range: 'fletch', stable: 'groom' };
+const VWORK_ANIM = { farm: 1, chores: 1, smith: 1, fletch: 1, water: 1 };
+function villagerPlan(v, t) {
+  v.task = null; v.fx = v.fy = undefined;
+  if (rand() < 0.62) {
+    const bs = S.buildings.filter(b => b.town === t.id && VJOB[b.type]);
+    if (bs.length && rand() < 0.78) {
+      const b = bs[ri(bs.length)];
+      v.task = VJOB[b.type];
+      if (b.type === 'farm') { v.tx = (b.x + rr(0.2, 0.8)) * T; v.ty = (b.y + rr(0.25, 0.85)) * T; v.fx = v.tx + rr(-9, 9); v.fy = v.ty - 6; }
+      else { v.tx = (b.x + .5 + rr(-0.3, 0.3)) * T; v.ty = (b.y + 1.05) * T; v.fx = (b.x + .5) * T; v.fy = (b.y + .5) * T; }
+    } else { // 우물가 (마을 중심 옆)
+      const a = rr(-0.6, 1.2); // 우물(world3d 실사 마을: 중심에서 +0.92, +0.8) 둘레
+      v.task = 'water'; v.tx = (t.x + .5 + 0.92 + Math.cos(a) * 0.42) * T; v.ty = (t.y + .5 + 0.8 + Math.sin(a) * 0.42) * T; v.fx = (t.x + 1.42) * T; v.fy = (t.y + 1.3) * T;
+    }
+    v.t = 25;
+  } else { v.t = rr(2, 5); const r = townRadius(t) - 1; v.tx = (t.x + .5 + rr(-r, r)) * T; v.ty = (t.y + .5 + rr(-r, r)) * T; }
 }
 function playerDie() {
   const p = S.player;
@@ -879,6 +903,7 @@ function drawWorld() {
   ctx.strokeStyle = '#3a2a1a'; ctx.lineWidth = 1.6;
   for (const a of arrows) { ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(a.x - Math.cos(a.ang || 0) * 11, a.y - Math.sin(a.ang || 0) * 11); ctx.stroke(); }
   drawShots2D(ctx);
+  if (typeof evDraw2D === 'function') evDraw2D(ctx);
   drawParts(ctx);
   drawFloats(ctx);
   // 낮밤
@@ -966,7 +991,7 @@ function save() {
   try {
     const o = { ...S, tiles: b64(S.tiles), hp: b64(S.hp), horses: S.horses.map(h => ({ x: h.x, y: h.y, col: h.col })),
       buildings: S.buildings.map(({ tiles, scan, rate, idleT, ...r }) => r),
-      player: { ...S.player, mounted: false }, camps: S.camps.map(c => ({ x: c.x, y: c.y, hp: c.hp, maxHp: c.maxHp, t: 0 })) };
+      player: { ...S.player, mounted: false }, armyMode: (typeof EV !== 'undefined' && EV && EV.army) || S.armyMode, camps: S.camps.map(c => ({ x: c.x, y: c.y, hp: c.hp, maxHp: c.maxHp, t: 0 })) };
     localStorage.setItem(SAVE_KEY, JSON.stringify(o));
   } catch (e) {}
 }
@@ -1110,6 +1135,7 @@ function startAuto(a) {
 }
 function worldTap(sx, sy) {
   if (MODE !== 'world' || paused || !S || !S.towns) return;
+  if (typeof evTap === 'function' && evTap(sx, sy)) return; // 3인칭: 마을 사람 톡 → 말 걸기
   const q = screenToWorldPx(sx, sy); if (!q) return;
   const a = pickTarget(q.x, q.y);
   if (a && a.kind === 'mil') { openArmyPanel(); return; } // 병영·궁술장·마구간: 훈련 화면

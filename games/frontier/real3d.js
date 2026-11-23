@@ -240,7 +240,7 @@ const RA = (() => {
   // A3D.start 가 이 목록(A.files)을 같이 불러오고 끝나면 A.finish() 를 부른다
   A.begin = () => {
     A.started = true;
-    if (/[?&]noreal\b/.test(location.search)) { A.files = []; return; }
+    if (typeof REAL_ON !== 'undefined' ? !REAL_ON : /[?&]noreal\b/.test(location.search)) { A.files = []; return; } // 귀여운 스타일: 사실적 모델 안 받음
     A.loadGround();
     if (R3D.fx && R3D.fx.onChange) { tier = R3D.quality ? R3D.quality() : tier; R3D.fx.onChange.push(t => A.setTier(t)); }
   };
