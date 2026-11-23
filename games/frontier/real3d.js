@@ -90,7 +90,7 @@ const RA = (() => {
     }
     const leaf = /^(tree_|bush)/.test(name), crop = nm === 'crop';
     const m = new THREE.MeshLambertMaterial({ map: src.map || null, side: src.side, vertexColors: false });
-    if (src.alphaTest > 0 || src.transparent || crop || leaf) { m.alphaTest = leaf ? 0.42 : 0.5; m.transparent = false; m.side = /^scatter_/.test(name) ? THREE.FrontSide : THREE.DoubleSide; } // scatter 카드는 뒷면이 따로 모델링돼 있어 DoubleSide 면 법선이 뒤집혀 시커멓게 나온다
+    if (src.alphaTest > 0 || src.transparent || crop || leaf) { m.alphaTest = leaf ? 0.42 : 0.5; m.transparent = false; m.side = /^(scatter_|tree_|bush)/.test(name) ? THREE.FrontSide : THREE.DoubleSide; } // scatter·나무·덤불 카드는 뒷면이 실제 면으로 모델링돼 있다. DoubleSide 면 같은 자리의 앞·뒷면이 겹쳐 그려져 깜빡이고(z-fighting) 법선이 뒤집혀 시커멓게 나온다
     if (src.map) { src.map.anisotropy = Math.min(4, R3D.maxAniso || 1); }
     // 노멀맵: 큰 건물만, '높음' 품질에서만 (이 카메라 거리에선 차이가 작고 텍스처 메모리를 크게 먹는다)
     if (src.normalMap && !leaf && !SMALL.has(name)) { nrm.set(m, src.normalMap); m.normalMap = tier === 'high' ? src.normalMap : null; m.normalScale.set(0.9, 0.9); }

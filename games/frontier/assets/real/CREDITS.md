@@ -92,3 +92,16 @@ Results: tree_broadleaf_a 2750 tris / 305 KB, tree_broadleaf_b 2618 / 283 KB, tr
 | chars/villager.glb | 3900 | 261.1 | Body: [Blender Studio Human Base Meshes v1.4](https://download.blender.org/demo/asset-bundles/human-base-meshes/), GEO-body_male_realistic (CC0), decimated. Clothing, headgear and skeleton were made in this pipeline. Fabric grain: Poly Haven [rough_linen](https://polyhaven.com/a/rough_linen), [medieval_wood](https://polyhaven.com/a/medieval_wood), [reed_roof_04](https://polyhaven.com/a/reed_roof_04), [castle_brick_07](https://polyhaven.com/a/castle_brick_07) (CC0). |
 
 The skeleton copies the bone names and rest orientations of **KayKit Rig_Medium** (Kay Lousberg, CC0, already credited in `../CREDITS.md`), so the game's KayKit animation clips drive these characters. See `chars/README.md`. No KayKit geometry or animation data is included in these files.
+
+## Horse (`horse.glb`)
+| file | tris | KB | source |
+|---|---|---|---|
+| horse.glb | 3464 | 300 | [White Horse by Quaternius](https://poly.pizza/m/bEdE4rmZy9) (Ultimate Animated Animal pack, **CC0**). Changes: vertices welded and smoothed (subdivided once, then decimated), rescaled to a real horse (2.3 m to the ear tips, saddle seat at about 1.74 m), and coat baked into one 512 px texture. Saddle, blanket and noseband added. |
+
+- Materials:
+  - `coat`: a light neutral body with darker mane, tail and hooves. Multiply it by the mount colour, e.g. `#c9a27a`.
+  - `cloth`: the white saddle blanket; tint it with the team colour.
+  - `tack`: leather.
+- Clips: `Idle`, `Walk`, `Gallop`, `Attack_Kick`, `Death`.
+- Facing: the head points along glTF +Z (Blender −Y), not −Z like the KayKit characters, so rotate it 180° in the game. Origin is between the hooves at ground level.
+- The rider sits at about y = 1.74 m. Bones `Torso` and `Back` carry the saddle; `Head` is the head.
