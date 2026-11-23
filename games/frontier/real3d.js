@@ -16,6 +16,7 @@
 //                               opt = {shadow, recv} → THREE.Group (userData.dispose())
 //   RA.U                        흔들림 uniform {time, chop} (world3d 가 매 프레임 갱신)
 //   RA.ground                   지면 PBR 텍스처 {grass|dirt|sand|rock: {a, n}} (R3D.tex 항목) 또는 null
+//   RA.horse(col, cloth)        스키닝 말 (horse.glb, Idle/Walk/Gallop) → R3D.horse 가 대신 씀. 준비 안 됐으면 null (RA.hasHorse())
 //   RA.setTier(tier)            건물 노멀맵은 'high' 에서만 (텍스처 메모리·셰이더 비용↓). 지면 노멀은 low 에서만 끈다
 const RA = (() => {
   const A = { ok: false, done: false, ver: 0, files: [], ground: null, failed: [] };
@@ -117,6 +118,104 @@ const RA = (() => {
     M.set(name, { parts, box });
   }
   A.files = NAMES.map(n => ['real/' + n + '.glb', g => ingest(n, g), n]);
+  A.files.push(['real/horse.glb', g => ingestHorse(g), 'horse']);
+
+  // ---------- 말 (horse.glb: Quaternius White Horse, CC0 · 스키닝 + Idle/Walk/Gallop) ----------
+  // 모델은 m 단위(귀 끝 2.3 m, 안장 1.74 m), 머리가 +Z (게임 규약과 같음). 게임 단위로는 HORSE_K 배 (옛 절차적 말과 같은 바깥 배율 W3_HS 를 그대로 쓴다)
+  // A.horse(col, cloth) → { group, key, pose({moving, yaw}), seat(), flash() }  · seat() = 지금 프레임의 안장 높이(그룹 배율 곱하기 전)
+  const HORSE_K = 0.6, SEAT_M = 1.74;
+  let HZ = null;
+  function ingestHorse(gltf) {
+    const root = gltf.scene, clip = nm => gltf.animations.find(a => a.name === nm);
+    const C = { idle: clip('Idle'), walk: clip('Walk'), gallop: clip('Gallop') };
+    if (!C.idle || !C.walk || !C.gallop) throw new Error('horse: clips missing');
+    const src = {}; let skinned = 0;
+    root.traverse(o => { if (o.isSkinnedMesh) { skinned++; src[o.material.name] = o.material; } });
+    if (!skinned || !src.coat) throw new Error('horse: no skinned coat');
+    // 장면 밖(부모 없는) 뼈가 있으면 리그 밑으로 (예전 내보내기: 발굽 IK 뼈 FF/FFB 가 고아 노드라 복제하면 발굽이 원점으로 늘어났다)
+    let arm = null; root.traverse(o => { if (!arm && o.isBone && o.parent && !o.parent.isBone) arm = o.parent; });
+    root.traverse(o => { if (o.isSkinnedMesh) for (const b of o.skeleton.bones) if (b && !b.parent && arm) arm.add(b); });
+    if (src.coat.map) src.coat.map.anisotropy = Math.min(4, R3D.maxAniso || 1);
+    // 안장 자리 = 안장 담요(cloth) 가운데, 높이 SEAT_M. 그 점을 Torso 뼈에 붙여 두면 달릴 때 기수가 말 등과 같이 출렁이고 앞뒤로 기운다
+    root.updateMatrixWorld(true);
+    let torso = null, cz = 0.2;
+    root.traverse(o => { if (o.isBone && o.name === 'Torso') torso = o; if (o.isSkinnedMesh && o.material.name === 'cloth') { o.geometry.computeBoundingBox(); const bb = o.geometry.boundingBox; cz = (bb.min.z + bb.max.z) / 2; } });
+    const seatL = new THREE.Vector3(0, SEAT_M, cz);
+    if (torso) seatL.applyMatrix4(new THREE.Matrix4().copy(torso.matrixWorld).invert());
+    HZ = { root, clips: C, src, seatL, seatZ: cz, mats: new Map() };
+  }
+  // 재질: coat = 털(텍스처 × 말 색), cloth = 안장 담요(진영 색), tack = 가죽 (색별로 공유)
+  function horseMat(kind, col) {
+    const key = kind + '|' + col;
+    let m = HZ.mats.get(key); if (m) return m;
+    const s = HZ.src[kind];
+    if (kind === 'coat') { m = new THREE.MeshLambertMaterial({ map: s.map || null }); m.color.set(col); m.color.multiplyScalar(1.12); }
+    else if (kind === 'cloth') { m = new THREE.MeshLambertMaterial(); m.color.set(col); }
+    else { m = new THREE.MeshLambertMaterial(); if (s && s.color) m.color.copy(s.color); }
+    HZ.mats.set(key, m); allMats.add(m); if (A.done && R3D.regMat) R3D.regMat(m);
+    return m;
+  }
+  A.hasHorse = () => !!HZ;
+  A.horse = (col, cloth) => {
+    if (!HZ || !THREE.SkeletonUtils) return null;
+    col = col || '#8b5a2b'; cloth = cloth || '#8a2a2a';
+    const rig = THREE.SkeletonUtils.clone(HZ.root), meshes = [], bones = [];
+    rig.traverse(o => {
+      if (o.isSkinnedMesh) {
+        const nm = o.material.name, mat = nm === 'cloth' ? horseMat('cloth', cloth) : nm === 'tack' ? horseMat('tack', '') : horseMat('coat', col);
+        o.material = mat; o.userData.mat = mat; o.frustumCulled = false; o.castShadow = true; o.receiveShadow = false; meshes.push(o);
+      }
+      if (o.isBone && o.name === 'Torso') bones.push(o);
+    });
+    const inner = new THREE.Group(); inner.add(rig); inner.scale.setScalar(HORSE_K);
+    const group = new THREE.Group(); group.add(inner);
+    const mixer = new THREE.AnimationMixer(rig), act = {};
+    for (const k in HZ.clips) act[k] = mixer.clipAction(HZ.clips[k]);
+    let cur = null, last = performance.now(), px = null, pz = 0, spd = 0, fl = false;
+    const go = (k, fade) => {
+      if (cur === k) return;
+      const n = act[k]; n.reset(); n.enabled = true; n.setEffectiveWeight(1); n.play();
+      if (cur) act[cur].crossFadeTo(n, fade, false);
+      cur = k;
+    };
+    go('idle', 0); act.idle.time = Math.random() * HZ.clips.idle.duration;
+    const m4 = new THREE.Matrix4(), v = new THREE.Vector3();
+    let seatY = SEAT_M * HORSE_K, seatZ = HZ.seatZ * HORSE_K;
+    return {
+      group, key: A.horseKey(col, cloth), asset: true,
+      pose(p) {
+        const now = performance.now(), dt = Math.min(0.1, (now - last) / 1000); last = now;
+        // 속도(그룹 배율로 나눈 값, 초당): 지난 프레임 위치 → 걷기/질주 고르기 (게임의 walk 값은 속도와 상관없이 늘어서 못 쓴다)
+        const gp = group.position, sc = group.scale.x || 1;
+        if (px === null || dt <= 0) { px = gp.x; pz = gp.z; }
+        const d = Math.hypot(gp.x - px, gp.z - pz) / sc; px = gp.x; pz = gp.z;
+        if (dt > 0) { const s = d > 3 ? spd : d / dt; spd += (s - spd) * Math.min(1, dt * 6); } // 순간이동(풀 재사용)은 무시
+        let st;
+        if (!p.moving || spd < 0.12) st = 'idle';
+        else if (cur === 'gallop' ? spd > 1.35 : spd > 1.85) st = 'gallop';
+        else st = 'walk';
+        go(st, 0.25);
+        if (st === 'gallop') act.gallop.timeScale = Math.max(0.75, Math.min(1.5, spd / 4));
+        else if (st === 'walk') act.walk.timeScale = Math.max(0.6, Math.min(1.6, spd / 0.75));
+        if (p.yaw !== undefined) group.rotation.y = p.yaw;
+        mixer.update(dt);
+        // 안장 자리: Torso 뼈의 리그 안 행렬 × 붙여 둔 점 (rig 까지의 부모 행렬만 곱한다)
+        if (bones.length) {
+          const b = bones[0]; b.updateMatrix(); m4.copy(b.matrix);
+          for (let o = b.parent; o && o !== rig; o = o.parent) { o.updateMatrix(); m4.premultiply(o.matrix); }
+          rig.updateMatrix(); m4.premultiply(rig.matrix);
+          v.copy(HZ.seatL).applyMatrix4(m4); seatY = v.y * HORSE_K; seatZ = v.z * HORSE_K;
+        }
+      },
+      seat() { return seatY; },
+      seatZ() { return seatZ; },
+      flash(on) { if (on === fl) return; fl = on; for (const m of meshes) m.material = on ? R3D.mats.flash : m.userData.mat; },
+      shadow(on) { for (const m of meshes) m.castShadow = on; },
+      dispose() { mixer.stopAllAction(); mixer.uncacheRoot(rig); },
+    };
+  };
+  A.horseSeat = () => SEAT_M * HORSE_K;
+  A.horseKey = (col, cloth) => 'horse|' + (col || '#8b5a2b') + '|' + (cloth || '#8a2a2a') + '|g';
   A.has = n => M.has(n);
   A.box = n => { const e = M.get(n); return e ? e.box : null; };
   A.fit = (n, w) => { const b = A.box(n); return b ? w / Math.max(b.max.x - b.min.x, b.max.z - b.min.z) : 1; };

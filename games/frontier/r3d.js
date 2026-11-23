@@ -24,7 +24,8 @@
 //        → { group, key, pose({walk, moving, swing(0..1, 1=막 휘두름 시작), sit, yaw}), flash(on) }  키 약 1단위(scale 1)
 //          메시 5개(몸통+머리+모자 / 다리 2 / 팔 2(무기 포함)), 같은 외형은 지오메트리 공유 → 100명도 가볍다
 //   R3D.human.key(look)          외형 키(풀링용)
-//   R3D.horse(col)               말 모델 → { group, pose({walk, moving, ridden, yaw}) }  등 높이 R3D.SADDLE_Y
+//   R3D.horse(col, cloth)        말 모델 → { group, pose({walk, moving, ridden, yaw}), seat()? }  안장 높이 R3D.seat(m) (그룹 배율 전)
+//                                사실적 스타일이면 horse.glb (RA.horse, Idle/Walk/Gallop), 아니면 절차적 상자 말. 키는 R3D.horse.key(col, cloth)
 //   R3D.autoRes                  true면 느릴 때 해상도(픽셀비)를 자동으로 낮춤
 //   R3D.blobs(scene, max)        발밑 둥근 그림자(InstancedMesh 1개) → { begin(), add(x, z, r, a), end() }
 //   R3D.ctex(canvas)             캔버스 텍스처(sRGB)
@@ -363,7 +364,10 @@ const R3D = (() => {
     { g: box(0.03, 0.18, 0.03), c: '#d9b44a', p: [0.19, 0.66, 0] },
     { g: box(0.03, 0.18, 0.03), c: '#d9b44a', p: [-0.19, 0.66, 0] },
   ]));
-  function horse(col) {
+  // 사실적 말(real3d.js RA.horse, horse.glb)이 준비됐으면 그걸, 아니면(귀여운 스타일·로딩 전·실패) 아래 절차적 말
+  const realHorse = () => typeof RA !== 'undefined' && RA.hasHorse && RA.hasHorse();
+  function horse(col, cloth) {
+    if (realHorse()) { const m = RA.horse(col, cloth); if (m) return m; }
     col = col || '#8b5a2b';
     const leg = new THREE.Color(col).multiplyScalar(0.72).getStyle();
     const mat = R.mats.vc, group = new THREE.Group();
@@ -383,5 +387,18 @@ const R3D = (() => {
     };
   }
   R.horse = horse;
+  // 풀링 키: 사실적 말이 준비되면 키가 바뀌어 풀에서 새 모델로 바꿔 끼운다
+  R.horse.key = (col, cloth) => realHorse() ? RA.horseKey(col, cloth) : 'horse|' + (col || '#8b5a2b');
+  // 안장 높이(그룹 배율 곱하기 전): 사실적 말은 매 프레임 등 높이, 절차적 말은 고정
+  R.seat = m => m && m.seat ? m.seat() : R.SADDLE_Y;
+  // 말 탄 사람이 올라가는 높이 (체력바·베기 효과 위치용) = 서 있는 안장 높이 × 말 배율
+  R.mountUp = s => (realHorse() && RA.horseSeat ? RA.horseSeat() : R.SADDLE_Y) * s;
+  // 기수 위치: 말(h) 위 안장 자리에 (사실적 말은 안장이 말 원점보다 앞에 있어 바라보는 쪽으로 밀어 준다). s = 말 그룹 배율
+  R.ride = (h, g, x, y, z, s) => {
+    const f = h && h.seatZ ? h.seatZ() * (h.group.scale.x || s) : 0, yw = h ? h.group.rotation.y : 0; // 앞뒤 거리는 말의 실제 배율(3인칭 축소 포함)
+    g.position.set(x + Math.sin(yw) * f, y + R.seat(h) * s, z + Math.cos(yw) * f);
+  };
+  // 진영별 안장 담요 색
+  R.CLOTH = { ally: '#2f5fb8', foe: '#a3322a', bandit: '#5b4a3a', king: '#7a1f3a', wild: '#8a7a5a' };
   return R;
 })();

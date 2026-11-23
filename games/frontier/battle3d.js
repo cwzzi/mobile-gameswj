@@ -424,12 +424,14 @@ function drawBattle3D() {
     pose.walk = u.walk; pose.moving = mv || u.chargeT > 0; pose.swing = sw; pose.sit = !!mnt;
     pose.yaw = w3dFaceMove(r, x, z, dt, fy);
     r.m.pose(pose); r.m.flash(u.hit > 0);
-    let y = u.z / T, s = r.base;
+    let y = u.z / T, s = r.base, rx = x, rz = z;
     if (mnt) { // 기병: 말 + 안장 위 자세
-      const HS = W3_HS / 1.45 * B3_MULT, hr = b3Use('horse|' + u._l3.mount, { scale: HS }, u._h || (u._h = {}), () => R3D.horse(u._l3.mount));
+      const HS = W3_HS / 1.45 * B3_MULT, cl = u.team === 1 ? R3D.CLOTH.foe : R3D.CLOTH.ally;
+      const hr = b3Use(R3D.horse.key(u._l3.mount, cl), { scale: HS }, u._h || (u._h = {}), () => { const m = R3D.horse(u._l3.mount, cl); if (m.shadow) m.shadow(false); return m; }); // 군중: 그림자맵 대신 발밑 그림자 (스키닝을 그림자 패스에서 또 하지 않게)
       hr.m.pose({ walk: u.walk * 0.7, moving: pose.moving, ridden: true, yaw: pose.yaw });
       hr.m.group.scale.setScalar(HS); hr.m.group.position.set(x, y, z);
-      y += R3D.SADDLE_Y * HS;
+      if (hr.m.seatZ) { const f = hr.m.seatZ() * HS; rx += Math.sin(pose.yaw) * f; rz += Math.cos(pose.yaw) * f; } // 안장이 말 원점보다 앞
+      y += R3D.seat(hr.m) * HS;
     }
     pose.sit = false;
     if (u.dead) {
@@ -438,8 +440,8 @@ function drawBattle3D() {
       if (u.deadT < 0.35) s *= Math.max(0.05, u.deadT / 0.35);
       y += 0.12 * k;
     } else g.rotation.x = 0;
-    g.scale.setScalar(s); g.position.set(x, y, z);
-    if (!u.dead || u.deadT > 0.4) BL.add(x, z, (u.kind === 'boss' ? 0.5 : u.kind === 'officer' ? 0.4 : 0.32) * (u.dead ? u.deadT : 1) * (1 - Math.min(0.5, u.z / T * 0.4)));
+    g.scale.setScalar(s); g.position.set(rx, y, rz);
+    if (!u.dead || u.deadT > 0.4) BL.add(x, z, (mnt ? 0.8 : u.kind === 'boss' ? 0.5 : u.kind === 'officer' ? 0.4 : 0.32) * (u.dead ? u.deadT : 1) * (1 - Math.min(0.5, u.z / T * 0.4)));
     // 지휘관 지면 광채 + 공격 예고
     if ((u.kind === 'boss' || u.kind === 'officer') && !u.dead && gi < S3.glows.length) {
       const gm = S3.glows[gi++]; gm.visible = true; gm.material = u.kind === 'boss' ? S3.M.glowRed : S3.M.glowGold;

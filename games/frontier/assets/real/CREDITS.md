@@ -105,3 +105,5 @@ The skeleton copies the bone names and rest orientations of **KayKit Rig_Medium*
 - Clips: `Idle`, `Walk`, `Gallop`, `Attack_Kick`, `Death`.
 - Facing: the head points along glTF +Z (Blender −Y), not −Z like the KayKit characters, so rotate it 180° in the game. Origin is between the hooves at ground level.
 - The rider sits at about y = 1.74 m. Bones `Torso` and `Back` carry the saddle; `Head` is the head.
+- Fix (game side): the four hoof IK bones `FF.L`, `FF.R`, `FFB.L`, `FFB.R` were orphan nodes outside the scene, so a cloned rig (SkeletonUtils.clone) lost them and the hooves stretched to the origin. They are now children of `AnimalArmature` (identity transform, so nothing moves); real3d.js also re-parents any orphan bone as a guard.
+- In game: `RA.horse(col, cloth)` (real3d.js), used through `R3D.horse`. Idle / Walk / Gallop are picked from the horse's measured speed; the rider sits on a point attached to the `Torso` bone. The cute style and load failures fall back to the old procedural horse.

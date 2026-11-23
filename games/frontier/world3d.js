@@ -888,9 +888,10 @@ function w3dRider(obj, look, x, z, dt, pose, BL) {
   const yaw = w3dFaceMove(r, x, z, dt, pose.face);
   if (look.mount) {
     const h = obj._h || (obj._h = {});
-    const hr = w3dUse(h, 'horse|' + look.mount, () => { const m = R3D.horse(look.mount); m.group.scale.setScalar(W3_HS); return m; });
+    const cl = pose.cloth || R3D.CLOTH.ally;
+    const hr = w3dUse(h, R3D.horse.key(look.mount, cl), () => { const m = R3D.horse(look.mount, cl); m.group.scale.setScalar(W3_HS); return m; });
     hr.m.pose({ walk: (obj.walk || 0) * 0.7, moving: moved, ridden: true, yaw }); hr.m.group.position.set(x, 0, z);
-    r.m.pose({ sit: true, swing: pose.swing, yaw }); r.m.group.position.set(x, R3D.SADDLE_Y * W3_HS, z);
+    r.m.pose({ sit: true, swing: pose.swing, yaw }); R3D.ride(hr.m, r.m.group, x, 0, z, W3_HS);
     BL.add(x, z, 0.6);
   } else {
     r.m.pose({ walk: obj.walk, moving: moved, swing: pose.swing, yaw }); r.m.group.position.set(x, 0, z);
@@ -1206,7 +1207,7 @@ function drawWorld3D() {
   for (const h of S.horses) {
     if (h.ridden) continue;
     const x = h.x / T, z = h.y / T; if (!w3dInView(x, z, 1)) continue;
-    const r = w3dUse(h, 'horse|' + h.col, () => { const m = R3D.horse(h.col); m.group.scale.setScalar(W3_HS); return m; });
+    const r = w3dUse(h, R3D.horse.key(h.col, R3D.CLOTH.wild), () => { const m = R3D.horse(h.col, R3D.CLOTH.wild); m.group.scale.setScalar(W3_HS); return m; });
     const mv = !!(h.vx || h.vy);
     r.m.pose({ walk: h.walk, moving: mv, ridden: false, yaw: w3dFaceMove(r, x, z, dt, mv ? Math.atan2(h.vx, h.vy) : undefined) });
     r.m.group.position.set(x, 0, z); BL.add(x, z, 0.62);
@@ -1231,16 +1232,16 @@ function drawWorld3D() {
     const x = b.x / T, z = b.y / T; if (!w3dInView(x, z, 1.5)) continue;
     const look = b.war && (b.cmd || !b.ut) ? w3dWarLook(b.cmd) : !b.ut && !b.war ? w3dEraLook('bandit', { scale: 1.45, lod: 1 }) : w3dUnitLook(banditLook(b));
     const dpx = p.x - b.x, dpy = p.y - b.y, near = dpx * dpx + dpy * dpy < 44 * 44;
-    w3dRider(b, look, x, z, dt, { swing: (b.swing || 0) / 0.25, face: near ? Math.atan2(dpx, dpy) : b.swing > 0 ? Math.atan2(b.face || 1, 0) : undefined }, BL);
+    w3dRider(b, look, x, z, dt, { cloth: b.war ? R3D.CLOTH.foe : R3D.CLOTH.bandit, swing: (b.swing || 0) / 0.25, face: near ? Math.atan2(dpx, dpy) : b.swing > 0 ? Math.atan2(b.face || 1, 0) : undefined }, BL);
     const sc = look.scale || 1;
-    bars.push({ x, y: 1.12 * sc + 0.1 + (look.mount ? 0.7 : 0), z, f: b.hp / (b.maxHp || 3), col: '#e44' });
+    bars.push({ x, y: 1.12 * sc + 0.1 + (look.mount ? R3D.mountUp(W3_HS) : 0), z, f: b.hp / (b.maxHp || 3), col: '#e44' });
     if (b.loot) coins.push({ x, y: 0.5, z });
   }
   for (const s of soldiers) { // 훈련된 아군 병사
     const x = s.x / T, z = s.y / T; if (!w3dInView(x, z, 1.5)) continue;
     const look = w3dUnitLook(unitLook(s.ut, 'ally', S.era));
     w3dRider(s, look, x, z, dt, { swing: (s.swing || 0) / 0.25, face: s.tgt && bandits.includes(s.tgt) && s.swing > 0 ? Math.atan2(s.tgt.x - s.x, s.tgt.y - s.y) : undefined }, BL);
-    if (s.hp < s.maxHp) bars.push({ x, y: 1.12 * 1.45 + 0.1 + (look.mount ? 0.7 : 0), z, f: s.hp / s.maxHp, col: '#4fa3ff' });
+    if (s.hp < s.maxHp) bars.push({ x, y: 1.12 * 1.45 + 0.1 + (look.mount ? R3D.mountUp(W3_HS) : 0), z, f: s.hp / s.maxHp, col: '#4fa3ff' });
   }
   // 영주
   {
@@ -1248,17 +1249,18 @@ function drawWorld3D() {
     const sw = swing > 0 ? swing / 0.2 : 0;
     if (p.mounted) {
       const h = S.horses.find(h => h.ridden);
-      const hr = w3dUse(h || 'riderHorse', 'horse|' + (h ? h.col : '#8b5a2b'), () => { const m = R3D.horse(h ? h.col : '#8b5a2b'); m.group.scale.setScalar(W3_HS); return m; });
+      const hc = h ? h.col : '#8b5a2b';
+      const hr = w3dUse(h || 'riderHorse', R3D.horse.key(hc, R3D.CLOTH.king), () => { const m = R3D.horse(hc, R3D.CLOTH.king); m.group.scale.setScalar(W3_HS); return m; });
       hr.m.pose({ walk: (p.walk || 0) * 0.6, moving: p.moving, ridden: true, yaw }); hr.m.group.position.set(px, 0, pz); BL.add(px, pz, 0.62);
-      r.m.pose({ sit: true, swing: sw, yaw }); r.m.group.position.set(px, R3D.SADDLE_Y * W3_HS, pz);
+      r.m.pose({ sit: true, swing: sw, yaw }); R3D.ride(hr.m, r.m.group, px, 0, pz, W3_HS);
     } else {
       r.m.pose({ walk: p.walk, moving: p.moving, swing: sw, yaw }); r.m.group.position.set(px, 0, pz); BL.add(px, pz, 0.42);
     }
     r.m.flash(p.hurt > 0.15);
-    if (ek < 0.5) bars.push({ x: px, y: p.mounted ? 2.7 : 2.05, z: pz, f: p.hp / heroMaxHp(), col: '#4c4' });
+    if (ek < 0.5) bars.push({ x: px, y: 2.05 + (p.mounted ? R3D.mountUp(W3_HS) - 0.05 : 0), z: pz, f: p.hp / heroMaxHp(), col: '#4c4' });
     W3.slash.visible = swing > 0;
     if (swing > 0) {
-      W3.slash.position.set(px, (p.mounted ? 1.4 : 0.75) * hk, pz); W3.slash.scale.setScalar(1.4 * hk); W3.slash.rotation.y = -(p.dir || 0);
+      W3.slash.position.set(px, (p.mounted ? 0.75 + R3D.mountUp(W3_HS) * 0.93 : 0.75) * hk, pz); W3.slash.scale.setScalar(1.4 * hk); W3.slash.rotation.y = -(p.dir || 0);
       W3.slash.material.opacity = Math.min(1, swing * 5);
     }
   }
