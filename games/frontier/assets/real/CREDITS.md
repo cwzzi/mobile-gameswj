@@ -74,3 +74,7 @@ Same pipeline and conventions as batch 1. Textures are 512 px (256 px for the sc
 | scatter_flowers.glb | 28 | 33.8 | 1.06 × 0.98 × 0.35 | [flower_gazania](https://polyhaven.com/a/flower_gazania) (model, rendered to cards) |
 
 Notes: `window` material appears on school, tower_wood (lantern), tower_stone (slits), mine (tunnel mouth), barracks and stable (stall interiors). Scatter props use alpha MASK; their back faces are real reversed faces with up-facing normals, so they light like the ground.
+
+### Update: trees and bush rebuilt
+The foliage cards now have real reversed back faces that keep the same up-biased normals, and the material is single-sided. Under three.js the canopies no longer darken from flipped normals. Each atlas is a 512 px 8-bit palette PNG with alpha (256 px for the bush).
+Results: tree_broadleaf_a 2750 tris / 305 KB, tree_broadleaf_b 2618 / 283 KB, tree_conifer 772 / 167 KB, bush 480 / 66 KB. Sources are unchanged.
