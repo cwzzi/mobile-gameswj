@@ -31,6 +31,7 @@ function startBattle(war) {
     B.obs.push({ x, y, kind: r() < 0.45 ? 'rock' : 'tree', v: (r() * 10) | 0, r: 14 });
   }
   for (let x = 20; x < BW; x += 46) { B.obs.push({ x, y: 18 + r() * 10, kind: 'tree', v: (r() * 10) | 0, r: 12 }); B.obs.push({ x: x + 20, y: BH - 8 - r() * 10, kind: 'tree', v: (r() * 10) | 0, r: 12 }); }
+  if (typeof bEraSetup === 'function') bEraSetup(r); // 시대별 전장 꾸밈·일제 사격·대포 (battleEra.js)
   // 영웅
   const maxHp = 40 + S.hero.lv * 6;
   B.hero = { x: 240, y: 640, hp: maxHp, maxHp, mg: 30, face: 1, dir: 0, combo: 0, comboQ: false, comboWin: 0, atkT: 0, atkDur: 0, atkHit: false,
@@ -100,6 +101,7 @@ function buildBattleGround(r) {
   for (let k = 0; k < 2600; k++) { const x = r() * BW, y = r() * BH; g.beginPath(); g.moveTo(x - 2, y - 3); g.lineTo(x, y); g.lineTo(x + 2, y - 4); g.stroke(); }
   const fc = ['#fff', '#ffd54a', '#ff8fb0', '#c9a0ff'];
   for (let k = 0; k < 260; k++) { g.fillStyle = fc[k % 4]; g.beginPath(); g.arc(r() * BW, r() * BH, 1.8, 0, 7); g.fill(); }
+  if (typeof bEraGround === 'function') bEraGround(g, r); // 시대별 땅 색
   return c;
 }
 
@@ -281,6 +283,7 @@ function updateBattle(dt) {
     if (u.team === 1) enemyAI(u, dt, H, allies); else allyAI(u, dt, enemies);
   }
   updateShots(dt, H);
+  if (typeof bEraUpdate === 'function') bEraUpdate(dt, H);
   // 겹침 밀어내기
   const live = B.units.filter(u => !u.dead && u.z <= 0);
   for (let i = 0; i < live.length; i++) {
@@ -430,7 +433,10 @@ function fireBattleShot(u) {
   const a = Math.atan2(ty - u.y, tx - u.x);
   const dmg = u.team === 1 ? U.atk * 0.8 * Math.sqrt(B.diff) : U.atk * (u.trained ? 1.5 : 1);
   B.shots.push({ x: u.x + Math.cos(a) * 12, y: u.y + Math.sin(a) * 12, vx: Math.cos(a) * P.sp, vy: Math.sin(a) * P.sp, team: u.team, kind: U.proj, dmg, life: U.range / P.sp + 0.35 });
-  if (U.proj === 'ball') emit(u.x + Math.cos(a) * 16, u.y + Math.sin(a) * 16, 6, { color: ['#eee', '#bbb', '#ffd54a'], kind: 'smoke', smin: 10, smax: 50, lmin: .4, lmax: .8, zmin: 3, zmax: 6, grow: 12 });
+  if (U.proj === 'ball') {
+    emit(u.x + Math.cos(a) * 16, u.y + Math.sin(a) * 16, 6, { color: ['#eee', '#bbb', '#ffd54a'], kind: 'smoke', smin: 10, smax: 50, lmin: .6, lmax: 1.3, zmin: 4, zmax: 8, grow: 14 });
+    if (B.eraFx) B.eraFx.fl.push({ x: u.x + Math.cos(a) * 18, y: u.y + Math.sin(a) * 18, t: 0.1, t0: 0.1, s: 1.1 }); // 총구 불꽃
+  }
 }
 function updateShots(dt, H) {
   for (let i = B.shots.length - 1; i >= 0; i--) {

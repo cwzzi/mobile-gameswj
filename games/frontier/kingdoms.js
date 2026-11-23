@@ -37,20 +37,21 @@ const envoys = [];           // 오고 있는 사신 (저장 안 함)
 let kBldCache = null, kTradeT = 0, kHorseT = 0;
 
 const kCiv = k => CIVS[k.c];
+const kIx = (arr, e) => arr[clamp(e | 0, 0, arr.length - 1)]; // 시대 배열이 늘어나도 마지막 항목을 쓴다
 function kEra(k) { return clamp(Math.floor(k.lv + 1e-6), 0, ERAS.length - 1); }
 function kCapLv(k) { return clamp(1 + Math.floor(k.pow / 22), 1, 5); }
 function kRadius(k) { return 2 + kCapLv(k) + (kEra(k) >= 3 ? 1 : 0); }
-function kTitle(k) { return kCiv(k).titles[kEra(k)]; }
+function kTitle(k) { return kIx(kCiv(k).titles, kEra(k)); }
 function kRuler(k) { return `${kTitle(k)} ${k.ruler}`; }
 const kFacCache = new Map();
 function kFaction(k) { // 전투·외형용 진영 (warFaction 형식)
   const C = kCiv(k), e = kEra(k), key = C.id + e;
   let f = kFacCache.get(key);
-  if (!f) kFacCache.set(key, f = { name: C.name.split(' ')[1] + ' 군', color: C.color, plume: C.plume, boss: C.boss[e], kingdom: true });
+  if (!f) kFacCache.set(key, f = { name: C.name.split(' ')[1] + ' 군', color: C.color, plume: C.plume, boss: kIx(C.boss, e), kingdom: true });
   return f;
 }
 function kByWar(w) { return w && w.kingdom !== undefined && S.kingdoms ? S.kingdoms[w.kingdom] : null; }
-function warMix(w) { const k = kByWar(w), e = w && w.era !== undefined ? w.era : S.era; return k ? kCiv(k).mix[clamp(e, 0, 3)] : ENEMY_MIX[clamp(e, 0, ENEMY_MIX.length - 1)]; }
+function warMix(w) { const k = kByWar(w), e = w && w.era !== undefined ? w.era : S.era; return k ? kIx(kCiv(k).mix, e) : ENEMY_MIX[clamp(e, 0, ENEMY_MIX.length - 1)]; }
 function mixText(mix) { return mix.map(m => `${UNITS[m[0]].icon}${UNITS[m[0]].name}`).join(' · '); }
 function kBonus(key) { // tech.js techBonus 에 더해진다
   if (!S || !S.kingdoms) return 0;
@@ -154,7 +155,7 @@ function kTick(dt) {
     k.lv = clamp(k.lv + dt / 300 * C.grow * (k.st === 'war' ? 0.85 : 1), lo, hi);
     k.pow = clamp(k.pow + dt / 14 * C.grow * (k.st === 'war' ? 0.6 : 1), 0, 100);
     const e1 = kEra(k);
-    if (e1 > e0) toast(`📯 ${C.icon} <b>${k.name || C.name}</b>${josaP(C.name, '이가')} <b>${ERAS[e1].icon} ${ERAS[e1].name}</b>에 들어섰습니다${e1 > S.era ? ' <b style="color:#ff8a7a">(우리보다 앞섬)</b>' : ''}<br><small>주력: ${mixText(C.mix[e1])}</small>`, 4);
+    if (e1 > e0) toast(`📯 ${C.icon} <b>${k.name || C.name}</b>${josaP(C.name, '이가')} <b>${ERAS[e1].icon} ${ERAS[e1].name}</b>에 들어섰습니다${e1 > S.era ? ' <b style="color:#ff8a7a">(우리보다 앞섬)</b>' : ''}<br><small>주력: ${mixText(kIx(C.mix, e1))}</small>`, 4);
     if (kCapLv(k) !== c0 || e1 !== e0) changed = true;
   }
   if (changed) kRecompute();
@@ -215,7 +216,7 @@ function kAttack(i) {
   const e = kEra(k), diff = (1.2 + S.warsWon * 0.3 + S.towns.length * 0.1) * ERAS[e].diff * C.diff * (0.9 + k.pow / 200);
   S.war = { town: t.id, diff, faction: 0, field: false, era: e, kingdom: i, attack: true };
   dismount(); startBattle(S.war);
-  banner(`${C.name} 수도 공격!`, `${C.boss[e]}${josaP(C.boss[e], '을를')} 쓰러뜨려라`, 3);
+  banner(`${C.name} 수도 공격!`, `${kIx(C.boss, e)}${josaP(kIx(C.boss, e), '을를')} 쓰러뜨려라`, 3);
 }
 function kDeclare(i, byUs) {
   const k = S.kingdoms[i];
@@ -289,7 +290,7 @@ function kRelBar(k) {
 function kEraTxt(k) { const e = kEra(k); return `${ERAS[e].icon} ${ERAS[e].name}${e > S.era ? ' <b style="color:#ff8a7a">(앞섬)</b>' : e < S.era ? ' (뒤처짐)' : ''}`; }
 function kTraitBox(k) {
   const C = kCiv(k);
-  return `<div class="ktrait"><div>💪 <b>강점</b> ${C.strong}</div><div>⚠️ <b>약점</b> ${C.weak}</div><div>💛 좋아함: ${C.like} · 💢 싫어함: ${C.dislike}</div><div>🪖 주력: ${mixText(C.mix[kEra(k)])}</div></div>`;
+  return `<div class="ktrait"><div>💪 <b>강점</b> ${C.strong}</div><div>⚠️ <b>약점</b> ${C.weak}</div><div>💛 좋아함: ${C.like} · 💢 싫어함: ${C.dislike}</div><div>🪖 주력: ${mixText(kIx(C.mix, kEra(k)))}</div></div>`;
 }
 function kAudience(i, kind) {
   const k = S.kingdoms[i], C = kCiv(k); if (!k) return;
@@ -396,7 +397,7 @@ function renderDiplo() {
       if (k.st === 'peace') b('trade', '🤝', '교역 협정', k.rel >= 15 ? C.tradeTxt : `관계 +15 이상 필요`, k.rel < 15);
       if (k.st === 'trade') b('ally', '🛡️', '동맹 맺기', k.rel >= 55 ? C.allyTxt : `관계 +55 이상 필요 · ${C.allyTxt}`, k.rel < 55);
       if (k.st === 'trade' || k.st === 'ally') b('cut', '✂️', k.st === 'ally' ? '동맹 깨기' : '교역 끊기', '관계 -25', false);
-      b('war', '⚔️', '선전포고', `주력: ${mixText(C.mix[kEra(k)])}${C.id === 'sea' ? '' : ''} · 다른 왕국 관계도 변함`, !!S.war);
+      b('war', '⚔️', '선전포고', `주력: ${mixText(kIx(C.mix, kEra(k)))}${C.id === 'sea' ? '' : ''} · 다른 왕국 관계도 변함`, !!S.war);
     } else {
       b('attack', '🏹', '수도로 진격 (대규모 전투)', `이기면 약탈 · 국력 크게 감소 · 전승 ${k.score}`, !!S.war);
       const pc = Math.round(40 * (1 + S.era * 0.5));
