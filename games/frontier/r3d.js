@@ -69,6 +69,7 @@ const R3D = (() => {
       R.renderer = renderer; R.canvas = canvas; R.ok = true;
       R.maxAniso = renderer.capabilities.getMaxAnisotropy();
       initMats();
+      if (R.fx) { try { R.fx.init(); } catch (e) { console.warn('post fx init failed', e); R.fx.on = false; } }
       return true;
     } catch (e) {
       console.warn('WebGL init failed, 2D fallback', e);
@@ -81,11 +82,16 @@ const R3D = (() => {
 
   // 느린 기기면 해상도를 조금씩 낮춘다
   let fAcc = 0, fN = 0;
+  R.stats = { calls: 0, tris: 0 };
   R.render = (scene, cam) => {
     lastCam = cam;
-    renderer.render(scene, cam);
+    const inf = renderer.info; inf.reset();
+    if (R.fx && R.fx.on) R.fx.render(scene, cam); // post3d.js: HDR + 블룸 + 톤매핑 + 색보정
+    else { renderer.setRenderTarget(null); renderer.render(scene, cam); }
+    R.stats.calls = inf.render.calls; R.stats.tris = inf.render.triangles;
   };
   R.tick = dt => {
+    if (R.fx) return R.fx.tick(dt); // 품질 단계 자동 조절
     if (!R.autoRes) return;
     fAcc += dt; fN++;
     if (fAcc > 2.5) {
@@ -126,7 +132,7 @@ const R3D = (() => {
       vc: new THREE.MeshLambertMaterial({ vertexColors: true }),
       flash: new THREE.MeshBasicMaterial({ color: 0xffffff }),
       glow: new THREE.MeshLambertMaterial({ color: 0x3a2c1c, emissive: 0xffc860, emissiveIntensity: 0 }),
-      fire: new THREE.MeshBasicMaterial({ vertexColors: true }),
+      fire: new THREE.MeshBasicMaterial({ vertexColors: true, color: new THREE.Color(2.4, 2.4, 2.4) }), // HDR: 블룸으로 빛남
     };
   }
 

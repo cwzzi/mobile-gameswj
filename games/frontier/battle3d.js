@@ -23,14 +23,18 @@ function b3AddMat(color, opacity, map) {
 function b3Init() {
   const scene = new THREE.Scene();
   const cam = new THREE.PerspectiveCamera(42, VW / VH, 1, 200);
-  scene.background = new THREE.Color(0x3a4a34);
-  scene.fog = new THREE.Fog(0xc99a6e, 40, 100);
-  const hemi = new THREE.HemisphereLight(0xffe6c8, 0x3a4a30, 0.66); scene.add(hemi);
-  const sun = new THREE.DirectionalLight(0xffe0b0, 1.0);
+  // 해 질 녘 전장: 낮게 깔린 주황빛 해(긴 그림자) + 보랏빛 하늘 + 먼지 안개, 화톳불·필살기가 블룸으로 빛난다
+  scene.background = new THREE.Color(0x8a5a58);
+  scene.fog = new THREE.Fog(0x9a6a60, 40, 100);
+  const hemi = new THREE.HemisphereLight(0xb8a0c8, 0x3a2c22, 0.55); scene.add(hemi);
+  const sun = new THREE.DirectionalLight(0xffa868, 1.25);
   sun.castShadow = true; sun.shadow.mapSize.set(1024, 1024);
-  const sc = sun.shadow.camera; sc.left = -24; sc.right = 24; sc.top = 24; sc.bottom = -24; sc.near = 1; sc.far = 100;
-  sun.shadow.bias = -0.0008; sun.shadow.normalBias = 0.03;
+  const sc = sun.shadow.camera; sc.left = -18; sc.right = 18; sc.top = 18; sc.bottom = -18; sc.near = 1; sc.far = 110;
+  sun.shadow.bias = -0.0006; sun.shadow.normalBias = 0.03;
   scene.add(sun, sun.target);
+  R3D.regScene(scene); R3D.regLight(sun);
+  const pts = [];
+  for (let k = 0; k < 3; k++) { const L = new THREE.PointLight(0xff8a3a, 0, 7, 2); scene.add(L); pts.push(L); }
 
   const skirt = new THREE.Mesh(new THREE.PlaneGeometry(500, 500).rotateX(-Math.PI / 2), new THREE.MeshLambertMaterial({ color: 0x35502f }));
   skirt.position.set(BW / T / 2, -0.03, BH / T / 2); scene.add(skirt);
@@ -125,7 +129,10 @@ function b3Init() {
   hero.glow.position.y = 0.05; hero.mglow.position.y = 0.06; hero.full.position.y = 0.07;
 
   const blobs = R3D.blobs(scene, 200);
-  B3 = { scene, cam, hemi, sun, ground, skirt, M, G, root, fx, hero, blobs, B: null, own: [], pool: new Map(), act: new Map(), frame: 0, lastT: performance.now(),
+  // 블룸용 HDR: 베기 궤적·돌진·필살 오라/고리를 1보다 밝게
+  for (const k of ['trail', 'dash', 'aura', 'mring', 'full', 'glowGold', 'glowRed']) M[k].color.multiplyScalar(k === 'trail' ? 2.6 : 2.0);
+  const glows = R3D.glows(scene, 60), pools = R3D.pools(scene, 40);
+  B3 = { scene, cam, hemi, sun, pts, fxGlow: glows, fxPool: pools, ground, skirt, M, G, root, fx, hero, blobs, B: null, own: [], pool: new Map(), act: new Map(), frame: 0, lastT: performance.now(),
     tx: 0, tz: 0, dist: 30, frustum: new THREE.Frustum(), pm: new THREE.Matrix4(), sph: new THREE.Sphere(new THREE.Vector3(), 1), bases: [], stakes: null, glows: [], tele: { officer: [], boss: [], charge: [] },
     dummy: new THREE.Object3D(), heroRec: null, pr: {}, pa: {}, tex: null };
   // 공용 텔레그래프 풀
@@ -144,7 +151,9 @@ function b3Resize() {
   const t = Math.tan(c.fov / 2 * Math.PI / 180);
   B3.dist = clamp(c.aspect < 1 ? 6.0 / (t * c.aspect) : 6.8 / t, 14, 60);
   c.far = B3.dist * 3; c.updateProjectionMatrix();
-  B3.scene.fog.near = B3.dist * 1.1; B3.scene.fog.far = B3.dist * 2.6;
+  B3.scene.fog.near = B3.dist * 0.95; B3.scene.fog.far = B3.dist * 2.4;
+  const sh = clamp(Math.round(B3.dist * 0.6), 12, 24), sc = B3.sun.shadow.camera;
+  sc.left = -sh; sc.right = sh; sc.top = sh; sc.bottom = -sh; sc.updateProjectionMatrix();
 }
 
 // ---------- 전투 시작/끝 정리 ----------
@@ -265,7 +274,7 @@ function drawBattle3D() {
   cam.updateMatrixWorld();
   S3.pm.multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse); S3.frustum.setFromProjectionMatrix(S3.pm);
   const scx = Math.round(ctx_), scz = Math.round(ctz - 2);
-  S3.sun.target.position.set(scx, 0, scz); S3.sun.position.set(scx + 13, 30, scz + 17); S3.sun.target.updateMatrixWorld();
+  S3.sun.target.position.set(scx, 0, scz); S3.sun.position.set(scx - 30, 15, scz + 20); S3.sun.target.updateMatrixWorld(); // 서쪽 낮은 해 → 긴 그림자
 
   // 거점
   for (const o of S3.bases) {
@@ -287,6 +296,17 @@ function drawBattle3D() {
     if (b.owner === 1 && !b.hq && rand() < 0.02) emit(b.x - 40 + (rand() < 0.5 ? 80 : 0), b.y + 14, 1, { color: '#ffb02e', kind: 'spark', smin: 10, smax: 30, up: 40, lmin: 0.4, lmax: 0.8, zmin: 1, zmax: 1.5 });
   }
   S3.M.glowFire.opacity = 0.45 + Math.sin(tm * 11) * 0.08;
+  // 화톳불 빛: 빛무리 + 바닥 빛 + 가까운 불 몇 개는 실제 광원
+  const GL = S3.fxGlow, PL = S3.fxPool; GL.begin(); PL.begin();
+  const fires = [];
+  for (const o of S3.bases) for (const f of o.fires) {
+    const fx = o.g.position.x + f.fm.parent.position.x, fz = o.g.position.z + f.fm.parent.position.z, fl = 0.85 + Math.sin(tm * 17 + f.ph) * 0.1 + Math.sin(tm * 29 + f.ph) * 0.07;
+    GL.add(fx, 0.55, fz, 1.3 * (0.9 + fl * 0.15), B3_FIRE, 0.8 * fl); PL.add(fx, 0.02, fz, 5, B3_FIRE, 0.45 * fl);
+    fires.push({ x: fx, z: fz, d: (fx - S3.tx) ** 2 + (fz - S3.tz) ** 2, fl });
+  }
+  fires.sort((a, b) => a.d - b.d);
+  const nReal = (R3D.fx ? R3D.fx.lights() : 4) - 1;
+  S3.pts.forEach((L, i) => { L.visible = i < nReal; const f = fires[i]; if (!f || !L.visible) { L.intensity = 0; return; } L.position.set(f.x, 0.8, f.z); L.distance = 6; L.intensity = 1.4 * f.fl; });
 
   // 유닛
   let gi = 0, ti = { officer: 0, boss: 0, charge: 0 };
@@ -309,7 +329,8 @@ function drawBattle3D() {
     else if (u.swing > 0) { sw = u.swing / 0.25; if (u.tgt) fy = R3D.yawTo(u.tgt.x - u.x, u.tgt.y - u.y); }
     else if (u.team === 1 && !u.dead && !mv) { const dx = H.x - u.x, dy = H.y - u.y; if (dx * dx + dy * dy < 90 * 90) fy = R3D.yawTo(dx, dy); }
     if (u.dead) fy = r.yaw === null ? 0 : r.yaw;
-    if (u.wkind === 'aim' && u.windup > 0) sw = 0.35; // 조준 자세
+    pose.aim = u.wkind === 'aim' && u.windup > 0;
+    if (pose.aim) sw = 0.35; // 조준 자세 (원거리 병종은 조준 클립)
     const mnt = u._l3.mount && !u.dead;
     pose.walk = u.walk; pose.moving = mv || u.chargeT > 0; pose.swing = sw; pose.sit = !!mnt;
     pose.yaw = w3dFaceMove(r, x, z, dt, fy);
@@ -353,6 +374,9 @@ function drawBattle3D() {
   // 영웅
   b3Hero(H, tm, dt, hx, hz, pose);
   BL.add(hx, hz, 0.45); BL.end();
+  if (H.musouT > 0) { PL.add(hx, 0.02, hz, 7, B3_GOLD, 1.4); GL.add(hx, 1.2, hz, 2.6, B3_GOLD, 0.9); }
+  GL.end(); PL.end();
+  b3Grade(H);
   for (const [o, r] of S3.act) if (r.seen !== S3.frame) b3Release(o, r);
 
   R3D.render(S3.scene, cam);
@@ -407,21 +431,32 @@ function drawBattle3D() {
   }
   g.globalAlpha = 1;
   ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
-  ctx.fillStyle = 'rgba(255,140,60,.05)'; ctx.fillRect(0, 0, VW, VH);
-  if (H.musouT > 0) { ctx.fillStyle = 'rgba(255,210,90,.10)'; ctx.fillRect(0, 0, VW, VH); }
-  drawVignette(0.4);
+  const pf = R3D.fx && R3D.fx.on;
+  if (!pf) { ctx.fillStyle = 'rgba(255,140,60,.05)'; ctx.fillRect(0, 0, VW, VH); } // 후처리가 있으면 색보정·비네트는 셰이더에서
+  if (H.musouT > 0) { ctx.fillStyle = 'rgba(255,210,90,.07)'; ctx.fillRect(0, 0, VW, VH); }
+  if (!pf) drawVignette(0.4);
   if (H.hurt > 0) { ctx.fillStyle = `rgba(200,0,0,${H.hurt * 0.7})`; ctx.fillRect(0, 0, VW, VH); }
   drawJoystick();
   hudBattle();
 }
 
+const B3_FIRE = new THREE.Color('#ff7428'), B3_GOLD = new THREE.Color('#ffc040');
+// 전장 색감: 노을빛 (그림자는 보라, 밝은 곳은 주황). 필살 중엔 조금 더 밝고 블룸 세게
+function b3Grade(H) {
+  const G = R3D.grade, m = H.musouT > 0 ? 1 : 0;
+  G.exposure = 1.16 + m * 0.06; G.bloom = 0.62 + m * 0.3; G.threshold = 1.15; G.knee = 0.6; G.sat = 1.14; G.contrast = 1.07; G.vignette = 0.42;
+  G.lift.setRGB(0.014, 0.004, 0.024); G.gain.setRGB(1.05, 0.98, 0.9);
+  R3D.renderer.toneMappingExposure = R3D.fx && R3D.fx.on ? 1 : 1.1;
+  if (R3D.uWin) R3D.uWin.value = 0;
+  if (R3D.uRim) R3D.uRim.value.setRGB(1.0, 0.72, 0.45).multiplyScalar(0.3);
+}
 function b3Hero(H, tm, dt, hx, hz, pose) {
   const S3 = B3, hr = S3.hero, look = S3.heroLook;
   const r = b3Use('hero|' + R3D.human.key(look), look, H); S3.heroRec = r;
   const g = r.m.group, c = H.atkT > 0 ? COMBO[H.combo - 1] : null;
   let sw = 0;
   if (c) sw = H.atkT / c.dur; else if (H.musouT > 0) sw = (tm * 7) % 1;
-  pose.walk = H.walk; pose.moving = H.moving; pose.swing = sw; pose.yaw = R3D.yaw(H.dir);
+  pose.walk = H.walk; pose.moving = H.moving; pose.swing = sw; pose.yaw = R3D.yaw(H.dir); pose.aim = false;
   r.m.pose(pose); r.m.flash(H.hurt > 0.15);
   g.rotation.x = H.dashT > 0 ? 0.45 : 0;
   g.scale.setScalar(r.base); g.position.set(hx, 0, hz);

@@ -36,29 +36,65 @@ function w3dDetailTex() {
   const t = new THREE.CanvasTexture(c); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = Math.min(4, R3D.maxAniso || 1);
   return (w3dDetail = t);
 }
-// 지면 재질: 칠한 텍스처 × 디테일 노이즈(2단계 크기). rep = 텍스처 한 장이 덮는 타일 수
-function w3dGroundMat(tex, rep) {
-  const m = new THREE.MeshLambertMaterial({ map: tex });
-  const det = w3dDetailTex();
-  m.onBeforeCompile = sh => {
-    sh.uniforms.uDetail = { value: det }; sh.uniforms.uRep = { value: rep };
-    sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nuniform sampler2D uDetail;\nuniform float uRep;')
-      .replace('#include <map_fragment>', `#include <map_fragment>
+// 지면 재질: 칠한 텍스처 × 디테일 노이즈 × 지형별 질감(풀·모래·바위·숲바닥, 높이맵 → 법선으로 요철)
+// rep = 텍스처 한 장이 덮는 타일 수, splat = 타일 종류 가중치 텍스처(W×H, RGBA = 풀/모래/바위/숲). 없으면 전부 풀
+let w3dTerr = null;
+function w3dTerrTex() { return w3dTerr || (w3dTerr = R3D.tex('assets/terrain_detail.jpg')); }
+const W3_GROUND_MAP = `#include <map_fragment>
+vec4 gW = vec4(1.0, 0.0, 0.0, 0.0); vec2 gP = vWP.xz; vec3 gT = vec3(0.5); float gF = 0.5;
 #ifdef USE_MAP
+{
   float dA = texture2D(uDetail, vUv * uRep * 0.5).r, dB = texture2D(uDetail, vUv * uRep * 0.093 + 0.37).r;
-  diffuseColor.rgb *= (0.8 + 0.34 * dA) * (0.9 + 0.2 * dB);
-  { float l = dot(diffuseColor.rgb, vec3(0.3, 0.59, 0.11)); diffuseColor.rgb = max(mix(vec3(l), diffuseColor.rgb, 1.22), 0.0); } // ACES로 빠지는 채도 보정
-#endif`);
+  diffuseColor.rgb *= (0.84 + 0.26 * dA) * (0.9 + 0.2 * dB);
+#ifdef SPLAT
+  gW = texture2D(uSplat, gP / uWorld);
+  gW = clamp(gW * (1.0 + vec4(dB - 0.5, 0.5 - dB, dA - 0.5, dB - 0.5) * 1.6), 0.0, 1.0);
+  gW /= max(dot(gW, vec4(1.0)), 0.001);
+#endif
+  gT = texture2D(uTerr, gP * 0.45).rgb; gF = texture2D(uTerr, gP * 0.29 + 0.31).r;
+  float h = dot(gW, vec4(gT, gF));
+  diffuseColor.rgb *= 1.0 + (h - 0.5) * dot(gW, vec4(0.55, 0.22, 0.8, 0.75)) * uTerrOn;
+  { float l = dot(diffuseColor.rgb, vec3(0.3, 0.59, 0.11)); diffuseColor.rgb = max(mix(vec3(l), diffuseColor.rgb, 1.18), 0.0); } // ACES로 빠지는 채도 보정
+}
+#endif`;
+const W3_GROUND_NRM = `#include <normal_fragment_maps>
+#ifdef USE_MAP
+if (uTerrOn > 0.5) {
+  const float e = 0.006;
+  vec3 tX = texture2D(uTerr, (gP + vec2(e, 0.0)) * 0.45).rgb, tZ = texture2D(uTerr, (gP + vec2(0.0, e)) * 0.45).rgb;
+  vec3 amp = vec3(0.009 * (gW.r + gW.a), 0.004 * gW.g, 0.016 * gW.b);
+  float h0 = dot(gT, amp), hx = dot(tX, amp), hz = dot(tZ, amp);
+  vec3 gN = (vec4(normal, 0.0) * viewMatrix).xyz; // 시점 공간 → 월드
+  gN = normalize(gN + vec3(-(hx - h0) / e, 0.0, -(hz - h0) / e));
+  normal = normalize((viewMatrix * vec4(gN, 0.0)).xyz);
+}
+#endif`;
+function w3dGroundMat(tex, rep, splat) {
+  const m = new THREE.MeshLambertMaterial({ map: tex });
+  const det = w3dDetailTex(), terr = w3dTerrTex();
+  m.onBeforeCompile = sh => {
+    Object.assign(sh.uniforms, { uDetail: { value: det }, uRep: { value: rep }, uTerr: { value: terr.tex }, uTerrOn: terr.on, uSplat: { value: splat || null }, uWorld: { value: new THREE.Vector2(W, H) } });
+    sh.vertexShader = 'varying vec3 vWP;\n' + sh.vertexShader.replace('#include <project_vertex>', '#include <project_vertex>\n  vWP = (modelMatrix * vec4(transformed, 1.0)).xyz;');
+    sh.fragmentShader = (splat ? '#define SPLAT\n' : '') + 'varying vec3 vWP;\nuniform sampler2D uDetail, uTerr, uSplat;\nuniform float uRep, uTerrOn;\nuniform vec2 uWorld;\n' +
+      sh.fragmentShader.replace('#include <map_fragment>', W3_GROUND_MAP).replace('#include <normal_fragment_maps>', W3_GROUND_NRM);
   };
-  m.customProgramCacheKey = () => 'w3ground';
+  m.customProgramCacheKey = () => 'w3ground2' + (splat ? 'S' : '');
   return m;
 }
+// 물: 노멀맵 2겹(흐름) + 하늘 반사(프레넬) + 해/달 반짝임 + 가까운 불빛 8개의 반사(물 위로 길게 번지는 빛)
+const W3_WL = 8;
 function w3dWaterMat(mask) {
+  const wn = R3D.tex('assets/water_normal.jpg');
+  const lp = [], lc = [];
+  for (let i = 0; i < W3_WL; i++) { lp.push(new THREE.Vector4(0, -99, 0, 0)); lc.push(new THREE.Color(0, 0, 0)); }
+  const u = THREE.UniformsUtils.merge([THREE.UniformsLib.fog, {
+    uTime: { value: 0 }, uSize: { value: new THREE.Vector2(W, H) },
+    uDeep: { value: new THREE.Color('#1b5d8c') }, uShal: { value: new THREE.Color('#46c2cf') }, uSkyZ: { value: new THREE.Color('#5d9be0') }, uSkyH: { value: new THREE.Color('#d7ecff') },
+    uSunDir: { value: new THREE.Vector3(0, 1, 0) }, uSunCol: { value: new THREE.Color(1, 1, 1) }, uFoam: { value: new THREE.Color(0.95, 0.98, 1) },
+  }]);
+  u.uMask = { value: mask }; u.uNormal = { value: wn.tex }; u.uNOn = wn.on; u.uLP = { value: lp }; u.uLC = { value: lc };
   return new THREE.ShaderMaterial({
-    uniforms: THREE.UniformsUtils.merge([THREE.UniformsLib.fog, {
-      uTime: { value: 0 }, uMask: { value: null }, uSize: { value: new THREE.Vector2(W, H) }, uNight: { value: 0 },
-      uDeep: { value: new THREE.Color('#1b5d8c') }, uShal: { value: new THREE.Color('#46c2cf') }, uSky: { value: new THREE.Color('#d7ecff') },
-    }]),
+    uniforms: u,
     vertexShader: `#include <common>
 #include <fog_pars_vertex>
 varying vec3 vW;
@@ -69,7 +105,9 @@ void main() {
 }`,
     fragmentShader: `#include <common>
 #include <fog_pars_fragment>
-uniform float uTime, uNight; uniform sampler2D uMask; uniform vec2 uSize; uniform vec3 uDeep, uShal, uSky;
+uniform float uTime, uNOn; uniform sampler2D uMask, uNormal; uniform vec2 uSize;
+uniform vec3 uDeep, uShal, uSkyZ, uSkyH, uSunDir, uSunCol, uFoam;
+uniform vec4 uLP[${W3_WL}]; uniform vec3 uLC[${W3_WL}];
 varying vec3 vW;
 void main() {
   vec2 uv = vW.xz / uSize;
@@ -77,19 +115,30 @@ void main() {
   vec2 p = vW.xz;
   float w1 = sin(p.x * 1.9 + uTime * 1.3 + sin(p.y * 0.8 + uTime * 0.6) * 1.6);
   float w2 = sin(p.y * 2.4 - uTime * 1.1 + sin(p.x * 1.1 - uTime * 0.45) * 1.3);
-  float w3 = sin((p.x + p.y) * 4.1 + uTime * 2.1);
-  vec3 n = normalize(vec3(w1 * 0.1 + w3 * 0.04, 1.0, w2 * 0.1 - w3 * 0.03));
-  vec3 V = normalize(cameraPosition - vW), L = normalize(vec3(0.4, 1.0, 0.55));
-  float spec = pow(max(dot(reflect(-L, n), V), 0.0), 80.0);
-  float fres = pow(1.0 - max(dot(n, V), 0.0), 4.0);
+  vec2 nt = vec2(w1, w2) * 0.07;
+  if (uNOn > 0.5) {
+    vec3 a = texture2D(uNormal, p * 0.11 + vec2(uTime * 0.013, uTime * 0.008)).rgb * 2.0 - 1.0;
+    vec3 b = texture2D(uNormal, p * 0.29 + vec2(-uTime * 0.021, uTime * 0.013)).rgb * 2.0 - 1.0;
+    nt = nt * 0.4 + (a.xy + b.xy) * 0.3;
+  }
+  vec3 n = normalize(vec3(nt.x, 1.0, nt.y));
+  vec3 V = normalize(cameraPosition - vW);
+  float fres = 0.04 + 0.96 * pow(1.0 - max(dot(n, V), 0.0), 5.0);
+  vec3 R = reflect(-V, n);
+  vec3 sky = mix(uSkyH, uSkyZ, smoothstep(0.05, 0.85, R.y));
   vec3 col = mix(uShal, uDeep, smoothstep(0.02, 0.75, d));
-  col = mix(col, uSky, clamp(fres * 0.6 + 0.04, 0.0, 0.5));
+  col = mix(col, sky, clamp(fres * 1.4 + 0.16, 0.0, 0.9));
+  float sd = max(dot(R, uSunDir), 0.0);
+  col += uSunCol * (pow(sd, 300.0) * 9.0 + pow(sd, 36.0) * 0.3);
+  for (int i = 0; i < ${W3_WL}; i++) {
+    vec3 L = uLP[i].xyz - vW; float dl = length(L); L /= max(dl, 0.001);
+    float s = max(dot(R, L), 0.0);
+    col += uLC[i] * uLP[i].w * (pow(s, 50.0) * 3.0 + pow(s, 6.0) * 0.08) / (1.0 + dl * dl * 0.3);
+  }
   float band = smoothstep(0.2, 0.04, d);
   float foam = band * smoothstep(0.35, 0.9, 0.5 + 0.5 * sin(d * 70.0 - uTime * 2.2 + w1 * 1.2 + w2)) + smoothstep(0.075, 0.03, d) * 0.8;
-  col = mix(col, vec3(0.95, 0.98, 1.0), clamp(foam, 0.0, 1.0) * 0.75);
-  col += spec * vec3(1.0, 0.97, 0.9) * (1.0 - uNight * 0.8) * 0.9;
-  col *= 1.0 - uNight * 0.55;
-  float a = mix(0.5, 0.88, smoothstep(0.0, 0.6, d)) + foam * 0.25;
+  col = mix(col, uFoam, clamp(foam, 0.0, 1.0) * 0.7);
+  float a = mix(0.55, 0.9, smoothstep(0.0, 0.6, d)) + foam * 0.25 + fres * 0.25;
   gl_FragColor = vec4(col, clamp(a, 0.0, 1.0));
   #include <tonemapping_fragment>
   #include <encodings_fragment>
@@ -122,6 +171,11 @@ function w3dBuildMask() {
   W3.mask.needsUpdate = true;
   W3.water.material.uniforms.uMask.value = W3.mask;
 }
+// 지형 가중치(splat): 타일 하나 = 텍셀 하나, 선형 보간으로 경계가 섞인다
+function w3dSplatPx(i) {
+  const t = S.tiles[i], d = W3.splat.image.data, o = i * 4;
+  d[o] = t === GRASS ? 255 : 0; d[o + 1] = t === SAND || t === WATER ? 255 : 0; d[o + 2] = t === MOUNTAIN || t === GOLD ? 255 : 0; d[o + 3] = t === FOREST ? 255 : 0;
+}
 
 // ---------- 초기화 ----------
 function w3dInit() {
@@ -132,11 +186,15 @@ function w3dInit() {
   const hemi = new THREE.HemisphereLight(0xd8ecff, 0x5a6a40, 0.6); scene.add(hemi);
   const sun = new THREE.DirectionalLight(0xfff2dc, 0.85);
   sun.castShadow = true; sun.shadow.mapSize.set(1024, 1024);
-  const sc = sun.shadow.camera; sc.left = -21; sc.right = 21; sc.top = 21; sc.bottom = -21; sc.near = 1; sc.far = 90;
-  sun.shadow.bias = -0.0008; sun.shadow.normalBias = 0.03;
+  const sc = sun.shadow.camera; sc.left = -21; sc.right = 21; sc.top = 21; sc.bottom = -21; sc.near = 1; sc.far = 110;
+  sun.shadow.bias = -0.0006; sun.shadow.normalBias = 0.03;
   scene.add(sun, sun.target);
+  R3D.regScene(scene); R3D.regLight(sun);
   const pts = [];
   for (let k = 0; k < 4; k++) { const L = new THREE.PointLight(0xffa050, 0, 7, 2); scene.add(L); pts.push(L); }
+  // 지형 가중치 텍스처 (타일 종류 → 풀/모래/바위/숲 질감 섞기)
+  const splat = new THREE.DataTexture(new Uint8Array(W * H * 4), W, H, THREE.RGBAFormat);
+  splat.magFilter = splat.minFilter = THREE.LinearFilter; splat.wrapS = splat.wrapT = THREE.ClampToEdgeWrapping;
 
   // 바다: 깊은 바닥 + 반투명 수면 + 물결 반짝임
   const ocean = new THREE.Mesh(new THREE.PlaneGeometry(700, 700).rotateX(-Math.PI / 2), new THREE.MeshLambertMaterial({ color: 0x1f4a6c }));
@@ -180,7 +238,14 @@ function w3dInit() {
 
   const treeMatA = new THREE.MeshLambertMaterial({ map: null });
   treeMatA.onBeforeCompile = treeMat.onBeforeCompile; treeMatA.customProgramCacheKey = () => 'w3treeA';
-  W3 = { scene, cam, hemi, sun, pts, water, waves, wtex, mask, detail, blobs, treeMat, treeMatA, goldMat, uTime, uChop, ring, slash, aver: -1,
+  // 가짜 빛 (빛무리 · 빛웅덩이) + 등불/횃불 기둥 (시대별 모양)
+  const glows = R3D.glows(scene, 220), pools = R3D.pools(scene, 140);
+  const lamps = {};
+  for (const k of ['torch', 'lantern', 'lamp']) {
+    const m = new THREE.InstancedMesh(w3dLampGeo(k), R3D.mats.vc, 160);
+    m.instanceMatrix.setUsage(THREE.DynamicDrawUsage); m.frustumCulled = false; m.count = 0; m.castShadow = true; scene.add(m); lamps[k] = m;
+  }
+  W3 = { scene, cam, hemi, sun, pts, water, splat, glows, pools, lamps, waves, wtex, mask, detail, blobs, treeMat, treeMatA, goldMat, uTime, uChop, ring, slash, aver: -1,
     frustum: new THREE.Frustum(), pm: new THREE.Matrix4(), chunks: [], dyn: new Map(), pool: new Map(), frame: 0,
     arrows: [], S: null, tx: 0, tz: 0, lastT: performance.now(), dist: 30, look: new WeakMap() };
   R3D.onResize.push(w3dResize); w3dResize();
@@ -190,7 +255,7 @@ function w3dResize() {
   const t = Math.tan(c.fov / 2 * Math.PI / 180);
   W3.dist = clamp(c.aspect < 1 ? 5.4 / (t * c.aspect) : 6.2 / t, 12, 40);
   c.far = W3.dist * 3; c.updateProjectionMatrix();
-  W3.scene.fog.near = W3.dist * 1.05; W3.scene.fog.far = W3.dist * 2.2;
+  W3.scene.fog.near = W3.dist * 1.0; W3.scene.fog.far = W3.dist * 2.3;
 }
 
 // ---------- 새 세계(새 게임/불러오기) ----------
@@ -211,6 +276,8 @@ function w3dReset() {
     ch[vz * (W + 1) + vx] = allW ? -(0.2 + 0.075 * Math.min(md, 6)) : 0;
   }
   w3dBuildMask();
+  for (let i = 0; i < W * H; i++) w3dSplatPx(i);
+  W3.splat.needsUpdate = true;
   W3.prevHp = S.hp.slice(); W3.ownSnap = owner.slice();
   for (const [o, r] of W3.dyn) w3dDrop(o, r);
   w3dDirtyTiles.length = 0; w3dOwnerDirty = false;
@@ -241,7 +308,7 @@ function w3dMakeGround(c) {
   geo.computeVertexNormals();
   const can = document.createElement('canvas'); can.width = can.height = CK * TPX;
   const tex = R3D.ctex(can); tex.anisotropy = Math.min(4, R3D.maxAniso || 1);
-  const mesh = new THREE.Mesh(geo, w3dGroundMat(tex, CK));
+  const mesh = new THREE.Mesh(geo, w3dGroundMat(tex, CK, W3.splat));
   mesh.position.set(c.cx * CK + CK / 2, 0, c.cz * CK + CK / 2); mesh.receiveShadow = true;
   c.ground = mesh; c.can = can; c.g = can.getContext('2d'); c.tex = tex; c.gDirty = true;
   W3.scene.add(mesh);
@@ -637,6 +704,8 @@ function w3dPalisadeGeo() {
 }
 // ---------- 모습 ----------
 const W3_HS = 1.4; // 말 크기
+const W3_WIN = new THREE.Color('#ff9a44'), W3_FIRE = new THREE.Color('#ff7a26');
+const W3_WINB = { house: 1, school: 1, market: 1, barracks: 1, lumber: 1, mine: 1, stable: 1 }; // 밤에 창/문간 불이 켜지는 건물
 const W3_BSCALE = { school: [1.25, 1.35, 1.25], house: [1.25, 1.4, 1.25], tower: [1.15, 1.45, 1.15], market: [1.2, 1.35, 1.2], farm: [1, 1.3, 1] };
 const W3_LOOK = {
   player: { body: '#2b5fb8', trim: '#f2c14e', cape: '#c0392b', hat: 'crown', weapon: 'sword', armor: true, scale: 1.45 * 1.1 },
@@ -680,33 +749,133 @@ function w3dRider(obj, look, x, z, dt, pose, BL) {
 function w3dWarLook(cmd) { return cmd ? w3dEraLook('officer', { scale: 1.45 * 1.3 }) : w3dEraLook('grunt', { scale: 1.45, lod: 1 }); }
 function w3dHuman(obj, look) { const key = R3D.human.key(look); return w3dUse(obj, 'h|' + key, () => R3D.human(look)); }
 
-// ---------- 매 프레임 ----------
-const w3dC1 = new THREE.Color(), w3dC2 = new THREE.Color();
-const W3_SKY = { day: new THREE.Color('#9ccbe6'), dusk: new THREE.Color('#e9a46f'), night: new THREE.Color('#0d1530') };
-const W3_SUN = { day: new THREE.Color('#fff3e0'), dusk: new THREE.Color('#ffa35c'), night: new THREE.Color('#7f98e6') };
-function w3dLighting(lightSrc) {
-  const d = dayInfo(), night = clamp(d.dark / 0.6, 0, 1), dusk = d.dusk * (1 - night);
-  const mix3 = (o, out) => { out.copy(o.day).lerp(o.dusk, dusk * 0.85); out.lerp(o.night, night); return out; };
-  mix3(W3_SKY, W3.scene.background); W3.scene.fog.color.copy(W3.scene.background);
-  mix3(W3_SUN, W3.sun.color);
-  W3.sun.intensity = lerp(0.88, 0.32, night) * (1 - dusk * 0.15);
-  W3.hemi.intensity = lerp(0.62, 0.42, night);
-  W3.hemi.color.set('#d8ecff').lerp(w3dC1.set('#4a5a9a'), night);
-  W3.hemi.groundColor.set('#5a6a40').lerp(w3dC1.set('#1a1c34'), night);
-  R3D.mats.glow.emissiveIntensity = clamp((night - 0.05) * 1.6 + dusk * 0.35, 0, 1.3);
-  W3.water.material.uniforms.uNight.value = night;
-  // 밤: 가까운 불빛 3개 + 영주 주변 은은한 빛 (빛 개수는 고정 → 셰이더 재컴파일 없음)
-  const p = S.player, px = p.x / T, pz = p.y / T;
-  lightSrc.sort((a, b) => ((a.x - px) ** 2 + (a.z - pz) ** 2) - ((b.x - px) ** 2 + (b.z - pz) ** 2));
-  const k = clamp((night - 0.1) * 1.5, 0, 1);
-  for (let i = 0; i < 3; i++) {
-    const L = W3.pts[i], s = lightSrc[i];
-    if (!s || k <= 0) { L.intensity = 0; continue; }
-    L.position.set(s.x, s.y, s.z); L.color.set(s.col); L.distance = s.r;
-    L.intensity = k * s.k * (s.fire ? 0.85 + Math.sin(S.time * 17 + i) * 0.1 + Math.sin(S.time * 29) * 0.06 : 1);
+// ---------- 등불 · 횃불 (시대별) ----------
+function w3dLampGeo(k) {
+  const { box, cyl, cone } = R3D.prim;
+  return R3D.cached('lamp|' + k, () => {
+    if (k === 'torch') return R3D.merge([
+      { g: cyl(0.03, 0.045, 0.9, 5), c: '#5a3a20', p: [0, 0.45, 0] },
+      { g: cyl(0.065, 0.04, 0.1, 6), c: '#3a2a1a', p: [0, 0.92, 0] },
+      { g: cone(0.065, 0.17, 6), c: '#ffb040', p: [0, 1.04, 0] },
+    ]);
+    if (k === 'lantern') return R3D.merge([
+      { g: box(0.06, 1.0, 0.06), c: '#4a3420', p: [0, 0.5, 0] },
+      { g: box(0.24, 0.04, 0.04), c: '#4a3420', p: [0.09, 0.98, 0] },
+      { g: box(0.11, 0.15, 0.11), c: '#ffd890', p: [0.18, 0.86, 0] },
+      { g: cone(0.095, 0.07, 4), c: '#2a2420', p: [0.18, 0.97, 0], r: [0, Math.PI / 4, 0] },
+    ]);
+    return R3D.merge([ // 가로등 (근세)
+      { g: cyl(0.03, 0.045, 1.35, 6), c: '#2a2e34', p: [0, 0.675, 0] },
+      { g: cyl(0.075, 0.095, 0.07, 6), c: '#2a2e34', p: [0, 0.035, 0] },
+      { g: box(0.13, 0.17, 0.13), c: '#ffe2a8', p: [0, 1.43, 0] },
+      { g: cone(0.12, 0.09, 4), c: '#1e2226', p: [0, 1.56, 0], r: [0, Math.PI / 4, 0] },
+    ]);
+  });
+}
+const W3_LAMP = [ // 시대별: 모양, 불빛 높이/옆 위치, 색, 세기
+  { k: 'torch', y: 1.05, dx: 0, col: new THREE.Color('#ff6a1e'), i: 3.2, fire: true },
+  { k: 'lantern', y: 0.86, dx: 0.18, col: new THREE.Color('#ff8a30'), i: 3.0 },
+  { k: 'lantern', y: 0.86, dx: 0.18, col: new THREE.Color('#ff9438'), i: 3.3 },
+  { k: 'lamp', y: 1.43, dx: 0, col: new THREE.Color('#ffa048'), i: 3.6 },
+];
+// 마을 둘레 등불 자리 (마을 레벨·시대·건물이 바뀔 때만 다시 계산)
+function w3dTownLamps(t, m) {
+  const lv = townLevel(t), key = lv + '|' + S.era + '|' + S.buildings.length;
+  if (m.lampKey === key) return m.lamps;
+  const ek = S.era >= 3 ? 1.12 : 1, n = S.era === 0 ? 5 : 3 + lv + S.era;
+  const R = (S.era === 0 ? 2.0 + (lv - 1) * 0.3 : 1.6 + lv * 0.14) * ek, out = [];
+  const free = (x, z) => { const tx = Math.floor(x), tz = Math.floor(z); const tt = tileAt(tx, tz); return (tt === GRASS || tt === SAND) && !S.buildings.some(b => b.x === tx && b.y === tz); };
+  for (let k = 0; k < n; k++) {
+    const a = (k + 0.5) / n * Math.PI * 2 + 0.35, x = t.x + 0.5 + Math.sin(a) * R, z = t.y + 0.5 + Math.cos(a) * R;
+    if (free(x, z)) out.push([x, z]);
   }
-  const L = W3.pts[3]; L.position.set(px, 1.6, pz + 0.3); L.color.set('#ffd9a0'); L.distance = 5.5; L.intensity = k * 0.9;
-  return { night, dusk };
+  if (lv >= 3) for (const s of [-1, 1]) { const x = t.x + 0.5 + s * 0.62 * ek, z = t.y + 0.5 + (lv >= 4 ? 1.62 : 1.3) * ek; if (free(x, z)) out.push([x, z]); } // 성문 양옆
+  m.lampKey = key; m.lamps = out; return out;
+}
+
+// ---------- 하루 (해돋이 → 낮 → 노을 → 푸른 저녁 → 밤) ----------
+// t: 하루 위상(0 해돋이 · 0.25 정오 · 0.5 해넘이 · 0.75 자정). sun/sI: 해(밤엔 달) 색·세기, sky/gnd/hI: 반구광,
+// fog: 안개·배경, zen/hor: 물에 비치는 하늘(천정/지평), wd/ws: 깊은/얕은 물, ex: 노출, bl/th: 블룸 세기/문턱,
+// sat/con: 채도/대비, lift/gain: 어두운 곳/밝은 곳 색조, vig: 비네트, on: 불빛 켜짐
+const W3_KEYS = [
+  [0.00, '#ff9060', 0.06, '#8496c4', '#2a2434', 0.40, '#b08c98', '#5a6aa8', '#f0a080', '#1c3050', '#3a6a80', 1.10, 0.7, 1.0, 1.05, 1.05, '#0a0412', '#fff0e0', 0.38, 0.6],
+  [0.035, '#ffb070', 0.55, '#a8b8d8', '#4a4040', 0.48, '#d4b8a8', '#7a98d0', '#ffd0a0', '#1c4a70', '#4a9aaa', 1.05, 0.45, 1.3, 1.08, 1.04, '#060408', '#fff4e4', 0.32, 0.0],
+  [0.09, '#ffe2bc', 0.92, '#c4daf4', '#5e6a48', 0.52, '#c8d8e4', '#6aa4e4', '#e4ecf4', '#1b5d8c', '#46c2cf', 1.0, 0.25, 1.7, 1.08, 1.04, '#000000', '#ffffff', 0.26, 0.0],
+  [0.25, '#fff6e8', 1.0, '#d0e6ff', '#6a7a4c', 0.55, '#bcd4e8', '#5d9be0', '#dcecf8', '#1b5d8c', '#46c2cf', 1.08, 0.22, 1.8, 1.06, 1.07, '#000000', '#ffffff', 0.24, 0.0],
+  [0.40, '#ffe0b4', 0.98, '#d4dcec', '#6a6844', 0.52, '#d4d4cc', '#6a9ad8', '#f2e2c8', '#1d5a86', '#48b8c4', 1.08, 0.28, 1.6, 1.08, 1.07, '#020000', '#fff8f0', 0.28, 0.0],
+  [0.465, '#ff9a58', 0.85, '#d0a49a', '#4a3a32', 0.5, '#e0a080', '#7a7cb4', '#ffb070', '#1c3c64', '#2e7088', 1.1, 0.5, 1.2, 1.14, 1.06, '#0a0204', '#fff0dc', 0.34, 0.2],
+  [0.50, '#ff6030', 0.12, '#8a6a92', '#2a2030', 0.44, '#8a5e78', '#3a4a8a', '#e87850', '#1a2a4c', '#3a4a60', 1.12, 0.8, 1.0, 1.08, 1.06, '#0a0418', '#ffe8dc', 0.42, 0.7],
+  [0.56, '#7f98e6', 0.14, '#3c4c8c', '#141828', 0.38, '#28325e', '#1a2450', '#4a4a7a', '#0a1430', '#14283a', 1.18, 1.0, 0.75, 0.95, 1.08, '#020818', '#e8eeff', 0.48, 1.0],
+  [0.64, '#9fb6ff', 0.24, '#28386e', '#0a0e1c', 0.26, '#0c1430', '#0a1230', '#1c2448', '#050c1c', '#0c1c2a', 1.22, 1.1, 0.65, 0.9, 1.1, '#000616', '#e0e8ff', 0.5, 1.0],
+  [0.86, '#9fb6ff', 0.32, '#28386e', '#0a0e1c', 0.32, '#0c1430', '#0a1230', '#1c2448', '#050c1c', '#0c1c2a', 1.22, 1.1, 0.65, 0.9, 1.1, '#000616', '#e0e8ff', 0.5, 1.0],
+  [0.95, '#9fb6ff', 0.16, '#3a4478', '#141626', 0.36, '#2a3058', '#1a2450', '#5a5078', '#0a1430', '#14283a', 1.16, 0.9, 0.8, 0.95, 1.08, '#040616', '#eef0ff', 0.45, 1.0],
+  [1.00, '#ff9060', 0.06, '#8496c4', '#2a2434', 0.40, '#b08c98', '#5a6aa8', '#f0a080', '#1c3050', '#3a6a80', 1.10, 0.7, 1.0, 1.05, 1.05, '#0a0412', '#fff0e0', 0.38, 0.6],
+].map(r => ({ t: r[0], sun: new THREE.Color(r[1]), sI: r[2], sky: new THREE.Color(r[3]), gnd: new THREE.Color(r[4]), hI: r[5], fog: new THREE.Color(r[6]), zen: new THREE.Color(r[7]), hor: new THREE.Color(r[8]),
+  wd: new THREE.Color(r[9]), ws: new THREE.Color(r[10]), ex: r[11], bl: r[12], th: r[13], sat: r[14], con: r[15], lift: new THREE.Color(r[16]), gain: new THREE.Color(r[17]), vig: r[18], on: r[19] }));
+const W3_K = { sun: new THREE.Color(), sky: new THREE.Color(), gnd: new THREE.Color(), fog: new THREE.Color(), zen: new THREE.Color(), hor: new THREE.Color(), wd: new THREE.Color(), ws: new THREE.Color(), lift: new THREE.Color(), gain: new THREE.Color() };
+function w3dKey(ph) {
+  let i = 0; while (i < W3_KEYS.length - 2 && ph >= W3_KEYS[i + 1].t) i++;
+  const a = W3_KEYS[i], b = W3_KEYS[i + 1], f0 = clamp((ph - a.t) / (b.t - a.t), 0, 1), f = f0 * f0 * (3 - 2 * f0), K = W3_K;
+  for (const c of ['sun', 'sky', 'gnd', 'fog', 'zen', 'hor', 'wd', 'ws', 'lift', 'gain']) K[c].copy(a[c]).lerp(b[c], f);
+  for (const n of ['sI', 'hI', 'ex', 'bl', 'th', 'sat', 'con', 'vig', 'on']) K[n] = lerp(a[n], b[n], f);
+  return K;
+}
+const w3dC1 = new THREE.Color(), w3dSunDir = new THREE.Vector3();
+// 하늘·빛·안개·물·색보정을 시간에 맞추고, 불빛 목록(src)으로 실제 점광원 몇 개 + 빛무리 + 빛웅덩이 + 물 반사를 채운다
+// src 원소: { x, y, z, col: THREE.Color, k: 세기, glow: 빛무리 크기, pool: 빛웅덩이 반지름, fire, real: 실제 광원 후보 }
+function w3dLighting(src) {
+  const ph = ((S.time / DAY_LEN) + 0.08) % 1, K = w3dKey(ph), d = dayInfo();
+  const night = clamp(d.dark / 0.6, 0, 1), dusk = d.dusk * (1 - night), on = K.on;
+  W3.scene.background.copy(K.fog); W3.scene.fog.color.copy(K.fog);
+  W3.scene.fog.near = W3.dist * lerp(1.0, 0.8, on); W3.scene.fog.far = W3.dist * lerp(2.3, 1.95, on);
+  // 해(낮) / 달(밤): 동→남→서로 돌고, 낮게 뜰수록 그림자가 길다
+  const day = ph < 0.5, a = (day ? ph : ph - 0.5) * 2 * Math.PI;
+  w3dSunDir.set(Math.cos(a) * 0.8, 0.24 + Math.max(0, Math.sin(a)) * 1.0, 0.55).normalize();
+  W3.sun.color.copy(K.sun); W3.sun.intensity = K.sI;
+  W3.hemi.color.copy(K.sky); W3.hemi.groundColor.copy(K.gnd); W3.hemi.intensity = K.hI;
+  // 색보정·노출 (후처리가 꺼진 낮음 품질에선 렌더러 노출만)
+  const G = R3D.grade;
+  G.exposure = K.ex; G.bloom = K.bl; G.threshold = K.th; G.knee = 0.6; G.sat = K.sat; G.contrast = K.con; G.lift.copy(K.lift); G.gain.copy(K.gain); G.vignette = K.vig;
+  R3D.renderer.toneMappingExposure = R3D.fx && R3D.fx.on ? 1 : K.ex;
+  // 창문: 밤이면 켜짐. 시대·인구가 클수록 켜진 창이 많다
+  const pop = S.towns.reduce((s, t) => s + t.pop, 0);
+  if (R3D.uWin) { R3D.uWin.value = on * 1.15; R3D.uWinLit.value = clamp(0.3 + S.era * 0.14 + pop / 300, 0.2, 0.95); }
+  R3D.mats.glow.emissiveIntensity = on * 1.8;
+  if (R3D.uRim) R3D.uRim.value.setRGB(1.0, 0.93, 0.8).multiplyScalar(0.28).lerp(w3dC1.setRGB(0.45, 0.55, 1.0).multiplyScalar(0.14), on);
+  // 물
+  const wu = W3.water.material.uniforms;
+  wu.uDeep.value.copy(K.wd); wu.uShal.value.copy(K.ws); wu.uSkyZ.value.copy(K.zen); wu.uSkyH.value.copy(K.hor);
+  wu.uSunDir.value.copy(w3dSunDir); wu.uSunCol.value.copy(K.sun).multiplyScalar(K.sI * (day ? 1 : 0.3)); // 달빛 반짝임은 약하게
+  wu.uFoam.value.setRGB(0.95, 0.98, 1).multiplyScalar(lerp(1, 0.16, on));
+  // 불빛
+  const p = S.player, px = p.x / T, pz = p.y / T, cx = W3.tx, cz = W3.tz;
+  const G1 = W3.glows, P1 = W3.pools; G1.begin(); P1.begin();
+  if (on > 0.01) for (const s of src) {
+    const fl = s.fire ? 0.82 + Math.sin(S.time * 17 + s.x * 3) * 0.1 + Math.sin(S.time * 29 + s.z) * 0.08 : 1;
+    s.kk = s.k * on * fl;
+    if (s.glow) G1.add(s.x, s.y, s.z, s.glow * (s.fire ? 0.9 + fl * 0.15 : 1), s.col, s.kk * 0.26);
+    if (s.pool) P1.add(s.x, 0.02, s.z, s.pool * 2, s.col, s.kk * 0.6); // 바닥은 원래 색에 곱해지므로 밤의 어두운 땅을 확 밝힌다
+  }
+  G1.end(); P1.end();
+  // 실제 점광원: 화면 가운데에서 가까운 것부터 (개수는 품질 단계에 따라)
+  src.sort((a, b) => ((a.x - cx) ** 2 + (a.z - cz) ** 2) - ((b.x - cx) ** 2 + (b.z - cz) ** 2));
+  const nReal = (R3D.fx ? R3D.fx.lights() : 4) - 1;
+  let n = 0;
+  for (let i = 0; i < 3; i++) {
+    const L = W3.pts[i]; L.visible = i < nReal;
+    while (n < src.length && !src[n].real) n++;
+    const s = src[n++];
+    if (!s || on <= 0.01 || !L.visible) { L.intensity = 0; continue; }
+    L.position.set(s.x, s.y + 0.2, s.z); L.color.copy(s.col); L.distance = s.r || 6;
+    L.intensity = s.kk * 0.32;
+  }
+  const L = W3.pts[3]; L.position.set(px, 1.6, pz + 0.3); L.color.set('#ffd9a0'); L.distance = 4.5; L.intensity = on * 0.75;
+  // 물에 비치는 불빛 8개
+  for (let i = 0; i < W3_WL; i++) {
+    const s = src[i];
+    if (s && on > 0.01) { wu.uLP.value[i].set(s.x, s.y, s.z, s.kk * 0.5); wu.uLC.value[i].copy(s.col); } else wu.uLP.value[i].w = 0;
+  }
+  return { night, dusk, on };
 }
 
 function drawWorld3D() {
@@ -730,9 +899,13 @@ function drawWorld3D() {
   W3.pm.multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse); W3.frustum.setFromProjectionMatrix(W3.pm);
 
   // 그림자 카메라: 화면 중심보다 조금 북쪽(위), 1단위 격자에 맞춰 흔들림 방지
-  const scx = Math.round(W3.tx), scz = Math.round(W3.tz - 3);
-  W3.sun.target.position.set(scx, 0, scz); W3.sun.position.set(scx + 14, 30, scz + 18);
+  const scx = Math.round(W3.tx), scz = Math.round(W3.tz - 2);
+  W3.sun.target.position.set(scx, 0, scz); W3.sun.position.copy(w3dSunDir).multiplyScalar(45).add(W3.sun.target.position);
   W3.sun.target.updateMatrixWorld();
+  { // 그림자 범위를 화면에 맞게 좁혀 해상도를 높인다
+    const sh = clamp(Math.round(W3.dist * 0.55), 10, 21), sc = W3.sun.shadow.camera;
+    if (sc.right !== sh) { sc.left = -sh; sc.right = sh; sc.top = sh; sc.bottom = -sh; sc.updateProjectionMatrix(); }
+  }
 
   // 바뀐 타일/영토 반영
   const markG = (x, y) => { if (x < 0 || y < 0 || x >= W || y >= H) return; W3.chunks[((y / CK) | 0) * NCK + ((x / CK) | 0)].gDirty = true; };
@@ -740,6 +913,7 @@ function drawWorld3D() {
     const x = i % W, y = (i / W) | 0;
     for (const [dx, dy] of [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1]]) markG(x + dx, y + dy);
     W3.chunks[((y / CK) | 0) * NCK + ((x / CK) | 0)].pDirty = true; W3.prevHp[i] = S.hp[i];
+    w3dSplatPx(i); W3.splat.needsUpdate = true;
   }
   w3dDirtyTiles.length = 0;
   const ptx = Math.floor(px), pty = Math.floor(pz);
@@ -782,6 +956,8 @@ function drawWorld3D() {
   // 동적 오브젝트
   const bars = [], labels = [], lights = [], coins = [];
   const BL = W3.blobs; BL.begin();
+  const LE = W3_LAMP[clamp(S.era | 0, 0, 3)], lampN = { torch: 0, lantern: 0, lamp: 0 };
+  const litFrac = clamp(0.3 + S.era * 0.14 + S.towns.reduce((s, t) => s + t.pop, 0) / 300, 0.2, 0.95);
   for (const t of S.towns) {
     const x = t.x + 0.5, z = t.y + 0.5;
     if (!w3dInView(x, z, 3)) continue;
@@ -807,7 +983,13 @@ function drawWorld3D() {
     m.group.position.set(x, 0, z); m.group.scale.set(m.sxz * ek, m.sy * ek, m.sxz * ek); w3dWave(m.flag, tm);
     if (m.pal) { const ps = 1 + (lv - 1) * 0.18, gx = m.sxz * ek, gy = m.sy * ek; m.pal.scale.set(ps / gx, 1 / gy, ps / gx); } // 성 크기 배율과 무관하게
     labels.push({ x, y: m.top * m.sy + 0.35, z, s: townLabel(t), war: S.war && S.war.town === t.id });
-    lights.push({ x, y: 1.4, z: z + 0.9, col: '#ffbb66', r: 6 + lv, k: 1.3 });
+    // 등불·횃불 기둥 + 성 안 불빛(마당을 밝힘)
+    const LM = W3.lamps[LE.k];
+    for (const [lx, lz] of w3dTownLamps(t, m)) {
+      if (lampN[LE.k] < 160) { w3dM4.makeTranslation(lx, 0, lz); LM.setMatrixAt(lampN[LE.k]++, w3dM4); }
+      lights.push({ x: lx + LE.dx, y: LE.y, z: lz, col: LE.col, k: LE.i, glow: 0.6, pool: 1.6, fire: LE.fire, real: true, r: 5 });
+    }
+    lights.push({ x, y: Math.min(1.6, m.top * m.sy * 0.4), z: z + 0.7, col: W3_WIN, k: 0.8, glow: 0, pool: 2.0 + lv * 0.2, real: true, r: 4 + lv * 0.5 });
   }
   for (const b of S.buildings) {
     const x = b.x + 0.5, z = b.y + 0.5;
@@ -831,7 +1013,8 @@ function drawWorld3D() {
     });
     r.m.group.position.set(x, 0, z); r.m.group.scale.set(...r.m.sc);
     if (r.m.flag) w3dWave(r.m.flag, tm);
-    if (b.type === 'tower') lights.push({ x, y: 1.6, z: z + 0.5, col: '#ffbb66', r: 5, k: 0.9 });
+    if (b.type === 'tower') lights.push({ x, y: 1.75, z: z + 0.3, col: LE.col, k: 2.6, glow: 0.7, pool: 1.7, fire: S.era === 0, real: true, r: 5 });
+    else if (W3_WINB[b.type] && hash2(b.x * 3 + 1, b.y * 5 + 2) < litFrac) lights.push({ x: x + 0.05, y: 0.45, z: z + 0.5, col: W3_WIN, k: 1.5, glow: 0.42, pool: 0.95 });
   }
   for (const c of S.camps) {
     const x = c.x + 0.5, z = c.y + 0.5;
@@ -850,7 +1033,7 @@ function drawWorld3D() {
     m.flame.scale.set(1 + Math.sin(tm * 19) * 0.08, f, 1 + Math.cos(tm * 17) * 0.08);
     w3dWave(m.flag, tm);
     bars.push({ x, y: 2.1, z, f: c.hp / c.maxHp, col: '#e44' });
-    lights.push({ x: x + 0.58, y: 0.8, z: z + 0.5, col: '#ff9a40', r: 6, k: 1.6, fire: true });
+    lights.push({ x: x + 0.58, y: 0.6, z: z + 0.5, col: W3_FIRE, k: 3.6, glow: 1.2, pool: 2.6, fire: true, real: true, r: 6 });
     if (rand() < 0.08) emit((c.x + 0.5) * T + 0.58 * T, (c.y + 0.5) * T + 0.5 * T - 8, 1, { color: '#ffb02e', kind: 'spark', smin: 10, smax: 30, up: 40, lmin: 0.4, lmax: 0.8, zmin: 1, zmax: 1.5 });
   }
   for (const h of S.horses) {
@@ -935,6 +1118,7 @@ function drawWorld3D() {
   } else W3.ring.visible = false;
 
   BL.end();
+  for (const k in W3.lamps) { const m = W3.lamps[k]; m.count = lampN[k]; m.visible = lampN[k] > 0; m.instanceMatrix.needsUpdate = true; }
   const L = w3dLighting(lights);
   R3D.render(W3.scene, W3.cam);
 
@@ -979,7 +1163,7 @@ function drawWorld3D() {
     g.lineWidth = 3; g.strokeStyle = 'rgba(0,0,0,.75)'; g.strokeText(f.s, pr.x, pr.y); g.fillStyle = f.c; g.fillText(f.s, pr.x, pr.y);
   }
   g.globalAlpha = 1;
-  drawVignette(0.22 + L.night * 0.15);
+  if (!(R3D.fx && R3D.fx.on)) drawVignette(0.22 + L.night * 0.15); // 후처리가 켜져 있으면 셰이더에서
   drawJoystick();
   if (p.hurt > 0) { ctx.setTransform(DPR, 0, 0, DPR, 0, 0); ctx.fillStyle = `rgba(200,0,0,${p.hurt * 0.8})`; ctx.fillRect(0, 0, VW, VH); }
   $('hint').textContent = act ? `행동: ${act.label}` : '';

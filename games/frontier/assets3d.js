@@ -92,6 +92,22 @@ const A3D = (() => {
     if (map) { map.anisotropy = Math.min(4, R3D.maxAniso || 1); map.encoding = THREE.sRGBEncoding; map.needsUpdate = true; }
     A.atlas = map;
     A.mat = new THREE.MeshLambertMaterial({ map });
+    // 밤 창문: 아틀라스에서 창문 칸(어두운 회색 칸)만 골라 따뜻하게 빛나게. 켜진 창 비율 = R3D.uWinLit (시대·인구)
+    if (R3D.uWin) {
+      let cell = [3, 0]; // [열, 행] (8×4 칸)
+      const mq = /[?&]wincell=(\d),(\d)/.exec(location.search); if (mq) cell = [+mq[1], +mq[2]];
+      const wc = new THREE.Vector4(cell[0] / 8 + 0.004, cell[1] / 4 + 0.004, (cell[0] + 1) / 8 - 0.004, (cell[1] + 1) / 4 - 0.004);
+      A.mat.onBeforeCompile = sh => {
+        sh.uniforms.uWin = R3D.uWin; sh.uniforms.uWinLit = R3D.uWinLit; sh.uniforms.uWinCell = { value: wc };
+        sh.vertexShader = 'varying vec3 vWP2;\n' + sh.vertexShader.replace('#include <project_vertex>', '#include <project_vertex>\n  vWP2 = (modelMatrix * vec4(transformed, 1.0)).xyz;');
+        sh.fragmentShader = 'uniform float uWin, uWinLit;\nuniform vec4 uWinCell;\nvarying vec3 vWP2;\n' + sh.fragmentShader.replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
+  if (uWin > 0.0 && vUv.x > uWinCell.x && vUv.x < uWinCell.z && vUv.y > uWinCell.y && vUv.y < uWinCell.w) {
+    float h = fract(sin(dot(floor(vWP2 * 2.5), vec3(12.9898, 78.233, 37.719))) * 43758.5453);
+    if (h < uWinLit) totalEmissiveRadiance += vec3(1.0, 0.5, 0.17) * uWin * (0.7 + 0.6 * fract(h * 7.0));
+  }`);
+      };
+      A.mat.customProgramCacheKey = () => 'a3dprops';
+    }
     A.ready = true; A.ver++;
   }
   A.geo = k => geos.get(k) || null;
@@ -214,7 +230,14 @@ const A3D = (() => {
   const CH = {}; // name → { geoAll: {meshName: geo}, skin parts, template info }
   const CLIP = { idle: 'Idle', run: 'Running_A', walk: 'Walking_A', atk: '1H_Melee_Attack_Slice_Diagonal', atk2: '2H_Melee_Attack_Slice', spin: '2H_Melee_Attack_Spin', sit: 'Sit_Chair_Idle', die: 'Death_A' };
   let clips = null;
+  // 원거리 자세 (anims_ranged.glb: KayKit 원본 Knight 의 조준/사격/던지기 클립만 뽑은 것, 같은 리그)
+  const RCLIP = { aim1: '1H_Ranged_Aiming', shoot1: '1H_Ranged_Shoot', aim2: '2H_Ranged_Aiming', shoot2: '2H_Ranged_Shoot', throw: 'Throw' };
+  const rclips = {};
+  function ingestAnims(gltf) { for (const k in RCLIP) { const c = THREE.AnimationClip.findByName(gltf.animations, RCLIP[k]); if (c) rclips[k] = c; } }
   const mb = new THREE.Matrix4(), mbi = new THREE.Matrix4(), mbone = new THREE.Matrix4();
+  const wq = new THREE.Quaternion(), W_FWD = new THREE.Matrix4().makeBasis(new THREE.Vector3(0, 0, 1), new THREE.Vector3(1, 0, 0), new THREE.Vector3(0, 1, 0));
+  const qE = (x, y) => new THREE.Quaternion().setFromEuler(new THREE.Euler(x, y, 0));
+  const W_UP = { spear: qE(0.12, 0), pike: qE(0.08, 0), musket: qE(-0.25, 0), bow: qE(0, 0) }; // 몸 기준 세운 각도 (+x = 앞으로 기울임)
   // gltf → 템플릿: 뼈대 + 부위별 지오메트리(모두 같은 스켈레톤에 스키닝)
   function ingestChar(name, gltf) {
     const scene = gltf.scene; scene.updateMatrixWorld(true);
@@ -312,9 +335,9 @@ const A3D = (() => {
     // 시대별 차림(kit): chief = 부족 족장, tribe = 부족 전사, knight = 중세 이후 기사 (era.js)
     const two = o.weapon === 'glaive';
     // 병종 차림 (tech.js unitLook): ranged = 두건 궁수/투석병, spear = 창·장창병, gunner = 석궁/머스킷병. prop = 손에 붙일 절차적 무기
-    if (o.kit === 'ranged') return { ch: 'rogue_lo', body: 'rogue', extra: ['Rogue_Cape'], tint: o.body, mode: 'green', atk: 'atk', prop: o.weapon };
+    if (o.kit === 'ranged') return { ch: 'rogue_lo', body: 'rogue', extra: ['Rogue_Cape'], tint: o.body, mode: 'green', atk: 'atk', prop: o.weapon, rng: o.weapon === 'sling' ? 't' : '1' };
     if (o.kit === 'spear') return { ch: lo ? 'knight_lo' : 'knight', body: 'knight', extra: ['Knight_Helmet', ...(o.weapon === 'pike' ? [] : ['Badge_Shield'])], tint: o.body, mode: 'armor', atk: 'atk', prop: o.weapon };
-    if (o.kit === 'gunner') return { ch: lo ? 'knight_lo' : 'knight', body: 'knight', extra: o.hat === 'helm' ? ['Knight_Helmet'] : [], tint: o.body, mode: 'armor', atk: 'atk', prop: o.weapon };
+    if (o.kit === 'gunner') return { ch: lo ? 'knight_lo' : 'knight', body: 'knight', extra: o.hat === 'helm' ? ['Knight_Helmet'] : [], tint: o.body, mode: 'armor', atk: 'atk', prop: o.weapon, rng: '2' };
     if (o.kit === 'chief') return { ch: 'barbarian', body: 'barbarian', extra: ['Barbarian_Hat', 'Barbarian_Cape', '2H_Axe'], tint: o.tint || null, mode: 'armor', atk: 'atk2', k: 1.18 };
     if (o.kit === 'tribe') return { ch: lo ? 'barbarian_lo' : 'barbarian', body: 'barbarian', extra: two ? ['Barbarian_Hat', 'Barbarian_Cape', '2H_Axe'] : o.armor ? ['Barbarian_Hat', 'Barbarian_Cape', '1H_Axe', 'Barbarian_Round_Shield'] : ['1H_Axe'], tint: o.body, mode: 'armor', atk: two ? 'atk2' : 'atk' };
     if (o.kit === 'knight') return { ch: lo ? 'knight_lo' : 'knight', body: 'knight', extra: ['Knight_Helmet', ...(o.cape ? ['Knight_Cape'] : []), two ? '2H_Sword' : '1H_Sword', ...(two ? [] : ['Badge_Shield'])], tint: o.body, mode: 'armor', atk: two ? 'atk2' : 'atk' };
@@ -371,7 +394,9 @@ const A3D = (() => {
       sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying float vRim;')
         .replace('#include <project_vertex>', '#include <project_vertex>\n  { vec3 nv = normalize(normalMatrix * objectNormal); vec3 vd = normalize(-mvPosition.xyz); vRim = pow(1.0 - clamp(dot(nv, vd), 0.0, 1.0), 2.5); }');
       sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nvarying float vRim;')
-        .replace('#include <output_fragment>', 'outgoingLight += vec3(1.0, 0.93, 0.8) * vRim * 0.28 * (0.4 + 0.6 * diffuseColor.rgb);\n#include <output_fragment>');
+        .replace('#include <output_fragment>', 'outgoingLight += uRim * vRim * (0.4 + 0.6 * diffuseColor.rgb);\n#include <output_fragment>');
+      sh.fragmentShader = 'uniform vec3 uRim;\n' + sh.fragmentShader;
+      sh.uniforms.uRim = R3D.uRim || { value: new THREE.Color(0.28, 0.26, 0.22) }; // 테두리 빛 (밤엔 푸르고 약하게)
     };
     m.customProgramCacheKey = () => 'a3dchar';
     matCache.set(tex, m);
@@ -404,13 +429,20 @@ const A3D = (() => {
     mesh.frustumCulled = false; mesh.castShadow = !look.lod; mesh.receiveShadow = false;
     // 원래 스킨 메시가 붙어 있던 자리(보통 리그 루트 바로 아래)에 붙인다
     rig.add(mesh); mesh.bind(skel, C.bindMatrix);
-    if (pl.prop && R3D.weaponGeo) { // 손 뼈(handslot.r)에 절차적 무기 (활·석궁·머스킷·장창)
+    let wpn = null;
+    if (pl.prop && R3D.weaponGeo) { // 손 뼈(handslot.r)에 절차적 무기 (활·석궁·머스킷·창·장창·투석끈)
       const pg = R3D.weaponGeo(pl.prop), hand = [...byName.values()].find(b => /^handslot\.?r$/i.test(b.name));
       if (pg && hand) {
         rig.updateMatrixWorld(true); const pm = new THREE.Mesh(pg, R3D.mats.vc); pm.castShadow = !look.lod;
-        pm.scale.setScalar(0.62 / C.norm / hand.getWorldScale(new THREE.Vector3()).x);
-        if (pl.prop === "spear" || pl.prop === "pike") pm.rotation.x = Math.PI; // 창끝이 위로
-        hand.add(pm);
+        pm.scale.setScalar(0.62 / C.norm / hand.getWorldScale(new THREE.Vector3()).x * (pl.prop === 'bow' ? 1.7 : 1));
+        // 겨누기·공격: KayKit 석궁과 같은 규약(손 슬롯 +X = 앞) → 무기 +Y(개머리→총구/창끝)를 앞으로, 석궁 활대는 가로
+        const fwd = new THREE.Quaternion();
+        if (pl.prop === 'bow') fwd.setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI / 2); // 활대 세로, 앞면이 앞
+        else if (pl.prop !== 'sling') fwd.setFromRotationMatrix(W_FWD);
+        pm.quaternion.copy(fwd); hand.add(pm);
+        // 서 있기·걷기·말 타기: 창·장창·머스킷·활은 손 방향과 상관없이 몸 기준으로 세워 든다 (손 뼈에 붙은 채 매 프레임 보정)
+        const up = W_UP[pl.prop] || null;
+        wpn = { pm, hand, fwd, up };
       }
     }
     const inner = new THREE.Group(); inner.add(rig);
@@ -422,6 +454,10 @@ const A3D = (() => {
     const mixer = new THREE.AnimationMixer(rig);
     const act = {};
     for (const k in clips) { act[k] = mixer.clipAction(clips[k]); }
+    // 원거리 병종: 조준(반복) / 쏘기(한 번) — 클립이 없으면 근접 공격 자세로
+    const rk = pl.rng && (pl.rng === 't' ? (rclips.throw && 'throw') : (rclips['aim' + pl.rng] && pl.rng));
+    if (rk === 'throw') act.shoot = mixer.clipAction(rclips.throw);
+    else if (rk) { act.aim = mixer.clipAction(rclips['aim' + rk]); act.shoot = mixer.clipAction(rclips['shoot' + rk]); }
     if (act.die) { act.die.setLoop(THREE.LoopOnce, 1); act.die.clampWhenFinished = true; }
     const atk = act[pl.atk] || act.atk;
     atk.setLoop(THREE.LoopRepeat, Infinity);
@@ -442,18 +478,28 @@ const A3D = (() => {
       pose(p) {
         const now = performance.now(); let dt = Math.min(0.1, (now - last) / 1000); last = now;
         let st;
-        if (p.swing > 0) st = 'atk';
+        if (p.swing > 0 && act.shoot) st = p.aim && act.aim ? 'aim' : 'shoot';
+        else if (p.swing > 0) st = 'atk';
         else if (p.sit) st = 'sit';
         else if (p.moving) st = 'run';
         else st = 'idle';
-        go(st, st === 'atk' ? 0.06 : 0.16);
+        go(st, st === 'atk' || st === 'shoot' ? 0.06 : 0.16);
         inner.position.y = p.sit ? y0 - 0.36 * k : y0; // 앉은 자세: 엉덩이를 안장 높이(그룹 원점)에 맞춤
         if (st === 'atk') {
           const k = 1 - Math.min(1, p.swing);
           atk.paused = false; atk.time = ATK_D * (0.22 + 0.5 * k); atk.paused = true;
+        } else if (st === 'shoot') { // 쏘는 순간(swing 1) → 끝(0)
+          const D = act.shoot.getClip().duration, k = 1 - Math.min(1, p.swing);
+          act.shoot.paused = false; act.shoot.time = D * (0.15 + 0.8 * k); act.shoot.paused = true;
         } else if (st === 'run') act.run.timeScale = 1.15;
         if (p.yaw !== undefined) group.rotation.y = p.yaw;
         mixer.update(dt);
+        if (wpn) {
+          if (wpn.up && (st === 'idle' || st === 'run' || st === 'sit')) {
+            wpn.hand.updateWorldMatrix(true, false); wpn.hand.getWorldQuaternion(wq).invert();
+            wpn.pm.quaternion.copy(wq).multiply(group.quaternion).multiply(wpn.up);
+          } else wpn.pm.quaternion.copy(wpn.fwd);
+        }
       },
       flash(on) { if (on === fl) return; fl = on; mesh.material = on ? R3D.mats.flash : mat; },
       dispose() { mixer.stopAllAction(); mixer.uncacheRoot(rig); },
@@ -469,6 +515,7 @@ const A3D = (() => {
     ['barbarian_lo.glb', g => ingestChar('barbarian_lo', g)],
     ['rogue_lo.glb', g => ingestChar('rogue_lo', g)],
     ['villager_lo.glb', g => ingestChar('villager_lo', g)],
+    ['anims_ranged.glb', g => ingestAnims(g), true], // 선택: 실패해도 캐릭터는 그대로
   ];
   A.start = () => {
     if (A.started) return; A.started = true;
@@ -480,6 +527,7 @@ const A3D = (() => {
     const upd = () => showUI(`🏰 3D 모델 불러오는 중… ${Math.round(prog.reduce((a, b) => a + b, 0) / FILES.length * 100)}%`);
     upd();
     const charsLeft = new Set(FILES.slice(1).map(f => f[0]));
+    const optional = new Set(FILES.filter(f => f[2]).map(f => f[0]));
     const finish = () => {
       A.done = true; A.ms = Math.round(performance.now() - t0);
       if (failed) hideUI(); else hideUI('✨ 3D 모델 적용 완료');
@@ -495,7 +543,9 @@ const A3D = (() => {
         upd();
         if (++n === FILES.length) { A.ok = !failed; finish(); } else one();
       }, e => { if (e.total) { prog[i] = e.loaded / e.total * 0.95; A.bytes = Math.max(A.bytes, 0); } upd(); }, e => {
-        console.warn('asset load failed', f, e && e.message); failed = true; A.err = String(e && e.message || e);
+        console.warn('asset load failed', f, e && e.message);
+        if (optional.has(f)) { charsLeft.delete(f); if (!charsLeft.size && !failed && clips) { A.chars = true; A.ver++; } }
+        else { failed = true; A.err = String(e && e.message || e); }
         if (++n === FILES.length) finish(); else one();
       });
     };
