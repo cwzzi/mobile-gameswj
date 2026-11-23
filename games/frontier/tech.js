@@ -321,7 +321,10 @@ function playerHurt(n, frac) {
 function fireShot(x, y, tx, ty, team, kind, dmg) {
   const P = PROJ[kind] || PROJ.arrow, d = Math.hypot(tx - x, ty - y) || 1;
   shots.push({ x, y, vx: (tx - x) / d * P.sp, vy: (ty - y) / d * P.sp, team, kind, dmg, life: d / P.sp + 0.25 });
-  if (kind === 'ball') emit(x + (tx - x) / d * 14, y - 14 + (ty - y) / d * 14, 5, { color: ['#eee', '#bbb'], kind: 'smoke', smin: 10, smax: 40, lmin: .4, lmax: .8, zmin: 3, zmax: 5, grow: 10 });
+  if (kind === 'ball') { // 머스킷: 총구 불꽃 + 자욱한 연기
+    emit(x + (tx - x) / d * 14, y - 14 + (ty - y) / d * 14, 7, { color: ['#eee', '#bbb', '#d8d4cc'], kind: 'smoke', smin: 10, smax: 40, lmin: .7, lmax: 1.4, zmin: 4, zmax: 7, grow: 12 });
+    emit(x + (tx - x) / d * 16, y - 14 + (ty - y) / d * 16, 4, { color: ['#fff2a0', '#ffb030'], kind: 'spark', smin: 60, smax: 140, ang: Math.atan2(ty - y, tx - x), spread: 0.35, lmin: .06, lmax: .12 });
+  }
 }
 let soldierSpawnT = 0;
 function soldierAnchor(s, i) {

@@ -1,17 +1,23 @@
 'use strict';
 // ===== event.js: 특별 사건 — '장면 속으로' 들어가 직접 겪는 이벤트 =====
-// 첫 사건: 사람 찾기 (마을 아이/노인이 사라졌다)
-//   묻기: "직접 찾으러 가시겠습니까?"  네 → 3인칭(어깨 뒤) 시점으로 바뀌어 직접 걸어 다니며 마을 사람에게 묻고 찾는다
-//                                       아니오 → 경비병을 보낸다 (잠시 뒤 작은 보상, 가끔 실패)
+// 사건 세 가지 (모두 같은 틀: 묻기(네/아니오) → 어깨 뒤 낮은 시점(3인칭) → 목표 상자 · 마을 사람 단서 · 돌아가기 → 보상 → 위에서 내려다보는 시점)
+//   findPerson 사람 찾기: 마을 아이/노인이 사라졌다 — 마을 사람에게 묻고 숲 가장자리에서 찾는다 (아니오 = 경비병을 보낸다)
+//   treasure   보물찾기: 떠돌이가 두고 간 옛 지도에 X 표시가 셋 — 마을 사람·은둔자의 말로 가짜를 거르고 「파기」
+//   thief      도둑 추격: 장터 도둑이 물건을 훔쳐 달아났다 — 직접 뛰어가 붙잡는다 (지치면 헉헉, 덤불에 숨기도 한다)
+// 📜 소식 버튼(오른쪽): 지금 들어와 있는 의뢰 목록 → 골라서 들어간다. 새 소식은 새 게임/불러오기 뒤 60~90초에 처음, 그 뒤 120~200초마다
+//   (그때 다른 창이 열려 있지 않으면 바로 묻는다. 아니면 소식판에 쌓아 둔다 — 최대 3개)
 //   3인칭 동안: 조이스틱 = 카메라 기준 이동, 화면 오른쪽 끌기 = 시선 돌리기(Q/E 키도), 마을 사람 톡/「말 걸기」 = 대화
-//   잃어버린 사람 가까이 가면 찾음 → 보상 → 위에서 내려다보는 시점으로 돌아간다
-// 저장하지 않는다 (S 밖 전역 EV) → 저장 형식 그대로. 새로고침하면 사건은 사라진다
-// 테스트: __game.startEvent('findPerson'), __game.ev
+// 저장하지 않는다 (S 밖 전역 EV · EVQ) → 저장 형식 그대로. 새로고침하면 사건은 사라지고 타이머가 다시 돈다
+// 테스트: __game.startEvent('findPerson' | 'treasure' | 'thief'), __game.ev, __game.evq, __game.evBoard()
 let EV = null;
 const EVCAM = { k: 0, yaw: 0 }; // 3인칭 섞임(0~1)과 바라보는 방향 (world3d.js w3dTPCam)
-let evT = 0, evNext = 200;
+let evT = 0, evNext = 75, evS = null, evClock = 0, evLastGen = -99, evKindLast = null;
+const EVQ = []; let evQid = 0; // 소식판 (의뢰 목록)
+const EV_KIND_ORDER = ['treasure', 'findPerson', 'thief'];
 function evBusy() { return !!EV; }
 function evTP() { return !!(EV && EV.tp); }
+function evTPSpeed() { return EV && EV.kind === 'thief' && EV.phase === 'search' ? 124 : 85; } // 도둑 추격은 뛰어서
+function evEra() { return clamp(S.era | 0, 0, 3); }
 
 // ---------- 말 (시대: 0 부족 · 1 고대 · 2 중세 · 3 근세) ----------
 const EV_KIDS = ['순이', '돌이', '복동이', '꽃님이', '막동이', '달래', '분이', '똘이'];
@@ -25,7 +31,7 @@ const VROLE = {
   lumber: ['나무꾼', '나무꾼', '나무꾼', '벌목꾼'], quarry: ['돌 줍는 이', '석공', '석공', '석공'], mine: ['금 캐는 이', '광부', '광부', '광부'],
   idle: ['부족민', '백성', '농민', '시민'],
 };
-// 역할별 평소 말 ({T} = 군주 칭호에 '님', 예: 족장님 · 왕이시여는 따로)
+// 역할별 평소 말
 const VLINES = {
   farm: [['조 이삭이 여물었어요. 올겨울은 배곯지 않겠네요.', '돌괭이가 또 부러졌지 뭐예요.'], ['청동 낫 덕분에 추수가 빨라졌어요!', '올해는 비가 알맞게 와서 보리가 잘 됐습니다.'],
     ['영주님 밭부터 갈고 우리 밭을 갈아야 해서… 아이고 허리야.', '삼포식으로 돌려 짓으니 땅이 덜 지치네요.'], ['새로 들어온 감자란 작물, 척박한 땅에서도 잘 자라요!', '농사 개량 책자를 읽어 봤는데 글씨가 너무 작아요.']],
@@ -50,11 +56,25 @@ const VLINES = {
     ['도적떼 소문 때문에 밤길이 무서워요.', '성당 종소리가 참 좋지요?'], ['신문 보셨어요? 바다 건너 소식이 가득해요.', '도시가 날마다 커지네요!']],
 };
 const EV_HAIL = ['족장님', '전하', '폐하', '황제 폐하'];
+// 보물찾기 · 도둑 추격 (시대별)
+const EV_TR = {
+  traveler: ['떠돌이 사냥꾼', '대상 행렬의 낙타꾼', '떠돌이 음유시인', '배에서 내린 늙은 선원'],
+  map: ['짐승 가죽에 그린 그림 지도', '구운 점토판 지도', '낡은 양피지 보물 지도', '바닷물에 얼룩진 해도'],
+  treasure: ['옛 대족장의 흑요석 보물', '옛 왕의 청동 보물', '몰락한 기사단의 금고', '해적이 묻은 금화 상자'],
+  relic: ['흑요석 의식용 칼', '청동 거울과 옥 목걸이', '보석 박힌 성배', '황금 회중시계와 금화'],
+  hermit: ['늙은 주술사', '은둔 현자', '숲속 은수자', '외딴 오두막 노인'],
+  junk: ['깨진 토기 조각', '녹슨 청동 화살촉', '부러진 쟁기 날', '빈 럼주 병'],
+};
+const EV_TH = {
+  market: ['물물교환 터', '장터', '장날 장터', '시장'],
+  who: ['이웃 부족 좀도둑', '소매치기', '소매치기', '소매치기'],
+  item: ['말린 고기 꾸러미', '청동 거울', '은화 주머니', '금화 주머니'],
+  caught: ['"으악! 놔줘요! 배가 고파서 그랬어요…"', '"아이고, 왕의 손에 잡히다니…"', '"자, 잘못했습니다! 영주님께서 직접 쫓아오실 줄이야!"', '"황제께서 이렇게 빠르실 줄은… 항복합니다!"'],
+};
 function evRole(v) {
   if (v.job) return v.job.type in VROLE ? v.job.type : 'idle';
   return v.act || v.task || 'idle';
 }
-function evEra() { return clamp(S.era | 0, 0, 3); }
 // 8방위 (게임 좌표 y가 남쪽)
 function evDir(dx, dy) { return ['동', '남동', '남', '남서', '서', '북서', '북', '북동'][(Math.round(Math.atan2(dy, dx) / (Math.PI / 4)) + 8) % 8]; }
 function evPlace(tx, ty) {
@@ -64,65 +84,201 @@ function evPlace(tx, ty) {
   return w > 3 ? '물가' : m > 3 ? '산기슭' : '들판';
 }
 
-// ---------- 시작 ----------
-// 마을에서 걸어서 갈 수 있는 곳(물·산 너머 제외) 중 9~18칸 떨어진 숲 가장자리(없으면 아무 땅)
-function evPickSpot(t) {
-  const sx = t.x, sy = t.y, seen = new Uint8Array(W * H), q = [sy * W + sx], forest = [], land = [];
+// ---------- 자리 고르기 ----------
+// 마을에서 걸어서 갈 수 있는 땅(물·산 너머 제외)을 넓이 우선으로 훑어 cb(x, y, d, i) 를 부른다
+function evScan(t, maxD, cb) {
+  const sx = t.x, sy = t.y, seen = new Uint8Array(W * H), q = [sy * W + sx];
   seen[sy * W + sx] = 1;
   const ok = i => { const tt = S.tiles[i]; return tt !== WATER && tt !== MOUNTAIN && tt !== GOLD; };
   for (let h = 0; h < q.length; h++) {
     const i = q[h], x = i % W, y = (i / W) | 0, d = Math.hypot(x - sx, y - sy);
-    if (d >= 9 && d <= 18 && neighborsLand(x, y) && !S.camps.some(c => Math.abs(c.x - x) + Math.abs(c.y - y) < 7)) {
-      // 숲 바로 옆 풀밭/모래 (나무 그늘 아래 — 가까이 가면 보이고, 멀리선 나무에 가린다)
-      if (S.tiles[i] !== FOREST && [[1, 0], [-1, 0], [0, 1], [0, -1]].filter(([a, b]) => tileAt(x + a, y + b) === FOREST).length >= 2) forest.push(i); else land.push(i);
-    }
-    if (d > 19) continue;
+    cb(x, y, d, i);
+    if (d > maxD) continue;
     for (const [a, b] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
       const nx = x + a, ny = y + b; if (nx < 1 || ny < 1 || nx >= W - 1 || ny >= H - 1) continue;
       const j = ny * W + nx; if (seen[j] || !ok(j)) continue; seen[j] = 1; q.push(j);
     }
   }
+}
+const evForestN = (x, y) => [[1, 0], [-1, 0], [0, 1], [0, -1]].filter(([a, b]) => tileAt(x + a, y + b) === FOREST).length;
+const evFree = (x, y) => !S.buildings.some(b => b.x === x && b.y === y) && !S.towns.some(t => Math.abs(t.x - x) <= 1 && Math.abs(t.y - y) <= 1) && !S.camps.some(c => Math.abs(c.x - x) + Math.abs(c.y - y) < 7);
+// 사람 찾기: 9~18칸 떨어진 숲 가장자리(없으면 아무 땅)
+function evPickSpot(t) {
+  const forest = [], land = [];
+  evScan(t, 19, (x, y, d, i) => {
+    if (d >= 9 && d <= 18 && neighborsLand(x, y) && evFree(x, y)) { if (S.tiles[i] !== FOREST && evForestN(x, y) >= 2) forest.push(i); else land.push(i); }
+  });
   const pool = forest.length ? forest : land;
   return pool.length ? pool[ri(pool.length)] : -1;
 }
-function startEvent(kind) {
-  kind = kind || 'findPerson';
-  if (kind !== 'findPerson' || EV || MODE !== 'world' || !S || !S.towns.length || S.war) return false;
-  const towns = S.towns.slice().sort((a, b) => dist2(a.x, a.y, S.player.x / T, S.player.y / T) - dist2(b.x, b.y, S.player.x / T, S.player.y / T));
-  let t = null, spot = -1;
-  for (const tt of towns) { spot = evPickSpot(tt); if (spot >= 0) { t = tt; break; } }
-  if (!t) return false;
-  const child = rand() < 0.6, vl = eraVillager(), e = evEra();
-  const name = child ? EV_KIDS[ri(EV_KIDS.length)] : EV_ELDERS[ri(EV_ELDERS.length)];
-  const look = child ? { body: vl.body, legs: vl.legs || '#4a3a2a', hat: null, helm: '#e8d8b0', hair: '#3a2414', scale: 1.1 * 0.72, lod: 1, role: 'villager' }
-    : { body: '#8a8478', legs: '#4a4038', hat: e ? 'band' : null, helm: '#d8d0c0', hair: '#d8d8d0', scale: 1.1 * 0.95, lod: 1, role: 'villager' };
-  const sx = spot % W, sy = (spot / W) | 0;
-  EV = { kind, S, phase: 'ask', tp: false, town: t.id, t: 0, asked: 0, hint: '', reporter: EV_NAMES[ri(EV_NAMES.length)],
-    who: { child, name, x: (sx + .5) * T, y: (sy + .5) * T, tx: sx, ty: sy, look, yaw: rand() * 6.28, place: evPlace(sx, sy) } };
+// 보물 표시 셋: 7~17칸, 숲이 아닌 땅, 서로 4칸 넘게 떨어지게. 은둔자: 4~8칸 숲 가장자리
+function evPickTreasure(t) {
+  const cand = [], hc = [];
+  evScan(t, 18, (x, y, d, i) => {
+    if (!neighborsLand(x, y) || !evFree(x, y)) return;
+    if (d >= 7 && d <= 17 && S.tiles[i] !== FOREST) cand.push([x, y]);
+    if (d >= 4 && d <= 8 && S.tiles[i] !== FOREST) hc.push([x, y, evForestN(x, y)]);
+  });
+  const spots = [];
+  for (let k = 0; k < 200 && spots.length < 3 && cand.length; k++) {
+    const c = cand[ri(cand.length)];
+    if (spots.every(s => Math.hypot(s[0] - c[0], s[1] - c[1]) >= 4.5)) spots.push(c);
+  }
+  if (spots.length < 3) return null;
+  hc.sort((a, b) => b[2] - a[2]);
+  const h = hc.length ? hc[ri(Math.min(hc.length, 6))] : null;
+  return { spots, hermit: h };
+}
+// 도둑 숨을 곳: 10~16칸 숲 가장자리(숲 칸도 됨) 둘, 서로 5칸 넘게
+function evPickHides(t) {
+  const f = [], l = [];
+  evScan(t, 17, (x, y, d, i) => {
+    if (d < 10 || d > 16 || !neighborsLand(x, y) || !evFree(x, y)) return;
+    if (S.tiles[i] === FOREST || evForestN(x, y) >= 2) f.push([x, y]); else l.push([x, y]);
+  });
+  const pool = f.length >= 2 ? f : f.concat(l), out = [];
+  for (let k = 0; k < 120 && out.length < 2 && pool.length; k++) { const c = pool[ri(pool.length)]; if (out.every(s => Math.hypot(s[0] - c[0], s[1] - c[1]) >= 5)) out.push(c); }
+  return out.length ? out : null;
+}
+
+// ---------- 소식판 (의뢰 목록) ----------
+function evNearestTown() { const p = S.player; return S.towns.slice().sort((a, b) => dist2(a.x, a.y, p.x / T, p.y / T) - dist2(b.x, b.y, p.x / T, p.y / T))[0]; }
+function evOffer(kind) {
+  if (!S || !S.towns.length) return null;
+  if (!kind) { const ks = EV_KIND_ORDER.filter(k => k !== evKindLast && !EVQ.some(o => o.kind === k)); kind = ks.length ? ks[ri(ks.length)] : EV_KIND_ORDER[ri(3)]; }
+  const t = S.towns[ri(S.towns.length)], e = evEra();
+  const o = { id: ++evQid, kind, town: t.id, age: 0, e };
+  if (kind === 'findPerson') { o.child = rand() < 0.6; o.name = o.child ? EV_KIDS[ri(EV_KIDS.length)] : EV_ELDERS[ri(EV_ELDERS.length)]; }
+  evKindLast = kind; evLastGen = evClock;
+  EVQ.push(o); while (EVQ.length > 3) EVQ.shift();
+  evBadge();
+  return o;
+}
+function evOfferInfo(o) {
+  const t = townById(o.town), tn = t ? t.name : '마을', e = evEra();
+  if (o.kind === 'findPerson') return { ic: '🔎', title: `${o.child ? '아이' : '노인'} ${josa(o.name, '이가')} 사라졌다`, desc: `${tn} · 숲 가장자리까지 찾아 나서기 · 보상 큼` };
+  if (o.kind === 'treasure') return { ic: '🗺️', title: `${josa(EV_TR.treasure[e], '을를')} 찾아라`, desc: `${tn} 근처 · 지도의 X 표시 셋 중 진짜를 파기` };
+  return { ic: '🏃', title: `${EV_TH.market[e]} 도둑을 잡아라`, desc: `${tn} · ${josa(EV_TH.item[e], '을를')} 훔쳐 달아난 ${EV_TH.who[e]} 추격` };
+}
+function evBadge() {
+  const b = $('evBoardBtn'); if (!b) return;
+  const n = EVQ.length;
+  b.dataset.n = n ? String(n) : ''; b.classList.toggle('new', n > 0);
+}
+function evBoard() {
+  if (!S || MODE !== 'world') return;
+  // 빈 소식판을 열면 (25초에 한 번까지) 새 의뢰가 바로 들어온다
+  if (!EVQ.length && !EV && S.towns.length && evClock - evLastGen > 25) evOffer();
+  paused = true; actHeld = false; auto = null;
+  const e = evEra();
+  let h = `<h2>📜 소식 · 의뢰</h2><div class="sub">${EV_HAIL[e]}께 들어온 부탁입니다. 골라서 직접 나서 보세요.</div>`;
+  if (EV) h += `<div class="lockbox">지금 하는 일: <b>${evNowText()}</b></div>`;
+  if (!S.towns.length) h += `<div class="lockbox">마을을 세우면 마을 사람들의 소식이 들어옵니다.</div>`;
+  for (const o of EVQ) {
+    const I = evOfferInfo(o);
+    h += `<button class="opt${EV || S.war ? '' : ' evq'}" data-a="pick" data-id="${o.id}" ${EV || S.war ? 'disabled' : ''}><span class="ic">${I.ic}</span><span>${I.title}<small>${I.desc}</small></span></button>`;
+  }
+  if (S.towns.length && !EVQ.length) h += `<div class="lockbox">지금은 새 소식이 없습니다. 약 ${Math.max(5, Math.round(evNext - evT))}초 뒤에 새 소식이 들어와요.</div>`;
+  if (S.war) h += `<div class="lockbox">⚔️ 전쟁 중에는 의뢰를 맡을 수 없습니다.</div>`;
+  h += `<button class="close" data-a="close">닫기</button>`;
+  $('evPanel').innerHTML = h; $('evPanel').classList.add('show');
+}
+function evNowText() {
+  if (!EV) return '';
+  if (EV.phase === 'guards') return `🛡️ 경비병이 ${josa(evWhoLabel(), '을를')} 찾는 중`;
+  const I = evOfferInfo(EV.offer); return I.ic + ' ' + I.title;
+}
+
+// ---------- 시작 ----------
+// startEvent(kind 또는 소식판 항목) → 묻기 창. 테스트에서 kind 문자열로 부르면 그 자리에서 의뢰를 만든다
+function startEvent(arg) {
+  if (EV || MODE !== 'world' || !S || !S.towns.length || S.war) return false;
+  let o = typeof arg === 'object' && arg ? arg : null;
+  if (!o) { o = evOffer(arg || 'findPerson'); if (!o) return false; }
+  const i = EVQ.indexOf(o); if (i >= 0) EVQ.splice(i, 1);
+  evBadge();
+  const ok = o.kind === 'treasure' ? evSetupTreasure(o) : o.kind === 'thief' ? evSetupThief(o) : evSetupFind(o);
+  if (!ok) return false;
   evAsk();
   return true;
 }
-function evWhoLabel() { const w = EV.who; return w.child ? `아이 ${w.name}` : w.name; }
+function evBase(o, t) { return { kind: o.kind, offer: o, S, phase: 'ask', tp: false, town: t.id, t: 0, asked: 0, hint: '', reporter: EV_NAMES[ri(EV_NAMES.length)] }; }
+function evTownFor(o) { const t = townById(o.town); return t || evNearestTown(); }
+function evSetupFind(o) {
+  const towns = [evTownFor(o), ...S.towns];
+  let t = null, spot = -1;
+  for (const tt of towns) { if (!tt) continue; spot = evPickSpot(tt); if (spot >= 0) { t = tt; break; } }
+  if (!t) return false;
+  const child = o.child !== undefined ? o.child : rand() < 0.6, vl = eraVillager(), e = evEra();
+  const name = o.name || (child ? EV_KIDS[ri(EV_KIDS.length)] : EV_ELDERS[ri(EV_ELDERS.length)]);
+  const look = child ? { body: vl.body, legs: vl.legs || '#4a3a2a', hat: null, helm: '#e8d8b0', hair: '#3a2414', scale: 1.1 * 0.72, lod: 1, role: 'villager' }
+    : { body: '#8a8478', legs: '#4a4038', hat: e ? 'band' : null, helm: '#d8d0c0', hair: '#d8d8d0', scale: 1.1 * 0.95, lod: 1, role: 'villager' };
+  const sx = spot % W, sy = (spot / W) | 0;
+  EV = Object.assign(evBase(o, t), { who: { child, name, x: (sx + .5) * T, y: (sy + .5) * T, tx: sx, ty: sy, look, yaw: rand() * 6.28, place: evPlace(sx, sy) } });
+  return true;
+}
+function evSetupTreasure(o) {
+  const t = evTownFor(o); if (!t) return false;
+  const P = evPickTreasure(t); if (!P) return false;
+  const real = ri(3), e = evEra();
+  const marks = P.spots.map(([x, y], k) => ({ x: (x + .5) * T, y: (y + .5) * T, tx: x, ty: y, real: k === real, st: 'x', place: evPlace(x, y) }));
+  let npc = null;
+  if (P.hermit) npc = { x: (P.hermit[0] + .5) * T, y: (P.hermit[1] + .5) * T, name: EV_TR.hermit[e], hermit: true, yaw: rand() * 6.28, walk: 0,
+    look: { body: e === 0 ? '#6a5038' : '#5a5a50', legs: '#3a3228', hat: e ? null : 'band', helm: '#d8d0c0', hair: '#e0e0d8', scale: 1.1 * 0.95, lod: 1, role: 'villager' } };
+  EV = Object.assign(evBase(o, t), { marks, npc, dug: 0, dig: null, ruled: [] });
+  return true;
+}
+function evSetupThief(o) {
+  const t = evTownFor(o); if (!t) return false;
+  const hides = evPickHides(t); if (!hides) return false;
+  const e = evEra();
+  EV = Object.assign(evBase(o, t), { hides: hides.map(([x, y]) => ({ x: (x + .5) * T, y: (y + .5) * T, place: evPlace(x, y) })), hideI: 0, limit: 80,
+    thief: { x: 0, y: 0, walk: 0, st: 'run', stam: 2.5, hid: 0, swerve: 0, swT: 0, look: { body: e >= 2 ? '#3a3236' : '#4a3a2c', legs: '#2a2422', hat: 'hood', helm: '#2a2220', scale: 1.1 * 0.95, lod: 1, role: 'villager' } } });
+  return true;
+}
+function evWhoLabel() { const w = EV && EV.who; return !w ? '' : w.child ? `아이 ${w.name}` : w.name; }
 function evAsk() {
   paused = true; actHeld = false; auto = null;
-  const t = townById(EV.town), w = EV.who, tn = t ? t.name : '마을';
-  const what = w.child ? `${josa(w.name, '이가')} 아침에 놀러 나가서는 해가 기울도록 돌아오지 않았어요!` : `${w.name}께서 약초를 캐러 나가셨다가 아직 안 돌아오셨어요!`;
-  $('evPanel').innerHTML = `<h2>🔎 ${w.child ? '아이' : '노인'}${w.child ? '가' : '이'} 사라졌다!</h2>
+  const t = townById(EV.town), tn = t ? t.name : '마을', e = evEra(), H = EV_HAIL[e];
+  const where = USE3D ? '마을 속으로 들어가 직접 걸으며' : '직접';
+  let h;
+  if (EV.kind === 'findPerson') {
+    const w = EV.who;
+    const what = w.child ? `${josa(w.name, '이가')} 아침에 ${['열매를 따러', '양 떼를 따라', '나물을 캐러', '놀러'][e]} 나가서는 해가 기울도록 돌아오지 않았어요!` : `${w.name}께서 약초를 캐러 나가셨다가 아직 안 돌아오셨어요!`;
+    h = `<h2>🔎 ${w.child ? '아이가' : '노인이'} 사라졌다!</h2>
     <div class="sub"><b>${tn}</b>의 ${josa(EV.reporter, '이가')} 헐레벌떡 달려왔습니다.</div>
-    <div class="evquote">"${EV_HAIL[evEra()]}, ${what}"</div>
-    <div style="font-size:17px;font-weight:800;margin:4px 0 12px;text-align:center">직접 찾으러 가시겠습니까?</div>
-    <button class="opt primary" data-a="go"><span class="ic">🚶</span><span>네<small>${USE3D ? '마을 속으로 들어가 직접 걸으며' : '직접'} 마을 사람들에게 묻고 찾아 나섭니다 · 보상이 큽니다</small></span></button>
+    <div class="evquote">"${H}, ${what}"</div>
+    <div class="evq-ask">직접 찾으러 가시겠습니까?</div>
+    <button class="opt primary" data-a="go"><span class="ic">🚶</span><span>네<small>${where} 마을 사람들에게 묻고 찾아 나섭니다 · 보상이 큽니다</small></span></button>
     <button class="opt" data-a="guard"><span class="ic">🛡️</span><span>아니오<small>경비병을 보냅니다 · 잠시 뒤 결과가 오고, 보상이 적거나 못 찾을 수도 있어요</small></span></button>`;
-  $('evPanel').classList.add('show');
+  } else if (EV.kind === 'treasure') {
+    h = `<h2>🗺️ 옛 보물 지도</h2>
+    <div class="sub"><b>${tn}</b>에 묵어 간 ${josa(EV_TR.traveler[e], '이가')} ${josa(EV_TR.map[e], '을를')} 두고 갔습니다.</div>
+    <div class="evquote">"${H}, 이 지도에 ${tn} 근처 X 표시가 세 군데 있습니다. ${josa(EV_TR.treasure[e], '이가')} 묻혀 있다는데… 진짜는 하나뿐이랍니다."</div>
+    <div class="evq-ask">직접 보물을 찾으러 가시겠습니까?</div>
+    <button class="opt primary" data-a="go"><span class="ic">⛏️</span><span>네<small>${where} 표시를 찾아가 「파기」 · 마을 사람과 ${EV_TR.hermit[e]}에게 물어 가짜를 거르세요</small></span></button>
+    <button class="opt" data-a="later"><span class="ic">📜</span><span>아니오<small>나중에 · 📜 소식판에 남겨 둡니다</small></span></button>`;
+  } else {
+    h = `<h2>🏃 도둑이야!</h2>
+    <div class="sub"><b>${tn}</b> ${EV_TH.market[e]}에서 ${josa(EV.reporter, '이가')} 소리칩니다.</div>
+    <div class="evquote">"${H}! ${josa(EV_TH.who[e], '이가')} 제 ${josa(EV_TH.item[e], '을를')} 훔쳐 달아났어요! 저쪽 ${EV.hides[0].place} 쪽으로요!"</div>
+    <div class="evq-ask">직접 쫓아가시겠습니까?</div>
+    <button class="opt primary" data-a="go"><span class="ic">🏃</span><span>네<small>${tn}에서 바로 뛰어나가 붙잡습니다 · 도둑은 지치면 헉헉대고, 덤불에 숨기도 해요</small></span></button>
+    <button class="opt" data-a="later"><span class="ic">📜</span><span>아니오<small>나중에 · 📜 소식판에 남겨 둡니다 (그사이 도둑은 숨어 있어요)</small></span></button>`;
+  }
+  $('evPanel').innerHTML = h; $('evPanel').classList.add('show');
 }
 function evEnterTP() {
   if (!EV) return;
   dismount(); auto = null; actHeld = false;
-  EV.phase = 'search'; EV.tp = USE3D;
+  EV.phase = 'search'; EV.tp = USE3D; EV.t = 0;
   // 따라오던 병사들은 마을에 남는다 (3인칭 화면을 가리지 않게) → 끝나면 원래대로
   if (EV.tp && S.armyMode !== 'guard') { EV.army = S.armyMode; S.armyMode = 'guard'; for (const s of soldiers) s.post = null; }
   EVCAM.yaw = 0; // 지금 화면(북쪽을 위로)과 같은 방향으로 내려앉는다
-  banner('🔎 ' + evWhoLabel() + ' 찾기', '마을 사람들에게 물어보세요', 2.5);
+  if (EV.kind === 'thief') evThiefStart();
+  if (EV.kind === 'findPerson') banner('🔎 ' + evWhoLabel() + ' 찾기', '마을 사람들에게 물어보세요', 2.5);
+  else if (EV.kind === 'treasure') banner('🗺️ 보물찾기', 'X 표시 셋 중 진짜를 찾아 파세요', 2.5);
+  else banner('🏃 도둑을 잡아라!', '가까이 따라붙으면 붙잡습니다', 2.2);
 }
 function evExitTP() {
   if (!EV) return;
@@ -134,32 +290,54 @@ function evGuards() {
   evExitTP(); EV.phase = 'guards'; EV.t = 22 + rand() * 10;
   toast(`🛡️ 경비병들이 ${josa(evWhoLabel(), '을를')} 찾으러 나갔습니다`, 2.5);
 }
+function evShelve() { // 나중에: 소식판으로 되돌림
+  if (!EV) return;
+  const o = EV.offer; evExitTP(); EV.phase = 'end';
+  if (o && !EVQ.includes(o)) { EVQ.unshift(o); while (EVQ.length > 3) EVQ.pop(); }
+  evBadge();
+}
 $('evPanel').addEventListener('click', e => {
-  const b = e.target.closest('button'); if (!b || !EV) return;
-  $('evPanel').classList.remove('show'); paused = false;
+  const b = e.target.closest('button'); if (!b) return;
   const a = b.dataset.a;
+  $('evPanel').classList.remove('show'); paused = false;
+  if (a === 'pick') { const o = EVQ.find(q => q.id === +b.dataset.id); if (o && !startEvent(o)) { toast('지금은 이 의뢰를 맡을 수 없어요', 2); EVQ.splice(EVQ.indexOf(o), 1); evBadge(); } return; }
+  if (a === 'close' || !EV) return;
   if (a === 'go') evEnterTP();
   else if (a === 'guard') evGuards();
+  else if (a === 'later') { evShelve(); EV = null; toast('📜 소식판에 남겨 두었습니다 · 오른쪽 📜 버튼', 2.5); }
   else if (a === 'done') { evExitTP(); EV.phase = 'end'; }
 });
 $('evExit').addEventListener('click', () => {
   if (!EV || EV.phase !== 'search') return;
-  evGuards(); // 돌아가면 경비병에게 맡긴다
+  if (EV.kind === 'findPerson') evGuards(); // 돌아가면 경비병에게 맡긴다
+  else if (EV.kind === 'treasure') { evShelve(); toast('🗺️ 지도는 📜 소식판에 남겨 두었습니다', 2.5); }
+  else { evExitTP(); EV.phase = 'end'; toast(`🏃 ${josa(EV_TH.who[evEra()], '이가')} 달아났습니다…`, 2.5); }
 });
+$('evBoardBtn').addEventListener('click', () => { if (MODE === 'world' && !paused) evBoard(); });
 
-// ---------- 매 프레임 (updateWorld 안, 멈춤 아닐 때) ----------
+// ---------- 매 프레임 (updateWorld 뒤, 멈춤 아닐 때) ----------
 function evUpdate(dt) {
-  if (EV && EV.S !== S) { EV = null; EVCAM.k = 0; } // 새 게임 · 불러오기
+  if (evS !== S) { evS = S; EV = null; EVCAM.k = 0; EVQ.length = 0; evT = 0; evNext = rr(60, 90); evBadge(); } // 새 게임 · 불러오기
+  evClock += dt;
   if (EV && EV.army && !EV.tp) evExitTP();
   if (!EV) {
     if (!S.towns.length || S.war || MODE !== 'world') return;
     evT += dt;
-    if (evT > evNext) { evT = 0; evNext = rr(240, 420); if (S.towns.reduce((a, t) => a + t.pop, 0) >= 6 && rand() < 0.65) startEvent('findPerson'); }
+    if (evT > evNext) {
+      evT = 0; evNext = rr(120, 200);
+      const o = evOffer();
+      // 다른 창이 없으면 바로 묻는다. 있으면 소식판에만
+      if (o && !document.querySelector('.panel.show') && !paused) startEvent(o);
+      else if (o) toast(`📜 새 소식: ${evOfferInfo(o).title}<br><small>오른쪽 📜 버튼</small>`, 3.5);
+    }
     return;
   }
-  const p = S.player, w = EV.who;
+  const p = S.player;
   if (EV.phase === 'search') {
-    if (dist2(p.x, p.y, w.x, w.y) < (T * 1.3) ** 2) evFound();
+    EV.t += dt;
+    if (EV.kind === 'findPerson') { const w = EV.who; if (dist2(p.x, p.y, w.x, w.y) < (T * 1.3) ** 2) evFound(); }
+    else if (EV.kind === 'treasure') evTreasureTick(dt);
+    else evThiefTick(dt);
   } else if (EV.phase === 'guards') {
     EV.t -= dt;
     if (EV.t <= 0) {
@@ -175,19 +353,156 @@ function evUpdate(dt) {
     }
   } else if (EV.phase === 'end' && EVCAM.k <= 0.001) EV = null;
 }
+function evResult(title, quote, sub, stats, btn) {
+  paused = true; actHeld = false; auto = null;
+  $('evPanel').innerHTML = `<h2>${title}</h2>${quote ? `<div class="evquote">${quote}</div>` : ''}
+    ${sub ? `<div class="sub" style="text-align:center">${sub}</div>` : ''}
+    ${stats ? `<div class="stats">${stats}</div>` : ''}
+    <button class="opt primary" data-a="done" style="justify-content:center"><span>${btn || '🏰 마을로 돌아가기'}</span></button>`;
+  $('evPanel').classList.add('show');
+}
 function evFound() {
   const e = evEra(), t = townById(EV.town), w = EV.who;
   const gold = 40 + 25 * e, exp = 30;
-  EV.phase = 'found'; paused = true; actHeld = false; auto = null;
+  EV.phase = 'found';
   S.gold += gold; gainExp(exp); if (t) t.pop += 2;
   const said = w.child ? `"${EV_HAIL[e]}! 무서웠어요… 길을 잃어서 계속 울었어요."` : `"아이고, ${EV_HAIL[e]}께서 몸소 오시다니… 발목을 삐어 꼼짝 못 하고 있었습니다."`;
-  $('evPanel').innerHTML = `<h2>🎉 ${josa(evWhoLabel(), '을를')} 찾았다!</h2>
-    <div class="evquote">${said}</div>
-    <div class="sub" style="text-align:center">${t ? `<b>${t.name}</b> 사람들이 ${EV_HAIL[e]}의 이름을 칭송합니다.` : ''}${EV.asked ? `<br><small>물어본 사람 ${EV.asked}명</small>` : ''}</div>
-    <div class="stats"><span>🪙 감사의 선물</span><b>+${gold}</b><span>⭐ 경험치</span><b>+${exp}</b><span>👥 ${t ? t.name : '마을'}에 이주민</span><b>+2</b></div>
-    <button class="opt primary" data-a="done" style="justify-content:center"><span>🏰 함께 마을로 돌아가기</span></button>`;
-  $('evPanel').classList.add('show');
+  evResult(`🎉 ${josa(evWhoLabel(), '을를')} 찾았다!`, said,
+    `${t ? `<b>${t.name}</b> 사람들이 ${EV_HAIL[e]}의 이름을 칭송합니다.` : ''}${EV.asked ? `<br><small>물어본 사람 ${EV.asked}명</small>` : ''}`,
+    `<span>🪙 감사의 선물</span><b>+${gold}</b><span>⭐ 경험치</span><b>+${exp}</b><span>👥 ${t ? t.name : '마을'}에 이주민</span><b>+2</b>`, '🏰 함께 마을로 돌아가기');
   save();
+}
+
+// ---------- 보물찾기 ----------
+function evNearMark(maxTiles) {
+  if (!EV || EV.kind !== 'treasure') return null;
+  const p = S.player; let best = null, bd = (maxTiles * T) ** 2;
+  for (const m of EV.marks) { if (m.st !== 'x') continue; const d = dist2(p.x, p.y, m.x, m.y); if (d < bd) { bd = d; best = m; } }
+  return best;
+}
+function evDig() {
+  if (!EV || EV.phase !== 'search' || EV.kind !== 'treasure' || EV.dig) return;
+  const m = evNearMark(1.4); if (!m) return;
+  EV.dig = { m, t: 1.5 }; actHeld = false;
+}
+function evTreasureTick(dt) {
+  const d = EV.dig; if (!d) return;
+  const p = S.player;
+  if (dist2(p.x, p.y, d.m.x, d.m.y) > (T * 1.8) ** 2) { EV.dig = null; return; } // 자리를 뜨면 그만
+  d.t -= dt;
+  if (rand() < dt * 14) emit(d.m.x + rr(-8, 8), d.m.y + rr(-4, 6), 3, { color: ['#7a5a3a', '#5a4028', '#9a7a52'], smin: 40, smax: 110, up: 90, grav: 320, lmin: .3, lmax: .6, zmin: 2, zmax: 3.5 });
+  if (d.t > 0) return;
+  EV.dig = null; EV.dug++;
+  const e = evEra(), m = d.m;
+  if (!m.real) {
+    m.st = 'dug'; S.gold += 3;
+    toast(`⛏️ 빈 구덩이… ${EV_TR.junk[e]}뿐입니다 (🪙+3)<br><small>가짜였어요. 다른 표시를 찾아보세요</small>`, 3.2);
+    return;
+  }
+  m.st = 'chest';
+  const gold = 70 + 40 * e, rp = 30 + 20 * e, exp = 40;
+  S.gold += gold; gainExp(exp);
+  if (S.research && TECH[S.research.id]) S.research.p += rp; else S.dev = (S.dev || 0) + rp;
+  EV.phase = 'found';
+  emit(m.x, m.y - 10, 30, { color: ['#ffe58a', '#fff', '#ffc030'], kind: 'spark', smin: 80, smax: 240, lmin: .3, lmax: .8 });
+  setTimeout(() => {
+    if (!EV || EV.kind !== 'treasure') return;
+    evResult(`💰 ${josa(EV_TR.treasure[e], '을를')} 찾았다!`, `궤짝 안에서 <b>${EV_TR.relic[e]}</b>${josa(EV_TR.relic[e], '이가').slice(-1)} 반짝입니다.`,
+      `${EV.dug === 1 ? '단번에 진짜를 팠습니다! ' : `${EV.dug}번 만에 찾았습니다. `}${EV.asked ? `<small>물어본 사람 ${EV.asked}명</small>` : ''}`,
+      `<span>🪙 보물</span><b>+${gold}</b><span>🔬 옛 지식 (연구 점수)</span><b>+${rp}</b><span>⭐ 경험치</span><b>+${exp}</b>`);
+  }, 900);
+  save();
+}
+// 셋 중 한 방향으로 가장 끝에 있는 표시 (1.5칸 넘게 앞서야) → [표시, '북'…] 또는 null
+function evExtreme(list, want) {
+  const D = [['북', m => -m.ty], ['남', m => m.ty], ['동', m => m.tx], ['서', m => -m.tx]];
+  for (const [dn, f] of D.sort(() => rand() - 0.5)) {
+    const s = list.slice().sort((a, b) => f(b) - f(a));
+    if (s.length > 1 && f(s[0]) - f(s[1]) >= 1.5 && (!want || want(s[0]))) return [s[0], dn];
+  }
+  return null;
+}
+function evTreasureLine(v) {
+  const e = evEra(), live = EV.marks.filter(m => m.st === 'x'), real = EV.marks.find(m => m.real);
+  if (v.hermit) {
+    const x = evExtreme(EV.marks, m => m.real);
+    EV.hermitTold = true;
+    if (x) { EV.hint = `가장 ${x[1]}쪽 표시가 진짜`; return `그 지도라면 내 젊을 적에 그린 걸세. 세 표시 중 <i>가장 ${x[1]}쪽</i>에 있는 게 진짜고, 나머진 도굴꾼 속이려고 그린 가짜지.`; }
+    EV.hint = `${real.place}의 표시가 진짜`; return `진짜는 <i>${josa(real.place, '이가')} 있는 쪽</i> 표시일세. 여기서 ${evDir(real.x - v.x, real.y - v.y)}쪽으로 가 보게.`;
+  }
+  const fakes = live.filter(m => !m.real && !EV.ruled.includes(m));
+  const r = rand();
+  if (fakes.length && r < 0.55) {
+    const x = evExtreme(live, m => !m.real && !EV.ruled.includes(m));
+    if (x) { EV.ruled.push(x[0]); EV.hint = EV.hint || `가장 ${x[1]}쪽 표시는 가짜`; return `그 지도 얘기 들었어요! <i>가장 ${x[1]}쪽</i> 표시는 가짜래요. 거긴 우리 할아버지가 벌써 파 봤는데 빈 구덩이였대요.`; }
+  }
+  if (EV.npc && r < 0.85) { const n = EV.npc; return `${josa(EV_TR.hermit[e], '이가')} 그 지도를 그렸다는 소문이 있어요. 마을에서 <i>${evDir(n.x - v.x, n.y - v.y)}쪽</i> ${evPlace(Math.floor(n.x / T), Math.floor(n.y / T))}에 혼자 살아요.`; }
+  const N = ['보물이요? 저도 한몫 주시면 같이 팔게요!', '그런 지도는 장터에 가면 열 장씩 팔던데… 조심하세요.', '보물 찾으시면 우물 좀 새로 파 주세요!'];
+  return N[ri(N.length)];
+}
+
+// ---------- 도둑 추격 ----------
+function evThiefStart() {
+  const t = townById(EV.town), p = S.player, th = EV.thief;
+  // 마을에서 멀리 있으면 마을로 (장터에서 바로 뛰어나간다)
+  if (t && dist2(p.x / T, p.y / T, t.x + .5, t.y + .5) > 7 * 7) {
+    for (const [dx, dy] of [[0, 2], [1, 2], [-1, 2], [2, 0], [-2, 0], [0, -2], [2, 2], [-2, 2]]) { const x = (t.x + .5 + dx) * T, y = (t.y + .5 + dy) * T; if (canStand(x, y, 6)) { p.x = x; p.y = y; break; } }
+  }
+  const h = EV.hides[0], a = Math.atan2(h.y - p.y, h.x - p.x);
+  th.x = p.x; th.y = p.y;
+  for (let d = 2.6; d >= 1.4; d -= 0.4) { const x = p.x + Math.cos(a) * d * T, y = p.y + Math.sin(a) * d * T; if (canStand(x, y, 6)) { th.x = x; th.y = y; break; } }
+  EVCAM.yaw = Math.atan2(th.x - p.x, -(th.y - p.y)); // 도둑 쪽을 보며 내려앉는다
+}
+function evThiefTick(dt) {
+  const th = EV.thief, p = S.player, d = Math.hypot(th.x - p.x, th.y - p.y), e = evEra();
+  if (th.st === 'hide') {
+    if (d < T * 2.4) { th.st = 'run'; th.stam = 3; toast(`🌿 덤불에서 ${josa(EV_TH.who[e], '이가')} 튀어나왔다!`, 1.8); EV.hint = ''; }
+  } else {
+    if (d < T * 0.95) return evCaught();
+    th.stam -= dt * (th.st === 'rest' ? -1.6 : 1);
+    if (th.st === 'run' && th.stam <= 0) { th.st = 'rest'; th.stam = 0; floatText(th.x, th.y - 44, '헉헉…', '#ffe0a0', 13); }
+    else if (th.st === 'rest' && th.stam >= 2.6) th.st = 'run';
+    const h = EV.hides[EV.hideI % EV.hides.length];
+    const hx = h.x - th.x, hy = h.y - th.y, hd = Math.hypot(hx, hy) || 1;
+    // 숨을 곳에 닿았고 영주가 멀면 숨는다 (두 번까지)
+    if (hd < T * 0.8 && d > T * 4.2 && th.hid < 2 && EV.t > 9) { th.st = 'hide'; th.hid++; EV.hideI++; EV.hint = `${h.place} 어딘가에 숨었다`; toast(`🌿 ${josa(EV_TH.who[e], '이가')} ${h.place}에 숨었다! 가까이 가 보세요`, 2.2); return; }
+    let ax = (th.x - p.x) / (d || 1), ay = (th.y - p.y) / (d || 1);
+    const near = d < T * 3;
+    th.swT -= dt; if (th.swT <= 0) { th.swT = rr(0.6, 1.3); th.swerve = near ? rr(-1.1, 1.1) : rr(-0.3, 0.3); }
+    let vx = ax * (near ? 1 : 0.35) + hx / hd * (near ? 0.6 : 1), vy = ay * (near ? 1 : 0.35) + hy / hd * (near ? 0.6 : 1);
+    const a0 = Math.atan2(vy, vx) + th.swerve;
+    const onF = tileAt(th.x / T, th.y / T) === FOREST;
+    const sp = (th.st === 'rest' ? 50 : 106) * (onF ? 0.7 : 1) * (d > T * 9 ? 0.75 : 1);
+    let moved = false;
+    for (const da of [0, 0.6, -0.6, 1.2, -1.2, 2, -2]) {
+      const a = a0 + da, ox = th.x, oy = th.y;
+      if (moveEnt(th, Math.cos(a) * sp * dt, Math.sin(a) * sp * dt, 6) && Math.hypot(th.x - ox, th.y - oy) > sp * dt * 0.5) { moved = true; th.yaw = Math.atan2(Math.cos(a), Math.sin(a)); break; }
+      th.x = ox; th.y = oy;
+    }
+    if (moved) th.walk += dt * (th.st === 'rest' ? 6 : 12);
+    th.moving = moved;
+  }
+  if (d > T * 22 || EV.t > EV.limit) evThiefLost();
+}
+function evCaught() {
+  const e = evEra(), t = townById(EV.town);
+  const gold = 50 + 30 * e, exp = 35;
+  EV.phase = 'found'; EV.thief.st = 'caught';
+  S.gold += gold; gainExp(exp); if (t) t.pop += 1;
+  banner('덥석!', '', 1);
+  shake(4);
+  evResult(`🤚 ${josa(EV_TH.who[e], '을를')} 붙잡았다!`, EV_TH.caught[e],
+    `${josa(EV_TH.item[e], '을를')} 되찾아 ${t ? t.name : '마을'} 장터에 돌려주었습니다. <small>(${Math.round(EV.t)}초 추격)</small>`,
+    `<span>🪙 상인들의 사례</span><b>+${gold}</b><span>⭐ 경험치</span><b>+${exp}</b><span>👥 소문 듣고 이주민</span><b>+1</b>`, '🏰 도둑을 끌고 마을로 돌아가기');
+  save();
+}
+function evThiefLost() {
+  const e = evEra();
+  EV.phase = 'found'; EV.thief.st = 'gone';
+  const loss = Math.min(S.gold, 10 + 5 * e); S.gold -= loss;
+  evResult(`💨 ${josa(EV_TH.who[e], '을를')} 놓쳤다…`, '"아이고, 다음엔 꼭 잡아 주세요…"',
+    `너무 멀어지거나 시간이 다 되면 달아납니다. 지친 틈(헉헉)을 노리고, 숨은 덤불은 가까이 가면 튀어나와요.`,
+    loss ? `<span>🪙 상인 위로금</span><b>-${loss}</b>` : '', '🏰 마을로 돌아가기');
 }
 
 // ---------- 3인칭 이동 (updateWorld) ----------
@@ -205,31 +520,39 @@ function evLook(dx) { EVCAM.yaw += dx * 0.008; }
 
 // ---------- 말 걸기 ----------
 let evTalk = null; // { v, html, t }
+function evTalkers() { return EV && EV.npc && EV.phase === 'search' ? villagers.concat([EV.npc]) : villagers; }
 function evNearVillager(maxTiles) {
   const p = S.player; let best = null, bd = (maxTiles * T) ** 2;
-  for (const v of villagers) { const d = dist2(p.x, p.y, v.x, v.y); if (d < bd) { bd = d; best = v; } }
+  for (const v of evTalkers()) { const d = dist2(p.x, p.y, v.x, v.y); if (d < bd) { bd = d; best = v; } }
   return best;
 }
 function evLineFor(v) {
-  const e = evEra(), role = evRole(v);
+  const e = evEra(), role = v.hermit ? 'idle' : evRole(v);
   if (!v.name) v.name = EV_NAMES[ri(EV_NAMES.length)];
-  const roleName = (VROLE[role] || VROLE.idle)[e];
+  const roleName = v.hermit ? '' : (VROLE[role] || VROLE.idle)[e];
   let line;
   if (EV && EV.phase === 'search') {
-    if (v.evLine && v.evLineEV === EV) line = v.evLine;
+    if (v.evLine && v.evLineEV === EV && !v.hermit) line = v.evLine;
     else {
-      const w = EV.who, dx = w.x - v.x, dy = w.y - v.y, dir = evDir(dx, dy), far = Math.hypot(dx, dy) / T > 13 ? '꽤 멀리 ' : '';
-      const where = `${dir}쪽 ${w.place}`;
-      const give = EV.hintN === undefined ? rand() < 0.8 : rand() < (EV.noHint >= 1 ? 1 : 0.6);
-      if (give) {
-        const H = w.child ? [`${josa(w.name, '이가')} ${far}${josa(where, '으로로')} 가는 걸 봤어요!`, `아까 ${far}${dir}쪽에서 아이 우는 소리가 들렸어요.`, `${w.name}? 나비 쫓아서 ${josa(where, '으로로')} 뛰어가던데요.`]
-          : [`${w.name}께서 ${far}${where}에서 약초를 캐신다고 했어요.`, `${dir}쪽으로 지팡이 짚고 가시는 걸 봤어요.`, `${w.place}에 좋은 약초가 난다고 ${dir}쪽으로 가셨는데…`];
-        line = H[ri(H.length)]; EV.hint = where; EV.hintN = (EV.hintN || 0) + 1; EV.noHint = 0;
+      if (EV.kind === 'treasure') line = evTreasureLine(v);
+      else if (EV.kind === 'thief') {
+        const th = EV.thief, dir = evDir(th.x - v.x, th.y - v.y);
+        line = th.st === 'hide' ? `방금 ${EV.hides[(EV.hideI - 1 + EV.hides.length) % EV.hides.length].place} 덤불이 마구 흔들렸어요! ${dir}쪽이에요.` : ['저쪽! <i>' + dir + '쪽</i>으로 뛰어갔어요!', `${josa(EV_TH.item[e], '을를')} 들고 ${dir}쪽으로 내뺐어요! 어서요!`][ri(2)];
       } else {
-        const N = ['저런, 큰일이네… 저는 못 봤어요. 다른 사람한테도 물어보세요.', '못 봤는데요… 우물가 사람들이 알지도 몰라요.', '아이고, 일하느라 정신이 없어서… 죄송해요.'];
-        line = N[ri(N.length)]; EV.noHint = (EV.noHint || 0) + 1;
+        const w = EV.who, dx = w.x - v.x, dy = w.y - v.y, dir = evDir(dx, dy), far = Math.hypot(dx, dy) / T > 13 ? '꽤 멀리 ' : '';
+        const where = `${dir}쪽 ${w.place}`;
+        const give = EV.hintN === undefined ? rand() < 0.8 : rand() < (EV.noHint >= 1 ? 1 : 0.6);
+        if (give) {
+          const H = w.child ? [`${josa(w.name, '이가')} ${far}${josa(where, '으로로')} 가는 걸 봤어요!`, `아까 ${far}${dir}쪽에서 아이 우는 소리가 들렸어요.`, `${w.name}? 나비 쫓아서 ${josa(where, '으로로')} 뛰어가던데요.`]
+            : [`${w.name}께서 ${far}${where}에서 약초를 캐신다고 했어요.`, `${dir}쪽으로 지팡이 짚고 가시는 걸 봤어요.`, `${w.place}에 좋은 약초가 난다고 ${dir}쪽으로 가셨는데…`];
+          line = H[ri(H.length)]; EV.hint = where; EV.hintN = (EV.hintN || 0) + 1; EV.noHint = 0;
+        } else {
+          const N = ['저런, 큰일이네… 저는 못 봤어요. 다른 사람한테도 물어보세요.', '못 봤는데요… 우물가 사람들이 알지도 몰라요.', '아이고, 일하느라 정신이 없어서… 죄송해요.'];
+          line = N[ri(N.length)]; EV.noHint = (EV.noHint || 0) + 1;
+        }
       }
-      v.evLine = line; v.evLineEV = EV; EV.asked++;
+      if (!v.hermit) { v.evLine = line; v.evLineEV = EV; }
+      if (EV.kind !== 'thief') EV.asked++;
     }
   } else {
     const L = (VLINES[role] || VLINES.idle)[e];
@@ -241,24 +564,38 @@ function evSay(v) {
   if (!v) return;
   const L = evLineFor(v);
   v.talkT = 5;
-  evTalk = { v, t: 5, html: `<b>${L.role} ${L.name}</b>${L.line}` };
+  evTalk = { v, t: v.hermit ? 7 : 5, html: `<b>${L.role ? L.role + ' ' : ''}${L.name}</b>${L.line}` };
   $('talkBox').innerHTML = evTalk.html; $('talkBox').classList.add('show');
 }
 $('talkBtn').addEventListener('click', () => { if (EV && EV.phase === 'search') evSay(evNearVillager(2)); });
+$('digBtn').addEventListener('click', () => evDig());
 $('talkBox').addEventListener('click', () => { evTalk = null; $('talkBox').classList.remove('show'); });
 // 3인칭에서 화면을 톡: 가까운 마을 사람이면 말 걸기. 3인칭에선 다른 탭 행동(자동 이동)은 하지 않는다
 function evTap(sx, sy) {
   if (!EV || !EV.tp || !USE3D) return false;
   const p = S.player, pr = {}, hk = W3_TP.hk;
   let best = null, bd = 56 * 56;
-  for (const v of villagers) {
+  for (const v of evTalkers()) {
     if (dist2(p.x, p.y, v.x, v.y) > (T * 9) ** 2) continue;
     R3D.project(v.x / T, 0.75 * hk, v.y / T, pr); if (!pr.vis) continue;
     const d = (pr.x - sx) ** 2 + (pr.y - sy) ** 2; if (d < bd) { bd = d; best = v; }
   }
   if (best) { if (dist2(p.x, p.y, best.x, best.y) < (T * 4) ** 2) evSay(best); else toast('조금 더 가까이 가서 말을 걸어 보세요', 1.5); }
+  else if (evNearMark(1.4)) evDig();
   return true;
 }
+
+// ---------- 3D 그리기용 (world3d.js w3dEvent) ----------
+// 사람: [{ o: 풀 키 객체, x, y (게임 px), look, yaw?, moving, walk, beam }] · 땅 표시: [{ x, y, st: 'x' | 'dug' | 'chest', beam }]
+function evActors() {
+  if (!EV || (EV.phase !== 'search' && EV.phase !== 'found')) return null;
+  const out = [], p = S.player;
+  if (EV.kind === 'findPerson') { const w = EV.who, near = dist2(p.x, p.y, w.x, w.y) < (T * 6) ** 2; out.push({ o: w, x: w.x, y: w.y, look: w.look, yaw: near ? Math.atan2(p.x - w.x, p.y - w.y) : w.yaw, beam: EV.phase === 'search' }); }
+  if (EV.npc) { const n = EV.npc, near = dist2(p.x, p.y, n.x, n.y) < (T * 5) ** 2; out.push({ o: n, x: n.x, y: n.y, look: n.look, yaw: near ? Math.atan2(p.x - n.x, p.y - n.y) : n.yaw, beam: false }); }
+  if (EV.kind === 'thief' && EV.thief.st !== 'hide' && EV.thief.st !== 'gone') { const th = EV.thief; out.push({ o: th, x: th.x, y: th.y, look: th.look, yaw: th.st === 'caught' ? Math.atan2(p.x - th.x, p.y - th.y) : th.moving ? th.yaw : undefined, moving: th.st !== 'caught' && !!th.moving, walk: th.walk }); }
+  return out;
+}
+function evMarks() { return EV && EV.kind === 'treasure' && (EV.phase === 'search' || EV.phase === 'found') ? EV.marks : null; }
 
 // ---------- HUD (매 프레임, 멈춤과 상관없이) ----------
 function evHud(dt) {
@@ -272,19 +609,29 @@ function evHud(dt) {
     hud.style.display = 'block'; hud.classList.toggle('bot', !EV.tp);
     let s;
     if (EV.phase === 'guards') s = `🛡️ 경비병이 ${josa(evWhoLabel(), '을를')} 찾는 중…`;
-    else s = `🔎 ${josa(evWhoLabel(), '을를')} 찾아라<small>${EV.hint ? `단서: ${EV.hint} 쪽` : USE3D ? '마을 사람에게 톡 하거나 「말 걸기」로 물어보세요' : '마을 사람 곁에서 「말 걸기」로 물어보세요'}</small>`;
+    else if (EV.kind === 'treasure') {
+      const left = EV.marks.filter(m => m.st === 'x').length;
+      s = `🗺️ 진짜 보물 자리를 파라 <span class="evn">표시 ${left}곳 남음</span><small>${EV.dig ? '⛏️ 파는 중…' : EV.hint ? `단서: ${EV.hint}` : '빛기둥이 X 표시 · 마을 사람에게 물어 가짜를 거르세요'}</small>`;
+    } else if (EV.kind === 'thief') {
+      const th = EV.thief, p = S.player, left = Math.max(0, Math.ceil(EV.limit - EV.t));
+      const where = th.st === 'hide' ? EV.hint : `${evDir(th.x - p.x, th.y - p.y)}쪽 ${Math.round(Math.hypot(th.x - p.x, th.y - p.y) / T)}걸음${th.st === 'rest' ? ' · 헉헉, 지쳤다!' : ''}`;
+      s = `🏃 ${josa(EV_TH.who[evEra()], '을를')} 잡아라 <span class="evn">⏱ ${left}</span><small>${where}</small>`;
+    } else s = `🔎 ${josa(evWhoLabel(), '을를')} 찾아라<small>${EV.hint ? `단서: ${EV.hint} 쪽` : USE3D ? '마을 사람에게 톡 하거나 「말 걸기」로 물어보세요' : '마을 사람 곁에서 「말 걸기」로 물어보세요'}</small>`;
     if (hud.dataset.s !== s) { hud.dataset.s = s; $('evObj').innerHTML = s; }
     $('evExit').style.display = EV.phase === 'search' && EV.tp ? 'block' : 'none';
   }
   const srch = !!(EV && EV.phase === 'search');
   document.body.classList.toggle('evs', srch);
-  const near = srch && !paused ? evNearVillager(2) : null;
+  const near = srch && !paused && EV.kind !== 'thief' ? evNearVillager(2) : null;
   $('talkBtn').style.display = near ? 'flex' : 'none';
+  const dig = srch && !paused && !EV.dig && evNearMark(1.4);
+  $('digBtn').style.display = dig ? 'flex' : 'none';
+  const bb = $('evBoardBtn'), bv = MODE === 'world' && S && S.towns.length ? '' : 'none'; if (bb.style.display !== bv) bb.style.display = bv;
   // 말풍선: 말하는 사람 머리 위 (안 보이면 화면 아래쪽)
   const tb = $('talkBox');
   if (evTalk) {
     evTalk.t -= dt;
-    if (evTalk.t <= 0 || !villagers.includes(evTalk.v) || MODE !== 'world' || paused || dist2(S.player.x, S.player.y, evTalk.v.x, evTalk.v.y) > (T * 5) ** 2) { evTalk = null; tb.classList.remove('show'); }
+    if (evTalk.t <= 0 || !evTalkers().includes(evTalk.v) || MODE !== 'world' || paused || dist2(S.player.x, S.player.y, evTalk.v.x, evTalk.v.y) > (T * 5) ** 2) { evTalk = null; tb.classList.remove('show'); }
     else if (USE3D) {
       const pr = R3D.project(evTalk.v.x / T, 1.6 * (EVCAM.k > 0.5 ? W3_TP.hk : 1) + 0.1, evTalk.v.y / T, {});
       if (pr.vis && pr.x > 0 && pr.x < VW && pr.y > 90 && pr.y < VH) { tb.style.left = clamp(pr.x, 130, VW - 130) + 'px'; tb.style.top = pr.y + 'px'; tb.classList.remove('low'); }
@@ -293,10 +640,17 @@ function evHud(dt) {
   }
 }
 
-// ---------- 2D 화면 (?2d): 잃어버린 사람 그리기 ----------
+// ---------- 2D 화면 (?2d): 사건 인물 · 표시 그리기 ----------
 function evDraw2D(g) {
-  if (!EV || EV.phase !== 'search') return;
-  const w = EV.who, L = w.look;
-  g.globalAlpha = 0.25 + 0.1 * Math.sin(S.time * 2.2); g.fillStyle = '#fff6c8'; g.beginPath(); g.arc(w.x, w.y - 6, 16, 0, 7); g.fill(); g.globalAlpha = 1;
-  drawHuman(g, w.x, w.y, { scale: w.child ? 0.55 : 0.72, face: 1, walk: 0, body: L.body, legs: L.legs, hat: L.hat, helm: L.helm });
+  const A = evActors(); if (!A) return;
+  for (const a of A) {
+    const L = a.look;
+    if (a.beam) { g.globalAlpha = 0.25 + 0.1 * Math.sin(S.time * 2.2); g.fillStyle = '#fff6c8'; g.beginPath(); g.arc(a.x, a.y - 6, 16, 0, 7); g.fill(); g.globalAlpha = 1; }
+    drawHuman(g, a.x, a.y, { scale: L.scale < 0.9 ? 0.55 : 0.72, face: 1, walk: a.walk || 0, body: L.body, legs: L.legs, hat: L.hat, helm: L.helm });
+  }
+  const M = evMarks();
+  if (M) for (const m of M) {
+    if (m.st === 'x') { g.strokeStyle = '#c0392b'; g.lineWidth = 4; g.beginPath(); g.moveTo(m.x - 8, m.y - 8); g.lineTo(m.x + 8, m.y + 8); g.moveTo(m.x + 8, m.y - 8); g.lineTo(m.x - 8, m.y + 8); g.stroke(); }
+    else { g.fillStyle = m.st === 'chest' ? '#c9a040' : '#5a4028'; g.beginPath(); g.arc(m.x, m.y, 8, 0, 7); g.fill(); }
+  }
 }

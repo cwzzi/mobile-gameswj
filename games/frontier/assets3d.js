@@ -389,10 +389,12 @@ const A3D = (() => {
   }
   // 캐릭터 재질: Lambert + 테두리 빛(rim) 살짝
   const matCache = new Map();
-  function charMat(tex) {
-    let m = matCache.get(tex);
+  // vc: 장비 조각(버텍스 색, uv.x < -0.5 → 텍스처 대신 흰색)이 섞인 몸
+  function charMat(tex, vc) {
+    const mk = vc ? (tex && tex.uuid || '-') + '|vc' : tex;
+    let m = matCache.get(mk);
     if (m) return m;
-    m = new THREE.MeshLambertMaterial({ map: tex });
+    m = new THREE.MeshLambertMaterial({ map: tex, vertexColors: !!vc });
     m.onBeforeCompile = sh => {
       sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying float vRim;')
         .replace('#include <project_vertex>', '#include <project_vertex>\n  { vec3 nv = normalize(normalMatrix * objectNormal); vec3 vd = normalize(-mvPosition.xyz); vRim = pow(1.0 - clamp(dot(nv, vd), 0.0, 1.0), 2.5); }');
@@ -400,9 +402,10 @@ const A3D = (() => {
         .replace('#include <output_fragment>', 'outgoingLight += uRim * vRim * (0.4 + 0.6 * diffuseColor.rgb);\n#include <output_fragment>');
       sh.fragmentShader = 'uniform vec3 uRim;\n' + sh.fragmentShader;
       sh.uniforms.uRim = R3D.uRim || { value: new THREE.Color(0.28, 0.26, 0.22) }; // 테두리 빛 (밤엔 푸르고 약하게)
+      if (vc) sh.fragmentShader = sh.fragmentShader.replace('#include <map_fragment>', '#ifdef USE_MAP\n  vec4 sdc = vUv.x < -0.5 ? vec4(1.0) : texture2D(map, vUv);\n  diffuseColor *= sdc;\n#endif');
     };
-    m.customProgramCacheKey = () => 'a3dchar';
-    matCache.set(tex, m);
+    m.customProgramCacheKey = () => vc ? 'a3dcharvc' : 'a3dchar';
+    matCache.set(mk, m);
     return m;
   }
   function charGeo(ch, list) {
@@ -451,7 +454,7 @@ const A3D = (() => {
   function realPlan(o) {
     if (!A.realChars || o.noreal) return null;
     const role = o.role, era = o.era | 0, ut = o.ut, foe = o.side === 'foe' || role === 'grunt' || role === 'officer' || role === 'boss';
-    let rc = null, tint = null, mode = null, w = [], prop = null, rng = null, atk = 'atk', k = 1;
+    let rc = null, tint = null, mode = null, w = [], prop = null, rng = null, atk = 'atk', k = 1, gear = null;
     const melee = wp => {
       if (wp === 'spear' || wp === 'pike') { rc = 'soldier_spear'; prop = wp; }
       else if (wp === 'glaive') { rc = 'soldier_sword'; w = ['2H_Sword']; atk = 'atk2'; }
@@ -484,6 +487,9 @@ const A3D = (() => {
         case 'club': if (o.side === 'bandit') { rc = 'soldier_archer'; w = ['1H_Axe']; } else melee('club'); break;
         default: melee(o.weapon);
       }
+      // 시대 차림: 같은 병종이라도 시대마다 몸·머리 장비·방패를 바꾼다 (산적은 그대로)
+      const ek = o.side !== 'bandit' && ERA_KIT[era] && ERA_KIT[era][ut];
+      if (ek) { if (ek.rc) rc = ek.rc; if (ek.w) w = ek.w.slice(); if (ek.prop !== undefined) prop = ek.prop; gear = ek.gear; }
     } else if (role === 'ally' || role === 'grunt') melee(o.weapon);
     else if (role === 'bandit') { rc = 'soldier_archer'; w = o.weapon === 'sword' ? ['1H_Sword'] : ['1H_Axe']; }
     else return null;
@@ -493,7 +499,84 @@ const A3D = (() => {
       mode = rc === 'soldier_archer' ? 'green' : rc === 'soldier_sword' ? 'white' : 'beige';
     }
     w = w.filter(n => CH[KW[n]] && CH[KW[n]].parts[n]);
-    return { rc, tint, mode, w, prop, rng, atk, k, lod: !!o.lod };
+    return { rc, tint, mode, w, prop, rng, atk, k, lod: !!o.lod, gear: gear && !o.lod ? gear : null };
+  }
+  // 시대별 병사 차림 [시대][병종] → rc: 몸 · w: KayKit 무기/방패 · prop: 절차적 무기 · gear: 덧붙일 장비(GEAR)
+  //   부족: 갑옷 없는 몸 + 가죽 머리띠·깃털·털 목도리 + 몽둥이 / 고대: 청동 볏 투구 + 둥근 방패
+  //   중세: 기본(양동이 투구·연 방패) / 근세: 머스킷병 = 투구 없는 몸 + 삼각모, 장창병 = 모리온 투구
+  const ERA_KIT = [
+    { club: { rc: 'villager', w: [], prop: 'club', gear: ['band', 'fur'] }, sling: { rc: 'villager', gear: ['band', 'fur'] }, rider: { rc: 'villager', w: [], gear: ['band', 'fur'] } },
+    { spear: { gear: ['crest', 'shield'] }, rider: { gear: ['crest'] }, archer: { rc: 'villager', gear: ['cap'] } },
+    {},
+    { musket: { rc: 'villager', gear: ['tricorn', 'belt'] }, pike: { gear: ['morion'] } },
+  ];
+  // 장비 조각: [뼈, R3D.merge 조각들] — 좌표는 그 뼈의 쉬는 자세 위치 기준(m, +Y 위, +Z 앞). 쉬는 자세에서 머리·가슴 뼈는 회전이 없다
+  const GEAR = {
+    band: () => ['head', [
+      { g: new THREE.TorusGeometry(0.1, 0.012, 4, 12), c: '#6a3a1c', p: [0, 0.17, 0.004], r: [Math.PI / 2 + 0.15, 0, 0], s: [1.02, 1.1, 1] },
+      { g: new THREE.ConeGeometry(0.022, 0.2, 4), c: '#f2ead6', p: [0.035, 0.3, -0.1], r: [-0.5, 0, -0.25], s: [1, 1, 0.35] },
+      { g: new THREE.ConeGeometry(0.02, 0.17, 4), c: '#b8321e', p: [-0.03, 0.28, -0.1], r: [-0.55, 0, 0.3], s: [1, 1, 0.35] },
+    ]],
+    fur: () => ['chest', [
+      { g: new THREE.TorusGeometry(0.12, 0.05, 5, 10), c: '#5e4630', p: [0, 0.165, -0.01], r: [Math.PI / 2 - 0.1, 0, 0], s: [1.55, 0.85, 0.55] },
+      { g: new THREE.IcosahedronGeometry(0.075, 0), c: '#d8ccb0', p: [0.02, 0.12, 0.13] }, // 뼈 목걸이
+    ]],
+    crest: () => ['head', [
+      { g: new THREE.SphereGeometry(0.14, 10, 5, 0, Math.PI * 2, 0, Math.PI * 0.62), c: '#b8822e', p: [0, 0.135, -0.005], s: [1, 1.12, 1.12] },
+      { g: new THREE.BoxGeometry(0.03, 0.11, 0.3), c: '#b02618', p: [0, 0.3, -0.03] },
+      { g: new THREE.BoxGeometry(0.03, 0.08, 0.05), c: '#d8a040', p: [0, 0.13, 0.142] }, // 코 가리개
+    ]],
+    cap: () => ['head', [
+      { g: new THREE.SphereGeometry(0.118, 10, 4, 0, Math.PI * 2, 0, Math.PI * 0.5), c: '#8a6a3a', p: [0, 0.155, -0.01], s: [1, 1.0, 1.1] },
+      { g: new THREE.ConeGeometry(0.05, 0.1, 6), c: '#a87e3e', p: [0, 0.3, -0.01] },
+    ]],
+    tricorn: () => ['head', [
+      { g: new THREE.CylinderGeometry(0.1, 0.115, 0.13, 9), c: '#1c1816', p: [0, 0.27, -0.005] },
+      { g: new THREE.CylinderGeometry(0.235, 0.2, 0.05, 3), c: '#24201c', p: [0, 0.225, 0.0] },
+      { g: new THREE.CylinderGeometry(0.242, 0.242, 0.014, 3), c: '#d8b24a', p: [0, 0.252, 0.0] },
+    ]],
+    belt: () => ['chest', [
+      { g: new THREE.BoxGeometry(0.034, 0.46, 0.03), c: '#ece6d6', p: [0, 0.02, 0.14], r: [0, 0, 0.55] }, // 흰 가죽 십자 띠
+      { g: new THREE.BoxGeometry(0.034, 0.46, 0.03), c: '#ece6d6', p: [0, 0.02, 0.145], r: [0, 0, -0.55] },
+    ]],
+    shield: () => ['handslotl', [ // 청동 둥근 방패 (왼손 슬롯, 앞을 본다) — 따로 그리지 않고 몸에 합침
+      { g: new THREE.CylinderGeometry(0.27, 0.27, 0.03, 14), c: '#b8862e', p: [0, 0, 0.07], r: [Math.PI / 2, 0, 0] },
+      { g: new THREE.CylinderGeometry(0.2, 0.2, 0.034, 14), c: '#8a3a1e', p: [0, 0, 0.072], r: [Math.PI / 2, 0, 0] },
+      { g: new THREE.SphereGeometry(0.06, 8, 4, 0, Math.PI * 2, 0, Math.PI / 2), c: '#d8aa48', p: [0, 0, 0.09], r: [Math.PI / 2, 0, 0] },
+    ]],
+    morion: () => ['head', [
+      { g: new THREE.SphereGeometry(0.13, 10, 4, 0, Math.PI * 2, 0, Math.PI * 0.5), c: '#a8aeb6', p: [0, 0.2, -0.01], s: [1, 1.05, 1.15] },
+      { g: new THREE.CylinderGeometry(0.17, 0.17, 0.02, 12), c: '#959ba4', p: [0, 0.215, -0.01], s: [1, 1, 1.3] },
+      { g: new THREE.BoxGeometry(0.022, 0.12, 0.25), c: '#b4bac2', p: [0, 0.34, -0.01] },
+    ]],
+  };
+  // 몸(사실적 텍스처) + 장비 조각(버텍스 색) → 스킨 지오메트리 하나. 장비 정점은 uv (-1,-1), 몸 정점은 흰색
+  function gearGeo(ch, gear) {
+    const C = CH[ch], key = 'gear|' + gear.join(',');
+    if (C.geoCache.has(key)) return C.geoCache.get(key);
+    const base = charGeo(ch, Object.keys(C.parts).filter(n => C.parts[n].skin));
+    let out = null;
+    if (base) {
+      const body = base.clone(), nb = body.attributes.position.count;
+      body.setAttribute('color', new THREE.BufferAttribute(new Float32Array(nb * 3).fill(1), 3));
+      const list = [body], bones = C.skeleton.bones, bmi = new THREE.Matrix4().copy(C.bindMatrix).invert(), bp = new THREE.Vector3();
+      for (const gk of gear) {
+        const def = GEAR[gk] && GEAR[gk](); if (!def) continue;
+        const j = bones.findIndex(b => b.name.replace('.', '') === def[0]); if (j < 0) continue;
+        bp.setFromMatrixPosition(mW.copy(C.skeleton.boneInverses[j]).invert().premultiply(bmi));
+        const g = R3D.merge(def[1]), n = g.attributes.position.count;
+        g.translate(bp.x, bp.y, bp.z);
+        const uv = new Float32Array(n * 2).fill(-1), I = new Uint16Array(n * 4), Wt = new Float32Array(n * 4);
+        for (let i = 0; i < n; i++) { I[i * 4] = j; Wt[i * 4] = 1; }
+        g.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+        g.setAttribute('skinIndex', new THREE.BufferAttribute(I, 4)); g.setAttribute('skinWeight', new THREE.BufferAttribute(Wt, 4));
+        const idx = []; for (let i = 0; i < n; i++) idx.push(i); g.setIndex(idx);
+        list.push(g);
+      }
+      try { out = merge(list); } catch (e) { console.warn('gear merge', e); out = null; }
+    }
+    C.geoCache.set(key, out);
+    return out;
   }
   // 사실적 텍스처 색 바꾸기. 해당 부분의 평균 밝기를 목표색에 맞추고 명암은 살린다
   function realTex(rc, tint, mode) {
@@ -612,7 +695,7 @@ const A3D = (() => {
     const m = keyMemo.get(look); if (m && m.v === A.ver) return m.k;
     const sc = look.scale || 1, rp = realPlan(look);
     let k;
-    if (rp) k = 'R|' + rp.rc + '|' + rp.w.join(',') + '|' + (rp.tint || '') + '|' + sc + '|' + (rp.prop || '') + (rp.lod ? '|lo' : '');
+    if (rp) k = 'R|' + rp.rc + '|' + rp.w.join(',') + '|' + (rp.tint || '') + '|' + sc + '|' + (rp.prop || '') + (rp.lod ? '|lo' : '') + (rp.gear ? '|g' + rp.gear.join('') : '');
     else { const p = plan(look); k = 'A|' + p.ch + '|' + p.extra.join(',') + '|' + (p.tint || '') + '|' + sc + (p.prop ? '|' + p.prop : ''); }
     keyMemo.set(look, { v: A.ver, k });
     return k;
@@ -622,12 +705,13 @@ const A3D = (() => {
     look = look || {};
     const rp = realPlan(look);
     if (rp) {
-      const C = CH[RCK(rp.rc)], geo = charGeo(RCK(rp.rc), Object.keys(C.parts).filter(n => C.parts[n].skin));
+      const C = CH[RCK(rp.rc)], gg = rp.gear ? gearGeo(RCK(rp.rc), rp.gear) : null;
+      const geo = gg || charGeo(RCK(rp.rc), Object.keys(C.parts).filter(n => C.parts[n].skin));
       if (geo) {
         const wg = rp.w.length ? realWeaponGeo(rp.rc, rp.w, rp.lod) : null;
         const wsrc = rp.w.length ? KW[rp.w[0]] : null;
         return rigHuman(look, {
-          C, geo, mat: charMat(realTex(rp.rc, rp.tint, rp.mode)), clipSet: realClips(), getR: realR,
+          C, geo, mat: charMat(realTex(rp.rc, rp.tint, rp.mode), !!gg), clipSet: realClips(), getR: realR,
           wgeo: wg, wmat: wg ? charMat(tintTex(wsrc, rp.tint, 'blue')) : null,
           prop: rp.prop, rng: rp.rng, atk: rp.atk, k: rp.k * R_K, norm: 1 / R_H, sitDrop: 0.9 / R_H, real: true,
         });

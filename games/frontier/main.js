@@ -75,7 +75,7 @@ window.__game = { get S() { return S; }, get B() { return B; }, get owned() { re
   setAge(a) { S.ruler.born = S.year - a; S.ruler.warned = false; }, addYears(n) { for (let i = 0; i < n; i++) { S.yearT = YEAR_SEC; if (eraTick(0)) break; } },
   addDev(n) { S.dev += n; }, get paused() { return paused; },
   // 그래픽 확인용: 하루 중 시각(0 해돋이 · 6 정오 · 12 해넘이 · 18 자정, 24시간 기준) / 품질
-  startEvent, get ev() { return EV; }, EVCAM, evSay, evNearVillager,
+  startEvent, get ev() { return EV; }, get evq() { return EVQ; }, evBoard, evDig, EVCAM, evSay, evNearVillager,
   get quiet() { return QUIET; }, setQuiet(on) { if (R3D.fx) R3D.fx.setQuiet(on); }, get style() { return STYLE; },
   setTime(h) { S.time = (((h / 24) - 0.08 + 1) % 1) * DAY_LEN; }, setGfx(q) { if (R3D.fx) R3D.fx.set(q); },
   get gfx() { return R3D.fx ? { setting: R3D.fx.setting, tier: R3D.fx.tier, post: R3D.fx.on, hdr: R3D.fx.hdr, pr: R3D.pr, avgMs: R3D.fx.avgMs, stats: R3D.stats } : null; },

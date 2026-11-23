@@ -542,7 +542,7 @@ function updateWorld(dt) {
   p.moving = mv.l > 0.08;
   if (p.moving) {
     const onForest = tileAt(p.x / T, p.y / T) === FOREST;
-    const sp = (p.mounted ? 250 * (1 + techBonus('horse')) : typeof evTP === 'function' && evTP() ? 85 : 130) * (onForest ? 0.7 : 1) * Math.max(0.4, mv.l);
+    const sp = (p.mounted ? 250 * (1 + techBonus('horse')) : typeof evTP === 'function' && evTP() ? evTPSpeed() : 130) * (onForest ? 0.7 : 1) * Math.max(0.4, mv.l);
     moveEnt(p, mv.x * sp * dt, mv.y * sp * dt, 9);
     p.dir = Math.atan2(mv.y, mv.x); p.walk = (p.walk || 0) + dt * sp / 9;
     p.dustT = (p.dustT || 0) - dt;

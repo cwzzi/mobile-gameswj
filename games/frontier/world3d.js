@@ -1395,29 +1395,55 @@ function w3dTPCam(cam, px, pz, k) {
   W3.fogD = lerp(W3.dist, P.fogD, e);
   return lerp(1, P.hk, e);
 }
-// 사람 찾기: 잃어버린 사람(EV.who) + 희미한 빛기둥
-function w3dEvent(dt, tm, BL) {
-  const ev = typeof EV !== 'undefined' ? EV : null, who = ev && ev.who;
-  const show = who && (ev.phase === 'search' || ev.phase === 'found');
-  if (W3.evBeam) W3.evBeam.visible = false;
-  if (!show) return;
-  const x = who.x / T, z = who.y / T;
-  if (ev.phase === 'search') {
-    if (!W3.evBeam) {
-      const g = new THREE.CylinderGeometry(0.1, 0.16, 4, 8, 1, true); g.translate(0, 2, 0);
-      const m = new THREE.ShaderMaterial({ uniforms: { uA: { value: 0.15 } }, transparent: true, depthWrite: false, side: THREE.DoubleSide, toneMapped: false, fog: false,
-        blending: THREE.AdditiveBlending, vertexShader: 'varying float vY; void main() { vY = position.y / 4.0; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
-        fragmentShader: 'uniform float uA; varying float vY; void main() { gl_FragColor = vec4(vec3(1.0, 0.92, 0.7) * uA * (1.0 - vY) * (1.0 - vY), 1.0); }' });
-      W3.evBeam = new THREE.Mesh(g, m); W3.evBeam.renderOrder = 6; W3.evBeam.frustumCulled = false; W3.scene.add(W3.evBeam);
-    }
-    W3.evBeam.visible = true; W3.evBeam.position.set(x, 0, z);
-    W3.evBeam.material.uniforms.uA.value = 0.09 + 0.05 * Math.sin(tm * 2.2);
+// 장면 속 사건 (event.js): 사건 인물(잃어버린 사람 · 은둔자 · 도둑) + 땅 표시(보물 X · 판 구덩이 · 궤짝) + 희미한 빛기둥
+function w3dEvBeam(i) {
+  const L = W3.evBeams || (W3.evBeams = []);
+  if (!L[i]) {
+    const g = R3D.cached('evbeam', () => { const g = new THREE.CylinderGeometry(0.1, 0.16, 4, 8, 1, true); g.translate(0, 2, 0); return g; });
+    if (!W3.evBeamMat) W3.evBeamMat = new THREE.ShaderMaterial({ uniforms: { uA: { value: 0.15 } }, transparent: true, depthWrite: false, side: THREE.DoubleSide, toneMapped: false, fog: false,
+      blending: THREE.AdditiveBlending, vertexShader: 'varying float vY; void main() { vY = position.y / 4.0; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+      fragmentShader: 'uniform float uA; varying float vY; void main() { gl_FragColor = vec4(vec3(1.0, 0.92, 0.7) * uA * (1.0 - vY) * (1.0 - vY), 1.0); }' });
+    const m = new THREE.Mesh(g, W3.evBeamMat); m.renderOrder = 6; m.frustumCulled = false; W3.scene.add(m); L[i] = m;
   }
-  if (!w3dInView(x, z, 1)) return;
-  const r = w3dHuman(who, who.look);
-  const p = S.player, near = dist2(p.x, p.y, who.x, who.y) < (T * 6) ** 2;
-  r.m.pose({ walk: 0, moving: false, yaw: w3dFaceMove(r, x, z, dt, near ? Math.atan2(p.x - who.x, p.y - who.y) : who.yaw) });
-  r.m.group.position.set(x, 0, z); BL.add(x, z, 0.24);
+  return L[i];
+}
+const W3_EVMARK = {
+  x: () => R3D.merge([ // 돌무더기 + 붉은 천을 맨 막대
+    { g: R3D.prim.ico(0.13, 0), c: '#8a8680', p: [0.1, 0.08, 0.05] }, { g: R3D.prim.ico(0.11, 0), c: '#7a766e', p: [-0.1, 0.07, 0.06] }, { g: R3D.prim.ico(0.09, 0), c: '#96928a', p: [0, 0.17, 0.02] },
+    { g: R3D.prim.cyl(0.015, 0.018, 0.7, 4), c: '#5a3a20', p: [0, 0.35, -0.08] }, { g: R3D.prim.box(0.2, 0.12, 0.01), c: '#c0392b', p: [0.1, 0.62, -0.08] },
+    { g: R3D.prim.box(0.5, 0.012, 0.06), c: '#c0392b', p: [0, 0.01, 0.25], r: [0, 0.78, 0] }, { g: R3D.prim.box(0.5, 0.012, 0.06), c: '#c0392b', p: [0, 0.01, 0.25], r: [0, -0.78, 0] },
+  ]),
+  dug: () => R3D.merge([ { g: R3D.prim.cyl(0.26, 0.3, 0.03, 9), c: '#2e2218', p: [0, 0.015, 0] }, { g: R3D.prim.ico(0.16, 0), c: '#6a4e32', p: [0.34, 0.06, 0.05], s: [1.3, 0.5, 1] }, { g: R3D.prim.ico(0.12, 0), c: '#5e4430', p: [0.3, 0.05, -0.2], s: [1.2, 0.5, 1] } ]),
+  chest: () => R3D.merge([
+    { g: R3D.prim.cyl(0.3, 0.34, 0.03, 9), c: '#2e2218', p: [0, 0.015, 0] }, { g: R3D.prim.box(0.42, 0.24, 0.28), c: '#6a4222', p: [0, 0.14, 0] },
+    { g: R3D.prim.box(0.44, 0.05, 0.3), c: '#d8a838', p: [0, 0.27, 0] }, { g: R3D.prim.box(0.42, 0.12, 0.28), c: '#7a4c28', p: [0, 0.36, -0.1], r: [-0.9, 0, 0] },
+    { g: R3D.prim.ico(0.1, 0), c: '#ffd860', p: [0, 0.3, 0.02], s: [1.6, 0.5, 1.1] }, { g: R3D.prim.box(0.06, 0.08, 0.02), c: '#d8a838', p: [0, 0.18, 0.15] },
+  ]),
+};
+function w3dEvent(dt, tm, BL) {
+  let nb = 0;
+  const A = typeof evActors === 'function' ? evActors() : null, M = typeof evMarks === 'function' ? evMarks() : null, ua = 0.09 + 0.05 * Math.sin(tm * 2.2);
+  if (W3.evBeamMat) W3.evBeamMat.uniforms.uA.value = ua;
+  if (A) for (const a of A) {
+    const x = a.x / T, z = a.y / T;
+    if (a.beam) { const b = w3dEvBeam(nb++); b.visible = true; b.position.set(x, 0, z); }
+    if (!w3dInView(x, z, 1)) continue;
+    const r = w3dHuman(a.o, a.look);
+    r.m.pose({ walk: a.walk || 0, moving: !!a.moving, yaw: w3dFaceMove(r, x, z, dt, a.yaw) });
+    r.m.group.position.set(x, 0, z); BL.add(x, z, 0.24);
+  }
+  const ML = W3.evMarkM || (W3.evMarkM = []);
+  let nm = 0;
+  if (M) for (const m of M) {
+    const x = m.x / T, z = m.y / T;
+    if (m.st === 'x') { const b = w3dEvBeam(nb++); b.visible = true; b.position.set(x, 0, z); }
+    let o = ML[nm]; if (!o) { o = ML[nm] = new THREE.Mesh(R3D.cached('evmark|x', W3_EVMARK.x), R3D.mats.vc); o.castShadow = true; o.receiveShadow = true; W3.scene.add(o); }
+    nm++;
+    o.geometry = R3D.cached('evmark|' + m.st, W3_EVMARK[m.st]); o.visible = true; o.position.set(x, 0, z); o.scale.setScalar(1.25);
+    if (m.st === 'chest' && rand() < dt * 8) emit(m.x + rr(-6, 6), m.y - 4, 1, { color: ['#ffe58a', '#fff'], kind: 'spark', smin: 20, smax: 60, up: 50, lmin: .3, lmax: .6 }); // 궤짝 반짝임
+  }
+  for (let i = nm; i < ML.length; i++) ML[i].visible = false;
+  if (W3.evBeams) for (let i = nb; i < W3.evBeams.length; i++) W3.evBeams[i].visible = false;
 }
 
 // ---------- 사실적 건물 · 마을 (real3d.js) ----------

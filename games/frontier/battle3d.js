@@ -207,6 +207,7 @@ function b3Reset() {
     B3.bases.push({ b, g, fl, fe, ring, cap, cg, fires, hq: !!b.hq, own: -1, capN: -1 });
   });
   B3.heroLook = Object.assign(eraLook('player'), { scale: 1.15 * B3_MULT * 1.18 }); // 시대별 군주 차림
+  if (typeof b3EraEnv === 'function') b3EraEnv(); // 시대별 하늘·빛 (battleEra.js)
 }
 
 // 전장 지형지물: 나무·바위·거점 울타리(+ 본진 건물). 사실적 모델(real3d.js)이 있으면 그걸, 없으면 KayKit/절차적.
@@ -217,10 +218,11 @@ function b3Scenery() {
   if (B3.rpool) { for (const k in B3.rpool) B3.rpool[k] && B3.rpool[k].dispose(); B3.rpool = null; }
   const scen = new THREE.Group(), sown = []; root.add(scen); B3.scen = scen; B3.scenOwn = sown;
   B3.rver = typeof RA !== 'undefined' ? RA.ver : 0; B3.rItems = null;
+  if (typeof b3EraScenery === 'function') b3EraScenery(scen, sown); // 시대별 꾸밈 (battleEra.js)
   if (typeof RA !== 'undefined' && RA.ok && RA.has('tree_broadleaf_a') && RA.has('tree_conifer')) return b3RealScenery(scen, sown);
   // 장애물 (인스턴스)
   const rocks = [], trees = [], pines = [];
-  for (const o of B.obs) (o.kind === 'rock' ? rocks : o.v % 3 === 0 ? pines : trees).push(o);
+  for (const o of B.obs) if (o.kind !== 'deco') (o.kind === 'rock' ? rocks : o.v % 3 === 0 ? pines : trees).push(o);
   // CC0 모델이 있으면 나무/바위를 그걸로 (높이를 절차적 모델과 비슷하게 맞춤)
   const AP = typeof A3D !== 'undefined' && A3D.ready;
   const aGeo = (k, h) => { const g = AP && A3D.prop(k); if (!g) return null; g.computeBoundingBox(); return { g, k: h / (g.boundingBox.max.y || 1) }; };
@@ -259,14 +261,16 @@ function b3RealScenery(scen, sown) {
   const tint = (o, k) => { const c = new THREE.Color(); const v = 0.86 + (o.v % 4) * 0.06; c.setRGB(v, v, v); if (W3_RTINT[k]) c.multiply(W3_RTINT[k]).multiply(B3_TREEK); else c.multiplyScalar(1.6); return c; };
   // 건물 자리(아군 거점 뒤 집, 적 본진 뒤 성채) 근처의 나무·바위는 그리지 않는다
   const all = [B.allyBase, ...B.bases], hq = B.bases.find(b => b.hq), bld = [];
-  bld.push({ x: B.allyBase.x / T - 0.3, z: B.allyBase.y / T - 4.1, k: B3_RHOUSE[era], s: era === 0 ? 0.3 : 0.23, r: 1.9 });
+  const ae = clamp(S.era | 0, 0, 3); // 아군 거점은 내 시대
+  bld.push({ x: B.allyBase.x / T - 0.3, z: B.allyBase.y / T - 4.1, k: B3_RHOUSE[ae], s: ae === 0 ? 0.3 : 0.23, r: 1.9 });
   if (hq) {
     const k = era >= 2 && RA.has('castle_keep') ? 'castle_keep' : B3_RHOUSE[era];
     bld.push({ x: hq.x / T + 0.4, z: hq.y / T - 4.6, k, s: k === 'castle_keep' ? (era >= 3 ? 0.165 : 0.155) : era === 0 ? 0.32 : 0.26, r: k === 'castle_keep' ? 2.6 : 2.0 });
-    if (k !== 'castle_keep') bld.push({ x: hq.x / T - 2.6, z: hq.y / T - 3.6, k, s: era === 0 ? 0.26 : 0.21, r: 1.6, ry: 0.4 });
+    if (k !== 'castle_keep' && era !== 1) bld.push({ x: hq.x / T - 2.6, z: hq.y / T - 3.6, k, s: era === 0 ? 0.26 : 0.21, r: 1.6, ry: 0.4 }); // 고대: 그 자리에 계단 신전 (battleEra.js)
   }
   let n = 0;
   for (const o of B.obs) {
+    if (o.kind === 'deco') continue;
     const x = o.x / T, z = o.y / T;
     if (bld.some(b => (x - b.x) ** 2 + (z - b.z) ** 2 < b.r * b.r)) continue;
     if (o.kind === 'rock') {
@@ -280,12 +284,15 @@ function b3RealScenery(scen, sown) {
     items[k].push(RA.item({ x, z, ry: o.v * 1.7, s, sy: 0.92 + (o.v % 3) * 0.1, c: tint(o, k), r: 3 }));
   }
   B3.rItems = items; B3.rfX = -99;
-  // 거점 울타리: 부족·고대 = 나무 말뚝, 중세+ = 돌 성벽 (18칸 중 길이 나는 앞뒤는 비움)
-  const wk = era >= 2 && RA.has('wall_stone') ? 'wall_stone' : 'palisade', segL = Math.PI * 2 * 2.7 / 18, list = [];
-  all.forEach((b, bi) => { for (let i = 0; i < 18; i++) { const a = i / 18 * Math.PI * 2; if (Math.abs(angDiff(a, Math.PI)) < 0.4 || Math.abs(angDiff(a, 0)) < 0.4) continue;
-    const s = wk === 'palisade' ? segL / 4.01 : segL / 8, sx = 1.06;
-    list.push({ x: b.x / T + Math.cos(a) * 2.7, z: b.y / T + Math.sin(a) * 2.7, ry: Math.atan2(-Math.cos(a), -Math.sin(a)) + (bi % 2 ? Math.PI : 0), s, sx, sy: wk === 'palisade' ? 0.95 + ((i * 7 + bi) % 3) * 0.06 : 1 }); } });
-  const ring = RA.inst(wk, list, { shadow: true }); if (ring) { scen.add(ring); sown.push({ dispose: ring.userData.dispose }); }
+  // 거점 울타리 (거점마다 그 편의 시대): 부족 = 나무 말뚝, 고대 = 흙벽돌(누런 돌담), 중세 = 돌 성벽, 근세 = 흙 보루(battleEra.js). 18칸 중 길이 나는 앞뒤는 비움
+  const segL = Math.PI * 2 * 2.7 / 18, lists = { palisade: [], wall_stone: [] }, mud = new THREE.Color(1.5, 1.12, 0.72);
+  all.forEach((b, bi) => {
+    const be = bi === 0 ? ae : era; if (be >= 3 && typeof b3EraScenery === 'function') return;
+    const wk = be >= 1 && RA.has('wall_stone') ? 'wall_stone' : 'palisade', list = lists[wk];
+    for (let i = 0; i < 18; i++) { const a = i / 18 * Math.PI * 2; if (Math.abs(angDiff(a, Math.PI)) < 0.4 || Math.abs(angDiff(a, 0)) < 0.4) continue;
+      const s = wk === 'palisade' ? segL / 4.01 : segL / 8, sx = 1.06;
+      list.push({ x: b.x / T + Math.cos(a) * 2.7, z: b.y / T + Math.sin(a) * 2.7, ry: Math.atan2(-Math.cos(a), -Math.sin(a)) + (bi % 2 ? Math.PI : 0), s, sx, sy: wk === 'palisade' ? 0.95 + ((i * 7 + bi) % 3) * 0.06 : be === 1 ? 0.8 : 1, c: be === 1 ? mud : null }); } });
+  for (const wk in lists) { if (!lists[wk].length) continue; const ring = RA.inst(wk, lists[wk], { shadow: true }); if (ring) { scen.add(ring); sown.push({ dispose: ring.userData.dispose }); } }
   for (const b of bld) {
     if (!RA.has(b.k)) continue;
     const g = RA.group(b.k, true); g.scale.setScalar(b.s); g.position.set(b.x, 0, b.z); g.rotation.y = b.ry || 0; scen.add(g);
@@ -466,6 +473,7 @@ function drawBattle3D() {
   b3Hero(H, tm, dt, hx, hz, pose);
   BL.add(hx, hz, 0.45); BL.end();
   if (H.musouT > 0) { PL.add(hx, 0.02, hz, 7, B3_GOLD, 1.4); GL.add(hx, 1.2, hz, 2.6, B3_GOLD, 0.9); }
+  if (typeof b3EraFx === 'function') b3EraFx(GL, PL);
   GL.end(); PL.end();
   b3Grade(H);
   for (const [o, r] of S3.act) if (r.seen !== S3.frame) b3Release(o, r);
@@ -498,6 +506,7 @@ function drawBattle3D() {
     }
   }
   drawShots3D(g, B.shots, pr, ks, 0.75, 0);
+  if (typeof b3EraOverlay === 'function') b3EraOverlay(g, pr, ks, pk);
   for (const o of S3.bases) if (o.hq && o.b.owner === 1) {
     R3D.project(o.b.x / T, 3.5, o.b.y / T, pr); if (!pr.vis) continue;
     g.font = `800 ${Math.round(13 * ks)}px system-ui, sans-serif`; g.lineWidth = 3.5; g.strokeStyle = 'rgba(0,0,0,.8)'; g.strokeText('적 본진', pr.x, pr.y); g.fillStyle = '#ff9a8a'; g.fillText('적 본진', pr.x, pr.y);
@@ -540,6 +549,7 @@ function b3Grade(H) {
   R3D.renderer.toneMappingExposure = R3D.fx && R3D.fx.on ? 1 : 1.1;
   if (R3D.uWin) { R3D.uWin.value = 0.55; R3D.uWinLit.value = 0.55; } // 해 질 녘: 창문 몇 개에 불
   if (R3D.uRim) R3D.uRim.value.setRGB(1.0, 0.72, 0.45).multiplyScalar(0.3);
+  if (typeof b3EraGrade === 'function') b3EraGrade(G); // 시대별 색감 (battleEra.js)
 }
 function b3Hero(H, tm, dt, hx, hz, pose) {
   const S3 = B3, hr = S3.hero, look = S3.heroLook;
