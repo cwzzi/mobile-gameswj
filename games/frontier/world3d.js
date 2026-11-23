@@ -69,16 +69,70 @@ if (uTerrOn > 0.5) {
   normal = normalize((viewMatrix * vec4(gN, 0.0)).xyz);
 }
 #endif`;
+// 사실적 지면 (real3d.js RA.ground: Poly Haven 풀/흙/모래/바위 albedo + normal 512px)
+// 칠한 지면 색(타일 색·영토·물가)은 그대로 두고, 사진 질감을 "평균으로 나눈 밝기·색 변화"로 곱한다 → 풀은 칠한 초록을 따라가서
+// 갈색으로 마른 원본 풀 사진이 초록으로 보이고, 숲 바닥은 흙+풀, 모래·바위는 그 질감. 전장(SPLAT 없음)은 갈색 길에 흙 질감.
+const W3_RG_MAP = `#include <map_fragment>
+vec4 gW = vec4(1.0, 0.0, 0.0, 0.0); vec2 gP = vWP.xz, gQ = gP * uRGs;
+#ifdef USE_MAP
+{
+  float dA = texture2D(uDetail, vUv * uRep * 0.5).r, dB = texture2D(uDetail, vUv * uRep * 0.093 + 0.37).r;
+#ifdef SPLAT
+  gW = texture2D(uSplat, gP / uWorld);
+  gW = clamp(gW * (1.0 + vec4(dB - 0.5, 0.5 - dB, dA - 0.5, dB - 0.5) * 1.6), 0.0, 1.0);
+#else
+  { vec3 c = diffuseColor.rgb; float gr = c.g - max(c.r, c.b) * 0.97; float d = smoothstep(0.015, -0.03, gr); gW = vec4(1.0 - d, 0.0, 0.0, d); }
+#endif
+  gW /= max(dot(gW, vec4(1.0)), 0.001);
+  diffuseColor.rgb *= (0.9 + 0.17 * dA) * (0.93 + 0.14 * dB);
+  if (uRG > 0.5) {
+    vec3 aG = texture2D(uGa, gQ).rgb / max(texture2D(uGa, gQ, 12.0).rgb, vec3(0.02));
+    vec3 aD = texture2D(uDa, gQ * 1.13 + 0.31).rgb / max(texture2D(uDa, gQ, 12.0).rgb, vec3(0.02));
+    vec3 aS = texture2D(uSa, gQ * 0.83 + 0.17).rgb / max(texture2D(uSa, gQ, 12.0).rgb, vec3(0.02));
+    vec3 aR = texture2D(uRa, gQ * 0.61 + 0.53).rgb / max(texture2D(uRa, gQ, 12.0).rgb, vec3(0.02));
+    vec3 t = gW.r * aG + gW.g * aS + gW.b * aR + gW.a * mix(aD, aG, 0.3);
+    t = mix(vec3(dot(t, vec3(0.3, 0.59, 0.11))), t, 0.5); // 사진 고유의 색 차이는 반만 (마른 풀색 빼기)
+    diffuseColor.rgb *= mix(vec3(1.0), clamp(t, 0.25, 2.2), uRGk);
+  }
+  { float l = dot(diffuseColor.rgb, vec3(0.3, 0.59, 0.11)); diffuseColor.rgb = max(mix(vec3(l), diffuseColor.rgb, 1.15), 0.0); }
+}
+#endif`;
+const W3_RG_NRM = `#include <normal_fragment_maps>
+#ifdef USE_MAP
+if (uRGn > 0.5) {
+  vec3 nG = texture2D(uGn, gQ).xyz, nD = texture2D(uDn, gQ * 1.13 + 0.31).xyz, nS = texture2D(uSn, gQ * 0.83 + 0.17).xyz, nR = texture2D(uRn, gQ * 0.61 + 0.53).xyz;
+  vec3 nt = (gW.r * nG + gW.g * nS + gW.b * nR + gW.a * mix(nD, nG, 0.3)) * 2.0 - 1.0;
+  vec3 gN = (vec4(normal, 0.0) * viewMatrix).xyz; // 시점 공간 → 월드
+  gN = normalize(gN + vec3(nt.x, 0.0, nt.y) * vec3(uRGns, 0.0, uRGns));
+  normal = normalize((viewMatrix * vec4(gN, 0.0)).xyz);
+}
+#endif`;
+const W3_RGU = { k: { value: 0.8 }, ns: { value: 0.9 }, nOn: { value: 1 } }; // 질감 세기 · 노멀 세기 · 노멀 켜짐(낮음 품질이면 끔)
+function w3dRealGround() {
+  const G = typeof RA !== 'undefined' && RA.ground;
+  if (!G || !R3D.renderer || R3D.renderer.capabilities.maxTextures < 14) return null;
+  return G;
+}
 function w3dGroundMat(tex, rep, splat) {
   const m = new THREE.MeshLambertMaterial({ map: tex });
-  const det = w3dDetailTex(), terr = w3dTerrTex();
+  const det = w3dDetailTex(), RG = w3dRealGround(), terr = RG ? null : w3dTerrTex();
   m.onBeforeCompile = sh => {
-    Object.assign(sh.uniforms, { uDetail: { value: det }, uRep: { value: rep }, uTerr: { value: terr.tex }, uTerrOn: terr.on, uSplat: { value: splat || null }, uWorld: { value: new THREE.Vector2(W, H) } });
+    Object.assign(sh.uniforms, { uDetail: { value: det }, uRep: { value: rep }, uSplat: { value: splat || null }, uWorld: { value: new THREE.Vector2(W, H) } });
     sh.vertexShader = 'varying vec3 vWP;\n' + sh.vertexShader.replace('#include <project_vertex>', '#include <project_vertex>\n  vWP = (modelMatrix * vec4(transformed, 1.0)).xyz;');
-    sh.fragmentShader = (splat ? '#define SPLAT\n' : '') + 'varying vec3 vWP;\nuniform sampler2D uDetail, uTerr, uSplat;\nuniform float uRep, uTerrOn;\nuniform vec2 uWorld;\n' +
-      sh.fragmentShader.replace('#include <map_fragment>', W3_GROUND_MAP).replace('#include <normal_fragment_maps>', W3_GROUND_NRM);
+    if (RG) {
+      const nOn = { get value() { return RG.non.value * W3_RGU.nOn.value; } };
+      Object.assign(sh.uniforms, { uRG: RG.on, uRGn: nOn, uRGs: { value: 0.42 }, uRGk: W3_RGU.k, uRGns: W3_RGU.ns,
+        uGa: { value: RG.grass.a.tex }, uDa: { value: RG.dirt.a.tex }, uSa: { value: RG.sand.a.tex }, uRa: { value: RG.rock.a.tex },
+        uGn: { value: RG.grass.n.tex }, uDn: { value: RG.dirt.n.tex }, uSn: { value: RG.sand.n.tex }, uRn: { value: RG.rock.n.tex } });
+      sh.fragmentShader = (splat ? '#define SPLAT\n' : '') + 'varying vec3 vWP;\nuniform sampler2D uDetail, uSplat, uGa, uDa, uSa, uRa, uGn, uDn, uSn, uRn;\nuniform float uRep, uRG, uRGn, uRGs, uRGk, uRGns;\nuniform vec2 uWorld;\n' +
+        sh.fragmentShader.replace('#include <map_fragment>', W3_RG_MAP).replace('#include <normal_fragment_maps>', W3_RG_NRM);
+    } else {
+      Object.assign(sh.uniforms, { uTerr: { value: terr.tex }, uTerrOn: terr.on });
+      sh.fragmentShader = (splat ? '#define SPLAT\n' : '') + 'varying vec3 vWP;\nuniform sampler2D uDetail, uTerr, uSplat;\nuniform float uRep, uTerrOn;\nuniform vec2 uWorld;\n' +
+        sh.fragmentShader.replace('#include <map_fragment>', W3_GROUND_MAP).replace('#include <normal_fragment_maps>', W3_GROUND_NRM);
+    }
   };
-  m.customProgramCacheKey = () => 'w3ground2' + (splat ? 'S' : '');
+  m.customProgramCacheKey = () => 'w3ground3' + (splat ? 'S' : '') + (RG ? 'R' : '');
   return m;
 }
 // 물: 노멀맵 2겹(흐름) + 하늘 반사(프레넬) + 해/달 반짝임 + 가까운 불빛 8개의 반사(물 위로 길게 번지는 빛)
@@ -249,6 +303,8 @@ function w3dInit() {
     frustum: new THREE.Frustum(), pm: new THREE.Matrix4(), chunks: [], dyn: new Map(), pool: new Map(), frame: 0,
     arrows: [], S: null, tx: 0, tz: 0, lastT: performance.now(), dist: 30, look: new WeakMap() };
   R3D.onResize.push(w3dResize); w3dResize();
+  // 품질이 바뀌면 숲을 다시 (낮음: 나무 수↓ · 나무 그림자 없음)
+  if (R3D.fx && R3D.fx.onChange) R3D.fx.onChange.push(() => { if (W3) for (const c of W3.chunks) c.pDirty = true; });
 }
 function w3dResize() {
   const c = W3.cam; c.aspect = VW / VH;
@@ -439,9 +495,12 @@ function w3dBuildProps(c) {
   w3dFreeProps(c);
   const L = { round: [], fruit: [], pine: [], mA: [], mB: [], nug: [], tuft: [], rock: [] };
   const AP = typeof A3D !== 'undefined' && A3D.ready;
+  const RL = w3dRealOK() ? { tree_broadleaf_a: [], tree_broadleaf_b: [], tree_conifer: [], bush: [], rock_a: [], rock_b: [] } : null;
+  const low = R3D.quality && R3D.quality() === 'low';
   const x0 = c.cx * CK, y0 = c.cz * CK;
   for (let y = y0; y < y0 + CK; y++) for (let x = x0; x < x0 + CK; x++) {
     const i = y * W + x, t = S.tiles[i], h = hash2(x, y);
+    if (RL && w3dRealProps(RL, t, x, y, i, h, low)) continue; // 사실적 나무·바위·덤불 (산 봉우리·풀 포기는 아래에서 그대로)
     if (t === FOREST) {
       const n = Math.min(4, S.hp[i]), pine = hash2(x, y + 99) > 0.62;
       for (let k = 0; k < n; k++) {
@@ -486,12 +545,80 @@ function w3dBuildProps(c) {
     m.castShadow = k !== 'tuft'; m.receiveShadow = !tree; m.frustumCulled = false;
     grp.add(m);
   }
+  // 사실적 모델은 청크에 직접 넣지 않고 행렬만 모아 둔다 → w3dRealFill 이 화면 안 것만 공용 인스턴스 풀에 채운다
+  c.real = null;
+  if (RL) { c.real = {}; for (const k in RL) if (RL[k].length) c.real[k] = RL[k].map(o => RA.item(o)); }
+  W3.realDirty = true;
   c.props = grp; c.pDirty = false; W3.scene.add(grp);
+}
+// 보이는 청크의 사실적 나무·바위·덤불 중 화면(+그림자 여유) 안의 것만 모델별 InstancedMesh 하나씩에 채운다
+const W3_RKINDS = ['tree_broadleaf_a', 'tree_broadleaf_b', 'tree_conifer', 'bush', 'rock_a', 'rock_b'];
+const w3dRealBuf = {};
+function w3dRealFill() {
+  if (!w3dRealOK()) return;
+  const lowQ = R3D.quality && R3D.quality() === 'low';
+  if (!W3.rpool || W3.rpoolV !== RA.ver || W3.rpoolLow !== lowQ) { // 낮음 품질은 잎 카드 절반짜리 나무
+    if (W3.rpool) for (const k in W3.rpool) W3.rpool[k] && W3.rpool[k].dispose();
+    W3.rpool = {}; for (const k of W3_RKINDS) W3.rpool[k] = RA.pool(k, W3.scene, lowQ); W3.rpoolV = RA.ver; W3.rpoolLow = lowQ; W3.realDirty = true;
+  }
+  const moved = Math.abs(W3.tx - (W3.rfX || -99)) + Math.abs(W3.tz - (W3.rfZ || -99)) > 0.15;
+  if (!moved && !W3.realDirty) return;
+  W3.rfX = W3.tx; W3.rfZ = W3.tz; W3.realDirty = false;
+  const low = R3D.quality && R3D.quality() === 'low', sph = w3dSphere, F = W3.frustum;
+  const cnt = {}; for (const k of W3_RKINDS) { cnt[k] = 0; if (!w3dRealBuf[k]) w3dRealBuf[k] = []; }
+  for (const c of W3.chunks) {
+    if (!c.real || !c.props || !c.props.visible) continue;
+    for (const k in c.real) {
+      const L = c.real[k], buf = w3dRealBuf[k], rad = k === 'tree_conifer' || k.startsWith('tree') ? (low ? 1.2 : 2.0) : 0.8;
+      for (const e of L) { sph.center.set(e.x, 0.6, e.z); sph.radius = rad; if (F.intersectsSphere(sph)) buf[cnt[k]++] = e; }
+    }
+  }
+  for (const k of W3_RKINDS) { const P = W3.rpool[k]; if (P) P.fill(w3dRealBuf[k], cnt[k], !low && k !== 'bush', k === 'rock_a' || k === 'rock_b'); }
+}
+// ---------- 사실적 환경 모델 (real3d.js) ----------
+function w3dRealOK() { return typeof RA !== 'undefined' && RA.ok; }
+const W3_TREE_SPOTS = [[], [[0.5, 0.5]], [[0.3, 0.36], [0.7, 0.66]], [[0.28, 0.3], [0.74, 0.38], [0.46, 0.76]]];
+const W3_RTINT = { tree_broadleaf_a: new THREE.Color(0.86, 1.06, 0.72), tree_broadleaf_b: new THREE.Color(0.8, 1.0, 0.74), tree_conifer: new THREE.Color(0.82, 0.98, 0.86), bush: new THREE.Color(0.86, 1.04, 0.72) };
+// 타일 하나의 숲/바위/덤불을 목록에 넣는다. 처리했으면 true (그 칸의 예전 나무·바위는 건너뜀)
+function w3dRealProps(RL, t, x, y, i, h, low) {
+  const col = (k, v, d) => { const c = new THREE.Color(); const b = 0.88 + v * 0.22; c.setRGB(b, b * (0.97 + ((v * 7) % 1) * 0.06), b * (0.95 + ((v * 13) % 1) * 0.08)); if (W3_RTINT[k]) c.multiply(W3_RTINT[k]); if (d) c.multiplyScalar(d); return c; };
+  if (t === FOREST) {
+    const hp = Math.max(0, Math.min(4, S.hp[i])); // 4 → 나무 3, 3 → 2 + 덤불, 2 → 2, 1 → 1 (벌목하면 눈에 띄게 줄어든다)
+    const n = low ? [0, 1, 1, 2, 2][hp] : [0, 1, 2, 2, 3][hp];
+    const con = hash2(x >> 2, (y >> 2) + 555) > 0.56, flip = hash2(x + 3, y + 11) > 0.5, spots = W3_TREE_SPOTS[n];
+    for (let k = 0; k < n; k++) {
+      const r = hash2(x + k * 13, y + 5), hk = hash2(x + k * 7, y + 3);
+      const kind = hk < (con ? 0.78 : 0.14) ? 'tree_conifer' : hash2(x * 3 + k, y + 17) < 0.5 ? 'tree_broadleaf_a' : 'tree_broadleaf_b';
+      const sp = spots[k], sx = flip ? 1 - sp[0] : sp[0];
+      const s = (kind === 'tree_conifer' ? 0.092 : 0.1) * (0.84 + hash2(x * 3 + k, y) * 0.36) * (n === 1 ? 1.12 : 1);
+      RL[kind].push({ x: x + sx + (r - 0.5) * 0.16, z: y + sp[1] + (hash2(x, y + k * 11) - 0.5) * 0.16, ry: r * 6.28, s, sy: 0.95 + hash2(x, y * 3 + k) * 0.25, c: col(kind, r, 0.98) });
+    }
+    if (!low && hp === 3) RL.bush.push({ x: x + 0.5 + (h - 0.5) * 0.3, z: y + 0.55, ry: h * 6.28, s: 0.16, sy: 1.1, c: col('bush', h) });
+    return true;
+  }
+  if ((t === MOUNTAIN) && h < 0.38) { // 산자락에 바위 하나
+    const k = h < 0.2 ? 'rock_a' : 'rock_b', a = h * 40;
+    RL[k].push({ x: x + 0.5 + Math.sin(a) * 0.42, z: y + 0.5 + Math.abs(Math.cos(a)) * 0.4, ry: a, s: k === 'rock_a' ? 0.34 + h : 0.5 + h, sy: 0.9, c: col(null, h) });
+    return false; // 봉우리는 그대로 그린다
+  }
+  if ((t === GRASS || t === SAND) && owner[i] < 0) {
+    const h2 = hash2(x + 17, y + 31), h3 = hash2(x + 5, y + 71);
+    if (h2 > (t === SAND ? 0.95 : 0.975)) { // 들판 바위
+      const k = h3 < 0.5 ? 'rock_a' : 'rock_b';
+      RL[k].push({ x: x + 0.3 + h3 * 0.4, z: y + 0.3 + hash2(x + 9, y) * 0.4, ry: h3 * 6, s: (k === 'rock_a' ? 0.22 : 0.34) * (0.8 + h2 * 0.6), sy: 1, c: col(null, h3) });
+      return true;
+    }
+    if (t === GRASS && h2 > 0.3 && h2 < (low ? 0.32 : 0.345)) { // 덤불
+      RL.bush.push({ x: x + 0.25 + h3 * 0.5, z: y + 0.25 + hash2(x, y + 9) * 0.5, ry: h2 * 60, s: 0.12 + h3 * 0.08, sy: 0.9 + h2, c: col('bush', h3) });
+      return false; // 풀 포기도 같이
+    }
+  }
+  return false;
 }
 const W3_TREE_TINT = { pine: new THREE.Color(0.55, 0.78, 0.5), round: new THREE.Color(0.8, 0.95, 0.5), fruit: new THREE.Color(1.0, 0.85, 0.5) };
 function w3dFreeProps(c) {
   if (!c.props) return;
-  W3.scene.remove(c.props); for (const m of c.props.children) m.dispose(); c.props = null;
+  W3.scene.remove(c.props); for (const m of c.props.children) m.dispose(); c.props = null; c.real = null; W3.realDirty = true;
 }
 
 // ---------- 건물 모델 ----------
@@ -928,13 +1055,15 @@ function drawWorld3D() {
     snap.set(owner);
   }
   // CC0 모델이 막 준비됐으면: 숲/산 다시 만들고, 건물·사람은 새 모델로 바꿔 끼운다
-  const AV = typeof A3D !== 'undefined' ? A3D.ver : 0;
+  const AV = (typeof A3D !== 'undefined' ? A3D.ver : 0) * 100 + (typeof RA !== 'undefined' ? RA.ver : 0);
   if (W3.aver !== AV) {
     W3.aver = AV;
     for (const c of W3.chunks) c.pDirty = true;
     for (const [o, r] of W3.dyn) w3dDrop(o, r);
     W3.pool.clear();
   }
+  // 사실적 지면 텍스처를 쓸지 바뀌면(모델 로딩 실패 → 예전 지면) 지면 메시를 다시 만든다
+  { const rg = !!w3dRealGround(); if (W3.rgOn !== rg) { W3.rgOn = rg; for (const c of W3.chunks) { w3dFreeGround(c); c.gDirty = true; c.painted = false; } } }
   // 청크: 보이는 것만 만들고 그린다
   let budget = 3;
   for (const c of W3.chunks) {
@@ -945,13 +1074,17 @@ function drawWorld3D() {
       if (!c.props || (c.pDirty && (!c.propsAV || c.propsAV === AV || budget-- > 0))) { w3dBuildProps(c); c.propsAV = AV; }
     }
     if (c.ground) c.ground.visible = vis;
-    if (c.props) c.props.visible = vis;
+    if (c.props) { if (c.props.visible !== vis) W3.realDirty = true; c.props.visible = vis; }
   }
+  // 채워 둔 사실적 숲·바위 (화면 안 것만)
+  w3dRealFill();
   // 벌목 흔들림
   let chopI = -1, chopV = 0;
   for (const [i, v] of chopFx) if (S.tiles[i] === FOREST && v > chopV) { chopV = v; chopI = i; }
   if (chopI >= 0) W3.uChop.value.set(chopI % W + 0.5, ((chopI / W) | 0) + 0.5, chopV * 4); else W3.uChop.value.z = 0;
   W3.water.material.uniforms.uTime.value = tm;
+  if (typeof RA !== 'undefined' && RA.U) { RA.U.time.value = tm; RA.U.chop.value.copy(W3.uChop.value); }
+  W3_RGU.nOn.value = R3D.quality && R3D.quality() === 'low' ? 0 : 1;
 
   // 동적 오브젝트
   const bars = [], labels = [], lights = [], coins = [];
@@ -962,6 +1095,7 @@ function drawWorld3D() {
     const x = t.x + 0.5, z = t.y + 0.5;
     if (!w3dInView(x, z, 3)) continue;
     const col = TOWN_COLORS[t.id % TOWN_COLORS.length];
+    if (w3dRealOK() && w3dRealTownDraw(t, x, z, col, AV, labels, lights, LE, lampN, tm)) continue;
     const r = w3dUse(t, 'town|' + col + '|' + AV, () => {
       const group = new THREE.Group(), main = new THREE.Mesh(undefined, R3D.mats.vc), glow = new THREE.Mesh(undefined, R3D.mats.glow), flag = w3dFlag(col);
       main.castShadow = main.receiveShadow = true; group.add(main, glow, flag.mesh);
@@ -997,8 +1131,10 @@ function drawWorld3D() {
     const col = TOWN_COLORS[b.town % TOWN_COLORS.length];
     // CC0 모델이 있으면 그걸(집은 두 가지 모양), 없거나 모르는 종류면 절차적 모델
     const btype = b.type === 'house' && hash2(b.x, b.y) > 0.5 ? 'house2' : b.type;
-    const ab = typeof A3D !== 'undefined' ? A3D.building(btype) : null;
-    const r = w3dUse(b, 'b|' + btype + (ab ? '|a' : b.type === 'tower' ? col : ''), () => {
+    const rb = w3dRealBld(b);
+    const ab = !rb && typeof A3D !== 'undefined' ? A3D.building(btype) : null;
+    const r = w3dUse(b, rb ? 'rb|' + rb + '|' + AV : 'b|' + btype + (ab ? '|a' : b.type === 'tower' ? col : ''), () => {
+      if (rb) return w3dRealBldMake(b, rb);
       const group = new THREE.Group();
       if (ab) {
         const main = new THREE.Mesh(ab.geo, A3D.mat); main.castShadow = main.receiveShadow = true; group.add(main);
@@ -1011,7 +1147,7 @@ function drawWorld3D() {
       let flag = null; if (bg.flag) { flag = w3dFlag(col, 0.3, 0.19); flag.mesh.position.set(...bg.flag); group.add(flag.mesh); }
       return { group, flag, sc: W3_BSCALE[b.type] || [1, 1, 1] };
     });
-    r.m.group.position.set(x, 0, z); r.m.group.scale.set(...r.m.sc);
+    r.m.group.position.set(x, 0, z); r.m.group.scale.set(...r.m.sc); if (r.m.ry !== undefined) r.m.group.rotation.y = r.m.ry;
     if (r.m.flag) w3dWave(r.m.flag, tm);
     if (b.type === 'tower') lights.push({ x, y: 1.75, z: z + 0.3, col: LE.col, k: 2.6, glow: 0.7, pool: 1.7, fire: S.era === 0, real: true, r: 5 });
     else if (W3_WINB[b.type] && hash2(b.x * 3 + 1, b.y * 5 + 2) < litFrac) lights.push({ x: x + 0.05, y: 0.45, z: z + 0.5, col: W3_WIN, k: 1.5, glow: 0.42, pool: 0.95 });
@@ -1170,6 +1306,91 @@ function drawWorld3D() {
   $('hint').style.display = act ? 'block' : 'none';
 }
 
+
+// ---------- 사실적 건물 · 마을 (real3d.js) ----------
+const W3_RHOUSE = ['hut_tribal', 'house_ancient', 'house_medieval', 'house_earlymodern'];
+// 시대별 집 크기: 폭(타일) · 높이 배율 (사람이 크게 그려지는 게임이라 낮은 집은 조금 높여 읽히게)
+const W3_RHFIT = { hut_tribal: [0.98, 1.12], house_ancient: [1.06, 1.3], house_medieval: [1.0, 1.1], house_earlymodern: [1.04, 1.06] };
+function w3dRealBld(b) {
+  if (!w3dRealOK()) return null;
+  if (b.type === 'house') { const k = W3_RHOUSE[clamp(S.era | 0, 0, 3)]; return RA.has(k) ? k : null; }
+  if (b.type === 'farm') return RA.has('farm_field') ? 'farm_field' : null;
+  return null;
+}
+function w3dRealBldMake(b, k) {
+  const group = new THREE.Group(), body = RA.group(k, true);
+  const h = hash2(b.x * 3 + 7, b.y * 5 + 1);
+  if (k === 'farm_field') {
+    const s = RA.fit(k, 0.98); body.scale.set(s, s * 3.2, s); // 작물 카드(0.3m)가 위에서도 보이게 키를 키움
+    group.add(body);
+    return { group, flag: null, sc: [1, 1, 1], ry: h > 0.5 ? 0 : Math.PI };
+  }
+  const f = W3_RHFIT[k] || [1, 1], s = RA.fit(k, f[0]);
+  body.scale.set(s, s * f[1], s); group.add(body);
+  // 집은 대체로 남쪽(카메라 쪽)을 보고, 조금씩 틀어 줄이 덜 반듯하게. 부족 오두막은 아무 방향
+  const ry = k === 'hut_tribal' ? h * 6.28 : (h - 0.5) * 0.3 + (h > 0.85 ? Math.PI / 2 : 0);
+  return { group, flag: null, sc: [1, 1, 1], ry };
+}
+// 마을 중심: 시대 집(크게) 또는 성채(Lv3+ · 고대 이후) + 울타리(부족·고대 = 나무 말뚝, 중세+ = 돌 성벽) + 우물 · 모닥불
+const w3dPoleGeo = () => R3D.cached('w3pole6', () => R3D.merge([{ g: R3D.prim.cyl(0.018, 0.018, 0.62, 4), c: '#3a2a1a', p: [0, 0.31, 0] }]));
+function w3dRealTown(lv, era) {
+  const g = new THREE.Group(), disp = [];
+  let top, fx = 0, fz = 0, camp = null;
+  const keep = era >= 1 && lv >= 3 && RA.has('castle_keep');
+  if (keep) {
+    const s = [0, 0, 0, 0.082, 0.092, 0.102][lv] * (era >= 3 ? 1.06 : 1), k = RA.group('castle_keep', true);
+    k.scale.setScalar(s); k.position.z = -0.22; g.add(k);
+    top = RA.height('castle_keep') * s; fz = -0.22;
+    const b = RA.box('castle_keep'); // 깃대: 가장 높은 탑 위 (상자 가운데)
+    fx = (b.min.x + b.max.x) / 2 * s; fz += (b.min.z + b.max.z) / 2 * s;
+  } else {
+    const hk = W3_RHOUSE[clamp(era, 0, 3)], f = W3_RHFIT[hk] || [1, 1], s = RA.fit(hk, 1.3 + lv * 0.1);
+    const hm = RA.group(hk, true); hm.scale.set(s, s * f[1], s); hm.position.z = -0.12; g.add(hm);
+    top = RA.height(hk) * s * f[1]; fz = -0.12;
+  }
+  if (era <= 1 && RA.has('palisade')) { // 나무 말뚝 고리 (앞쪽 출입구)
+    const R = 1.3 + lv * 0.035, sp = 0.13, n = Math.round(Math.PI * 2 * R / (4.01 * sp)), list = [];
+    for (let k = 0; k < n; k++) {
+      const a = (k + 0.5) / n * Math.PI * 2; if (Math.cos(a) > 0.95) continue;
+      list.push({ x: Math.sin(a) * R, z: Math.cos(a) * R, ry: a, s: sp, sx: Math.PI * 2 * R / n / (4.01 * sp) * 1.05, sy: 0.95 + hash2(k, lv) * 0.12 });
+    }
+    const pi = RA.inst('palisade', list, { shadow: true }); if (pi) { g.add(pi); disp.push(pi); }
+  } else if (era >= 2 && RA.has('wall_stone')) { // 돌 성벽 (네모, 앞쪽 가운데 성문 자리 비움)
+    const hs = 1.36, sw = 0.088 + lv * 0.004, side = hs * 2 + 0.2, n = Math.max(3, Math.round(side / (8 * sw)) | 1), seg = side / n, list = [];
+    for (let k = 0; k < n; k++) {
+      const u = -side / 2 + (k + 0.5) * seg, sx = seg / (8 * sw) * 1.02;
+      if (k !== (n - 1) / 2) list.push({ x: u, z: hs, ry: 0, s: sw, sx });
+      list.push({ x: u, z: -hs, ry: Math.PI, s: sw, sx });
+      list.push({ x: -hs, z: u, ry: -Math.PI / 2, s: sw, sx });
+      list.push({ x: hs, z: u, ry: Math.PI / 2, s: sw, sx });
+    }
+    const wi = RA.inst('wall_stone', list, { shadow: true }); if (wi) { g.add(wi); disp.push(wi); }
+  }
+  if (RA.has('well')) { const w = RA.group('well', true); w.scale.setScalar(0.17); w.position.set(0.92, 0, 0.8); w.rotation.y = -0.5; g.add(w); }
+  if (era <= 2 && RA.has('campfire')) { const c = RA.group('campfire', false); c.scale.setScalar(0.24); c.position.set(-0.88, 0, 0.82); g.add(c); camp = [-0.88, 0.82]; }
+  const pole = new THREE.Mesh(w3dPoleGeo(), R3D.mats.vc); pole.position.set(fx, top - 0.06, fz); pole.castShadow = true; g.add(pole);
+  return { group: g, top: top + 0.6, flag: [fx + 0.02, top + 0.53, fz], camp, dispose() { for (const d of disp) d.userData.dispose(); } };
+}
+function w3dRealTownDraw(t, x, z, col, AV, labels, lights, LE, lampN, tm) {
+  if (!RA.has(W3_RHOUSE[clamp(S.era | 0, 0, 3)])) return false;
+  const r = w3dUse(t, 'rtown|' + col + '|' + AV, () => { const group = new THREE.Group(), flag = w3dFlag(col); group.add(flag.mesh); return { group, flag, body: null, key: '' }; });
+  const m = r.m, lv = townLevel(t), key = lv + '|' + S.era;
+  if (m.key !== key) {
+    if (m.body) { m.group.remove(m.body.group); m.body.dispose(); }
+    m.body = w3dRealTown(lv, clamp(S.era | 0, 0, 3)); m.group.add(m.body.group);
+    m.flag.mesh.position.set(...m.body.flag); m.top = m.body.top; m.key = key;
+  }
+  m.group.position.set(x, 0, z); w3dWave(m.flag, tm);
+  labels.push({ x, y: m.top + 0.3, z, s: townLabel(t), war: S.war && S.war.town === t.id });
+  const LM = W3.lamps[LE.k];
+  for (const [lx, lz] of w3dTownLamps(t, m)) {
+    if (lampN[LE.k] < 160) { w3dM4.makeTranslation(lx, 0, lz); LM.setMatrixAt(lampN[LE.k]++, w3dM4); }
+    lights.push({ x: lx + LE.dx, y: LE.y, z: lz, col: LE.col, k: LE.i, glow: 0.6, pool: 1.6, fire: LE.fire, real: true, r: 5 });
+  }
+  if (m.body.camp) lights.push({ x: x + m.body.camp[0], y: 0.28, z: z + m.body.camp[1], col: W3_FIRE, k: 3.4, glow: 0.75, pool: 1.9, fire: true, real: true, r: 5 });
+  lights.push({ x, y: Math.min(1.6, m.top * 0.4), z: z + 0.7, col: W3_WIN, k: 0.8, glow: 0, pool: 2.0 + lv * 0.2, real: true, r: 4 + lv * 0.5 });
+  return true;
+}
 
 // --- tap-to-act / resource buildings ---
 // 벌목소·채석장·금광용 간단한 절차적 모델 (다른 모델이 없을 때 w3dBuildingGeo가 사용)

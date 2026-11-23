@@ -33,3 +33,19 @@ CC0 이므로 출처 표기 의무는 없지만 감사의 뜻으로 밝혀 둡�
 - ACES 톤매핑 근사식(`RRTAndODTFit`, 입출력 행렬): three.js r149 셰이더 청크와 같은 식 (MIT, three.js authors)
 - FXAA: Timothy Lottes(NVIDIA)의 FXAA 콘솔판 알고리즘을 짧게 다시 쓴 것
 - 블룸 블러: 듀얼 필터(Kawase) 다운/업샘플 — Marius Bjørge, "Bandwidth-Efficient Rendering" (SIGGRAPH 2015) 의 기법
+
+## 사실적 환경 모델 (`real/`, 1차)
+
+`real/` 의 나무·덤불·바위·집(부족/고대/중세/근세)·성채·성벽·목책·밭·우물·모닥불과 `real/ground/` 지면 질감은 Blender 로 만든 모델에
+**Poly Haven** 스캔 재질(모두 **CC0 1.0**, https://polyhaven.com/license)을 구워 넣은 것입니다. 모델별 원본 목록은 `real/CREDITS.md`.
+
+휴대폰용으로 줄인 내용 (원본 12 MB → 약 2.2 MB, 원본은 저장소 밖에 보관):
+
+- 텍스처 1024 → 512px (나무 잎 아틀라스 PNG 는 알파 유지, 투명 칸은 잎 평균색으로 채워 먼 밉맵의 흰 테두리 방지), ORM 은 256px
+- 화면에서 작은 소품(우물·모닥불·밭·덤불·목책·바위)은 256px
+- `rock_a` / `rock_b` 는 meshoptimizer 로 1400/1199 → 349/299 삼각형으로 단순화
+- 지면 `ground/*` 512px (ORM 256px)
+- 도구: glTF-Transform 3.10 + sharp (MIT/Apache-2.0)
+
+게임에서 쓰는 방식 (`real3d.js`): 재질은 Lambert(+ '높음' 품질에서만 큰 건물 노멀맵)로 바꾸고, `window` 재질은 밤에 시대·인구 비율만큼 따뜻하게 켜지며,
+나무는 바람에 흔들리고 '낮음' 품질에서는 잎 카드를 절반만 쓴다. 불러오기에 실패하거나 `?noassets`(또는 `?noreal`)면 KayKit/절차적 모델로 그린다.

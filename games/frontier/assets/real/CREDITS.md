@@ -14,7 +14,7 @@ Made in Blender 5.2 with headless Python generator scripts. Geometry was modelle
 
 ## Models
 
-| file | tris | KB | size (m) | Poly Haven sources (CC0) |
+| file | tris | KB (original) | size (m) | Poly Haven sources (CC0) |
 |---|---|---|---|---|
 | bush.glb | 260 | 369.8 | 2.76 × 2.37 × 1.44 | [island_tree_02](https://polyhaven.com/a/island_tree_02) (leaf scans), [bark_brown_02](https://polyhaven.com/a/bark_brown_02) |
 | campfire.glb | 317 | 138.7 | 1.52 × 1.54 × 0.57 | [rock_surface](https://polyhaven.com/a/rock_surface), [bark_brown_02](https://polyhaven.com/a/bark_brown_02) |
@@ -43,3 +43,12 @@ Made in Blender 5.2 with headless Python generator scripts. Geometry was modelle
 | rock | rock_albedo.jpg, rock_normal.jpg (OpenGL, +Y), rock_orm.jpg (R=AO, G=rough, B=metal) | [aerial_rocks_02](https://polyhaven.com/a/aerial_rocks_02) |
 
 Generator scripts and .blend files are kept outside the repo, on the machine that built them (`%USERPROFILE%rontier-blenderatch1`).
+
+## Game build (phone-sized copies in this folder)
+
+The files here are the downscaled game copies; the originals (12 MB) are kept outside the repo.
+- Textures 1024 → 512 px (ORM → 256 px). Small props (well, campfire, farm_field, bush, palisade, rocks) → 256 px.
+- Leaf / crop alpha atlases stay lossless RGBA PNG; fully transparent texels are filled with the mean leaf colour (smaller file, no pale mip fringes).
+- `rock_a` / `rock_b` simplified with meshoptimizer: 1400 → 349 and 1199 → 299 triangles.
+- Ground textures → 512 px (ORM 256 px).
+- Current sizes (KB): bush 52 · campfire 68 · castle_keep 158 · farm_field 95 · house_ancient 105 · house_earlymodern 211 · house_medieval 170 · hut_tribal 92 · palisade 76 · rock_a 47 · rock_b 43 · tree_broadleaf_a 221 · tree_broadleaf_b 204 · tree_conifer 149 · wall_stone 112 · well 52. Total with ground ≈ 2.2 MB.

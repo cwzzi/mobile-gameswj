@@ -1,6 +1,6 @@
 'use strict';
 // ===== assets3d.js: CC0 3D 모델(glTF) 비동기 로딩 + 게임용 변환 =====
-// 출처/라이선스: assets/CREDITS.md (KayKit by Kay Lousberg, CC0 1.0)
+// 출처/라이선스: assets/CREDITS.md (KayKit by Kay Lousberg, CC0 1.0) · assets/real 은 real3d.js
 //
 // 게임은 처음부터 절차적(로우폴리) 모델로 바로 돌아가고, 여기서 .glb 를 뒤에서 불러와 다 되면 바꿔 끼운다.
 // 실패하면 조용히 절차적 모델을 계속 쓴다.  ?noassets 를 붙이면 모델을 아예 안 불러온다(비교/디버그용).
@@ -519,15 +519,20 @@ const A3D = (() => {
   ];
   A.start = () => {
     if (A.started) return; A.started = true;
-    if (/[?&]noassets\b/.test(location.search)) { A.done = true; return; }
+    if (/[?&]noassets\b/.test(location.search)) { A.done = true; if (typeof RA !== 'undefined') RA.done = true; return; }
     const t0 = performance.now();
     const loader = new THREE.GLTFLoader();
-    const prog = new Array(FILES.length).fill(0);
-    let n = 0, failed = false;
-    const upd = () => showUI(`🏰 3D 모델 불러오는 중… ${Math.round(prog.reduce((a, b) => a + b, 0) / FILES.length * 100)}%`);
+    // 사실적 환경 모델(real3d.js, assets/real)도 같은 줄에서 불러온다 (캐릭터 다음). 실패해도 KayKit/절차적 모델로 계속
+    const RL = typeof RA !== 'undefined' && RA.files ? (RA.begin(), RA.files) : [];
+    const ALL = FILES.concat(RL.map(([f, use]) => [f, use, true, 'real']));
+    const prog = new Array(ALL.length).fill(0);
+    let n = 0, failed = false, realLeft = RL.length;
+    const upd = () => showUI(`🏰 3D 모델 불러오는 중… ${Math.round(prog.reduce((a, b) => a + b, 0) / ALL.length * 100)}%`);
     upd();
     const charsLeft = new Set(FILES.slice(1).map(f => f[0]));
-    const optional = new Set(FILES.filter(f => f[2]).map(f => f[0]));
+    const optional = new Set(ALL.filter(f => f[2]).map(f => f[0]));
+    const realDone = () => { if (--realLeft === 0 && typeof RA !== 'undefined') RA.finish(); };
+    if (!RL.length && typeof RA !== 'undefined') RA.finish();
     const finish = () => {
       A.done = true; A.ms = Math.round(performance.now() - t0);
       if (failed) hideUI(); else hideUI('✨ 3D 모델 적용 완료');
@@ -535,18 +540,20 @@ const A3D = (() => {
     // 동시에 3개씩
     let next = 0;
     const one = () => {
-      const i = next++; if (i >= FILES.length) return;
-      const [f, use] = FILES[i];
+      const i = next++; if (i >= ALL.length) return;
+      const [f, use, , kind] = ALL[i];
       loader.load(BASE + f, gltf => {
-        try { use(gltf); prog[i] = 1; } catch (e) { console.warn('asset ingest failed', f, e); failed = true; A.err = String(e); }
-        if (i > 0) { charsLeft.delete(f); if (!charsLeft.size && !failed && clips) { A.chars = true; A.ver++; } }
+        try { use(gltf); prog[i] = 1; } catch (e) { console.warn('asset ingest failed', f, e); if (kind === 'real') RA.fail(f, e); else { failed = true; A.err = String(e); } }
+        if (kind === 'real') realDone();
+        else if (i > 0) { charsLeft.delete(f); if (!charsLeft.size && !failed && clips) { A.chars = true; A.ver++; } }
         upd();
-        if (++n === FILES.length) { A.ok = !failed; finish(); } else one();
+        if (++n === ALL.length) { A.ok = !failed; finish(); } else one();
       }, e => { if (e.total) { prog[i] = e.loaded / e.total * 0.95; A.bytes = Math.max(A.bytes, 0); } upd(); }, e => {
         console.warn('asset load failed', f, e && e.message);
-        if (optional.has(f)) { charsLeft.delete(f); if (!charsLeft.size && !failed && clips) { A.chars = true; A.ver++; } }
+        if (kind === 'real') { RA.fail(f, e); realDone(); }
+        else if (optional.has(f)) { charsLeft.delete(f); if (!charsLeft.size && !failed && clips) { A.chars = true; A.ver++; } }
         else { failed = true; A.err = String(e && e.message || e); }
-        if (++n === FILES.length) finish(); else one();
+        if (++n === ALL.length) { A.ok = !failed; finish(); } else one();
       });
     };
     one(); one(); one();
@@ -554,7 +561,7 @@ const A3D = (() => {
   // R3D.init 성공 시 자동 시작 (main.js 수정 없이)
   if (typeof R3D !== 'undefined' && R3D.init) {
     const init0 = R3D.init;
-    R3D.init = () => { const ok = init0(); if (ok) { try { A.start(); } catch (e) { console.warn(e); A.done = true; } } else A.done = true; return ok; };
+    R3D.init = () => { const ok = init0(); if (ok) { try { A.start(); } catch (e) { console.warn(e); A.done = true; if (typeof RA !== 'undefined') RA.done = true; } } else { A.done = true; if (typeof RA !== 'undefined') RA.done = true; } return ok; };
   }
   return A;
 })();

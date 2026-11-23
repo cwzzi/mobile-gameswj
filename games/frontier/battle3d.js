@@ -162,6 +162,9 @@ function b3Free() {
   for (const [u, r] of B3.act) b3Release(u, r);
   for (const o of B3.own) { try { o.dispose(); } catch (e) {} }
   B3.own.length = 0;
+  if (B3.scenOwn) { for (const o of B3.scenOwn) { try { o.dispose(); } catch (e) {} } B3.scenOwn = []; }
+  if (B3.rpool) { for (const k in B3.rpool) B3.rpool[k] && B3.rpool[k].dispose(); B3.rpool = null; }
+  B3.scen = null; B3.rItems = null;
   while (B3.root.children.length) B3.root.remove(B3.root.children[0]);
   B3.bases = []; B3.stakes = null; B3.tex = null; B3.B = null;
   B3.ground.material.map = null; B3.ground.material.needsUpdate = true;
@@ -181,6 +184,39 @@ function b3Reset() {
   B3.ground.material.map = tex; B3.ground.material.color.set(0xffffff); B3.ground.material.needsUpdate = true;
   B3.tx = B.hero.x / T; B3.tz = B.hero.y / T;
   const D = B3.dummy;
+  b3Scenery();
+  const all = [B.allyBase, ...B.bases];
+  const fcol = B.f.color === '#3a3a44' ? '#2a2a30' : B.f.color;
+  all.forEach(b => {
+    const g = new THREE.Group(); g.position.set(b.x / T, 0, b.y / T); root.add(g);
+    const pole = new THREE.Mesh(G.pole, R3D.mats.vc); pole.castShadow = true; g.add(pole);
+    const sc = b.hq ? 1.35 : 1; pole.scale.set(sc, sc, sc);
+    const fl = w3dFlag('#3a7ad8', 0.95, 0.6), fe = w3dFlag(fcol, 0.95, 0.6);
+    for (const f of [fl, fe]) { f.mesh.position.set(0.05, 2.45 * sc, 0); f.mesh.scale.setScalar(sc); g.add(f.mesh); own.push(f.mesh.geometry); }
+    const ring = new THREE.Mesh(G.dashRing, M.ringRed); ring.scale.set(2.5, 1, 2.5); ring.position.y = 0.07; ring.renderOrder = 4; g.add(ring);
+    const cg = new THREE.RingGeometry(0.9, 1, 48, 1).rotateX(-Math.PI / 2); own.push(cg);
+    const cap = new THREE.Mesh(cg, M.cap); cap.scale.set(2.5, 1, 2.5); cap.position.y = 0.09; cap.renderOrder = 5; cap.visible = false; g.add(cap);
+    const fires = [-1.25, 1.25].map((dx, k) => {
+      const f = new THREE.Group(); f.position.set(dx, 0, 0.62);
+      const logs = new THREE.Mesh(G.fire, R3D.mats.vc); logs.castShadow = true; f.add(logs);
+      const fm = new THREE.Mesh(G.flame, R3D.mats.fire); fm.scale.set(1.3, 1.45, 1.3); fm.position.y = 0.06; f.add(fm);
+      const gl = new THREE.Mesh(G.glow, M.glowFire); gl.scale.setScalar(1.6); gl.position.y = 0.1; gl.renderOrder = 3; f.add(gl);
+      g.add(f); return { fm, gl, ph: b.x * 0.01 + k * 2 };
+    });
+    B3.bases.push({ b, g, fl, fe, ring, cap, cg, fires, hq: !!b.hq, own: -1, capN: -1 });
+  });
+  B3.heroLook = Object.assign(eraLook('player'), { scale: 1.15 * B3_MULT * 1.18 }); // 시대별 군주 차림
+}
+
+// 전장 지형지물: 나무·바위·거점 울타리(+ 본진 건물). 사실적 모델(real3d.js)이 있으면 그걸, 없으면 KayKit/절차적.
+// 모델이 전투 도중 준비되면 이 부분만 다시 만든다 (B3.rver)
+function b3Scenery() {
+  const { G, root } = B3, D = B3.dummy;
+  if (B3.scen) { root.remove(B3.scen); for (const o of B3.scenOwn) { try { o.dispose(); } catch (e) {} } }
+  if (B3.rpool) { for (const k in B3.rpool) B3.rpool[k] && B3.rpool[k].dispose(); B3.rpool = null; }
+  const scen = new THREE.Group(), sown = []; root.add(scen); B3.scen = scen; B3.scenOwn = sown;
+  B3.rver = typeof RA !== 'undefined' ? RA.ver : 0; B3.rItems = null;
+  if (typeof RA !== 'undefined' && RA.ok && RA.has('tree_broadleaf_a') && RA.has('tree_conifer')) return b3RealScenery(scen, sown);
   // 장애물 (인스턴스)
   const rocks = [], trees = [], pines = [];
   for (const o of B.obs) (o.kind === 'rock' ? rocks : o.v % 3 === 0 ? pines : trees).push(o);
@@ -203,7 +239,7 @@ function b3Reset() {
       im.setColorAt(i, col);
     });
     im.instanceMatrix.needsUpdate = true; if (im.instanceColor) im.instanceColor.needsUpdate = true;
-    root.add(im); own.push(im);
+    scen.add(im); sown.push(im);
   };
   inst(G.rock, rocks, 0.9, true, aRock); inst(G.tree, trees, 1.15, true, aTree); inst(G.pine, pines, 1.1, true, aPine);
   // 거점
@@ -211,27 +247,62 @@ function b3Reset() {
   all.forEach((b, bi) => { for (let i = 0; i < 18; i++) { const a = i / 18 * Math.PI * 2; if (Math.abs(angDiff(a, Math.PI)) < 0.4 || Math.abs(angDiff(a, 0)) < 0.4) continue; slots.push([b.x / T + Math.cos(a) * 2.7, b.y / T + Math.sin(a) * 2.7, a + bi]); } });
   const st = new THREE.InstancedMesh(G.stake, R3D.mats.vc, slots.length); st.frustumCulled = false; st.castShadow = st.receiveShadow = true;
   slots.forEach((s, i) => { D.position.set(s[0], 0, s[1]); D.rotation.set(Math.sin(s[2] * 3) * 0.08, s[2], Math.cos(s[2] * 5) * 0.08); D.scale.set(1, 0.9 + (i % 3) * 0.12, 1); D.updateMatrix(); st.setMatrixAt(i, D.matrix); st.setColorAt(i, new THREE.Color(1, 1, 1)); });
-  root.add(st); own.push(st);
-  const fcol = B.f.color === '#3a3a44' ? '#2a2a30' : B.f.color;
-  all.forEach(b => {
-    const g = new THREE.Group(); g.position.set(b.x / T, 0, b.y / T); root.add(g);
-    const pole = new THREE.Mesh(G.pole, R3D.mats.vc); pole.castShadow = true; g.add(pole);
-    const sc = b.hq ? 1.35 : 1; pole.scale.set(sc, sc, sc);
-    const fl = w3dFlag('#3a7ad8', 0.95, 0.6), fe = w3dFlag(fcol, 0.95, 0.6);
-    for (const f of [fl, fe]) { f.mesh.position.set(0.05, 2.45 * sc, 0); f.mesh.scale.setScalar(sc); g.add(f.mesh); own.push(f.mesh.geometry); }
-    const ring = new THREE.Mesh(G.dashRing, M.ringRed); ring.scale.set(2.5, 1, 2.5); ring.position.y = 0.07; ring.renderOrder = 4; g.add(ring);
-    const cg = new THREE.RingGeometry(0.9, 1, 48, 1).rotateX(-Math.PI / 2); own.push(cg);
-    const cap = new THREE.Mesh(cg, M.cap); cap.scale.set(2.5, 1, 2.5); cap.position.y = 0.09; cap.renderOrder = 5; cap.visible = false; g.add(cap);
-    const fires = [-1.25, 1.25].map((dx, k) => {
-      const f = new THREE.Group(); f.position.set(dx, 0, 0.62);
-      const logs = new THREE.Mesh(G.fire, R3D.mats.vc); logs.castShadow = true; f.add(logs);
-      const fm = new THREE.Mesh(G.flame, R3D.mats.fire); fm.scale.set(1.3, 1.45, 1.3); fm.position.y = 0.06; f.add(fm);
-      const gl = new THREE.Mesh(G.glow, M.glowFire); gl.scale.setScalar(1.6); gl.position.y = 0.1; gl.renderOrder = 3; f.add(gl);
-      g.add(f); return { fm, gl, ph: b.x * 0.01 + k * 2 };
-    });
-    B3.bases.push({ b, g, fl, fe, ring, cap, cg, fires, hq: !!b.hq, own: -1, capN: -1 });
-  });
-  B3.heroLook = Object.assign(eraLook('player'), { scale: 1.15 * B3_MULT * 1.18 }); // 시대별 군주 차림
+  scen.add(st); sown.push(st);
+}
+const B3_TREEK = new THREE.Color(1.5, 1.72, 1.36);
+const B3_RHOUSE = ['hut_tribal', 'house_ancient', 'house_medieval', 'house_earlymodern'];
+function b3RealScenery(scen, sown) {
+  const low = R3D.quality && R3D.quality() === 'low', era = clamp(B.era | 0, 0, 3);
+  const items = { tree_broadleaf_a: [], tree_broadleaf_b: [], tree_conifer: [], rock_a: [], rock_b: [] };
+  // 노을 역광이라 나무가 시커멓게 보이지 않게 밝고 푸르게
+  const tint = (o, k) => { const c = new THREE.Color(); const v = 0.86 + (o.v % 4) * 0.06; c.setRGB(v, v, v); if (W3_RTINT[k]) c.multiply(W3_RTINT[k]).multiply(B3_TREEK); else c.multiplyScalar(1.6); return c; };
+  // 건물 자리(아군 거점 뒤 집, 적 본진 뒤 성채) 근처의 나무·바위는 그리지 않는다
+  const all = [B.allyBase, ...B.bases], hq = B.bases.find(b => b.hq), bld = [];
+  bld.push({ x: B.allyBase.x / T - 0.3, z: B.allyBase.y / T - 4.1, k: B3_RHOUSE[era], s: era === 0 ? 0.3 : 0.23, r: 1.9 });
+  if (hq) {
+    const k = era >= 2 && RA.has('castle_keep') ? 'castle_keep' : B3_RHOUSE[era];
+    bld.push({ x: hq.x / T + 0.4, z: hq.y / T - 4.6, k, s: k === 'castle_keep' ? (era >= 3 ? 0.165 : 0.155) : era === 0 ? 0.32 : 0.26, r: k === 'castle_keep' ? 2.6 : 2.0 });
+    if (k !== 'castle_keep') bld.push({ x: hq.x / T - 2.6, z: hq.y / T - 3.6, k, s: era === 0 ? 0.26 : 0.21, r: 1.6, ry: 0.4 });
+  }
+  let n = 0;
+  for (const o of B.obs) {
+    const x = o.x / T, z = o.y / T;
+    if (bld.some(b => (x - b.x) ** 2 + (z - b.z) ** 2 < b.r * b.r)) continue;
+    if (o.kind === 'rock') {
+      const k = o.v % 2 ? 'rock_b' : 'rock_a';
+      items[k].push(RA.item({ x, z, ry: o.v * 1.7, s: (k === 'rock_a' ? 0.62 : 0.95) * (0.85 + (o.v % 5) * 0.08), sy: 1, c: tint(o, null), r: 1 }));
+      continue;
+    }
+    if (low && o.r === 12 && (n++ % 2)) continue; // 낮음 품질: 가장자리 나무 줄을 절반만
+    const k = o.v % 3 === 0 ? 'tree_conifer' : o.v % 2 ? 'tree_broadleaf_a' : 'tree_broadleaf_b';
+    const s = (k === 'tree_conifer' ? 0.2 : 0.245) * (0.85 + (o.v % 5) * 0.08);
+    items[k].push(RA.item({ x, z, ry: o.v * 1.7, s, sy: 0.92 + (o.v % 3) * 0.1, c: tint(o, k), r: 3 }));
+  }
+  B3.rItems = items; B3.rfX = -99;
+  // 거점 울타리: 부족·고대 = 나무 말뚝, 중세+ = 돌 성벽 (18칸 중 길이 나는 앞뒤는 비움)
+  const wk = era >= 2 && RA.has('wall_stone') ? 'wall_stone' : 'palisade', segL = Math.PI * 2 * 2.7 / 18, list = [];
+  all.forEach((b, bi) => { for (let i = 0; i < 18; i++) { const a = i / 18 * Math.PI * 2; if (Math.abs(angDiff(a, Math.PI)) < 0.4 || Math.abs(angDiff(a, 0)) < 0.4) continue;
+    const s = wk === 'palisade' ? segL / 4.01 : segL / 8, sx = 1.06;
+    list.push({ x: b.x / T + Math.cos(a) * 2.7, z: b.y / T + Math.sin(a) * 2.7, ry: Math.atan2(-Math.cos(a), -Math.sin(a)) + (bi % 2 ? Math.PI : 0), s, sx, sy: wk === 'palisade' ? 0.95 + ((i * 7 + bi) % 3) * 0.06 : 1 }); } });
+  const ring = RA.inst(wk, list, { shadow: true }); if (ring) { scen.add(ring); sown.push({ dispose: ring.userData.dispose }); }
+  for (const b of bld) {
+    if (!RA.has(b.k)) continue;
+    const g = RA.group(b.k, true); g.scale.setScalar(b.s); g.position.set(b.x, 0, b.z); g.rotation.y = b.ry || 0; scen.add(g);
+  }
+}
+// 보이는(+그림자 여유) 나무·바위만 공용 인스턴스 풀에 채운다
+function b3RealFill() {
+  const S3 = B3; if (!S3.rItems) return;
+  const lowQ = R3D.quality && R3D.quality() === 'low';
+  if (!S3.rpool || S3.rpoolLow !== lowQ) { if (S3.rpool) for (const k in S3.rpool) S3.rpool[k] && S3.rpool[k].dispose(); S3.rpool = {}; for (const k in S3.rItems) S3.rpool[k] = RA.pool(k, S3.scen, lowQ); S3.rpoolLow = lowQ; S3.rfX = -99; }
+  if (Math.abs(S3.tx - S3.rfX) + Math.abs(S3.tz - S3.rfZ) < 0.2) return;
+  S3.rfX = S3.tx; S3.rfZ = S3.tz;
+  const low = R3D.quality && R3D.quality() === 'low', sph = S3.sph;
+  for (const k in S3.rItems) {
+    const L = S3.rItems[k], buf = []; let c = 0;
+    for (const e of L) { sph.center.set(e.x, 0.8, e.z); sph.radius = low ? Math.min(e.r, 1.8) : e.r; if (S3.frustum.intersectsSphere(sph)) buf[c++] = e; } // 낮음: 그림자가 없으니 여유를 줄인다
+    const P = S3.rpool[k]; if (P) P.fill(buf, c, !low, k === 'rock_a' || k === 'rock_b');
+  }
 }
 
 // ---------- 유닛 풀 ----------
@@ -261,6 +332,7 @@ function drawBattle3D() {
   if (B3.B !== B) b3Reset();
   const now = performance.now(), dt = Math.min(0.1, (now - B3.lastT) / 1000); B3.lastT = now;
   R3D.tick(dt); B3.frame++;
+  if (typeof RA !== 'undefined' && RA.U) { RA.U.time.value = B.t; RA.U.chop.value.z = 0; }
   const H = B.hero, tm = B.t, hx = H.x / T, hz = H.y / T, S3 = B3;
 
   // 카메라
@@ -276,6 +348,9 @@ function drawBattle3D() {
   const scx = Math.round(ctx_), scz = Math.round(ctz - 2);
   S3.sun.target.position.set(scx, 0, scz); S3.sun.position.set(scx - 30, 15, scz + 20); S3.sun.target.updateMatrixWorld(); // 서쪽 낮은 해 → 긴 그림자
 
+  // 사실적 모델이 전투 도중 준비되면 지형지물만 다시
+  if (typeof RA !== 'undefined' && S3.rver !== RA.ver) b3Scenery();
+  if (S3.rItems) b3RealFill();
   // 거점
   for (const o of S3.bases) {
     const b = o.b, own = b === B.allyBase ? 0 : b.owner;
@@ -447,7 +522,7 @@ function b3Grade(H) {
   G.exposure = 1.16 + m * 0.06; G.bloom = 0.62 + m * 0.3; G.threshold = 1.15; G.knee = 0.6; G.sat = 1.14; G.contrast = 1.07; G.vignette = 0.42;
   G.lift.setRGB(0.014, 0.004, 0.024); G.gain.setRGB(1.05, 0.98, 0.9);
   R3D.renderer.toneMappingExposure = R3D.fx && R3D.fx.on ? 1 : 1.1;
-  if (R3D.uWin) R3D.uWin.value = 0;
+  if (R3D.uWin) { R3D.uWin.value = 0.55; R3D.uWinLit.value = 0.55; } // 해 질 녘: 창문 몇 개에 불
   if (R3D.uRim) R3D.uRim.value.setRGB(1.0, 0.72, 0.45).multiplyScalar(0.3);
 }
 function b3Hero(H, tm, dt, hx, hz, pose) {
