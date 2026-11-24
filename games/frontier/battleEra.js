@@ -113,9 +113,9 @@ function bEraGround(g, r) {
     });
   } else { // 짓밟힌 진흙 들판 · 포탄 구덩이
     g.globalCompositeOperation = 'multiply'; g.fillStyle = '#c8c8bc'; g.fillRect(0, 0, BW, BH); g.globalCompositeOperation = 'source-over';
-    g.fillStyle = 'rgba(112,114,96,.34)'; g.fillRect(0, 0, BW, BH);
-    for (let k = 0; k < 110; k++) { g.fillStyle = r() < 0.5 ? 'rgba(92,74,48,.32)' : 'rgba(70,60,40,.26)'; g.beginPath(); g.ellipse(r() * BW, r() * BH, 30 + r() * 80, 18 + r() * 40, r() * 3, 0, 7); g.fill(); }
-    for (let k = 0; k < 34; k++) beCrater(g, r() * BW, r() * BH, 10 + r() * 16);
+    g.fillStyle = 'rgba(112,114,96,.2)'; g.fillRect(0, 0, BW, BH);
+    for (let k = 0; k < 70; k++) { g.fillStyle = r() < 0.5 ? 'rgba(104,84,54,.2)' : 'rgba(84,72,48,.16)'; g.beginPath(); g.ellipse(r() * BW, r() * BH, 30 + r() * 80, 18 + r() * 40, r() * 3, 0, 7); g.fill(); }
+    for (let k = 0; k < 16; k++) beCrater(g, r() * BW, r() * BH, 10 + r() * 14);
   }
 }
 function beCrater(g, x, y, s) {
@@ -214,9 +214,10 @@ const BE_ENV = [
   { bg: 0x98b49a, fog: 0xa4bc9c, sky: 0xd2ecc8, gnd: 0x3a4a28, hi: 0.62, sun: 0xffe2b4, si: 1.2, skirt: 0x3d5a2e, lift: [0.004, 0.012, 0.0], gain: [1.0, 1.04, 0.95], sat: 1.12, con: 1.05, rim: [0.8, 1.0, 0.7] },
   { bg: 0xd6b88c, fog: 0xd8be94, sky: 0xfff0d2, gnd: 0x6a5030, hi: 0.6, sun: 0xfff0d0, si: 1.42, skirt: 0x8a7a48, lift: [0.02, 0.012, 0.0], gain: [1.08, 1.01, 0.86], sat: 1.04, con: 1.06, rim: [1.0, 0.85, 0.6] },
   { bg: 0x8a5a58, fog: 0x9a6a60, sky: 0xb8a0c8, gnd: 0x3a2c22, hi: 0.55, sun: 0xffa868, si: 1.25, skirt: 0x35502f, lift: [0.014, 0.004, 0.024], gain: [1.05, 0.98, 0.9], sat: 1.14, con: 1.07, rim: [1.0, 0.72, 0.45] },
-  { bg: 0x868a8e, fog: 0x93958f, sky: 0xd0d4d8, gnd: 0x3a3a32, hi: 0.72, sun: 0xfff0e2, si: 0.88, skirt: 0x4a5038, lift: [0.012, 0.012, 0.016], gain: [0.99, 0.98, 1.0], sat: 0.84, con: 1.1, rim: [0.8, 0.8, 0.85] },
+  // 근세: 화약 연기 낀 맑은 오후 (예전 흐린 잿빛은 병사와 땅이 한 덩어리로 뭉개져 보였다)
+  { bg: 0x9aa6ae, fog: 0xa8b0b0, sky: 0xd8e2ea, gnd: 0x3e4030, hi: 0.66, sun: 0xfff0d8, si: 1.12, skirt: 0x4e5c38, lift: [0.008, 0.01, 0.018], gain: [1.03, 1.0, 0.96], sat: 1.0, con: 1.08, rim: [0.95, 0.9, 0.8] },
   // 근대: 석탄 연기 낀 흐린 하늘 · 누런 잿빛 · 낮은 채도
-  { bg: 0x7e7870, fog: 0x8a847a, sky: 0xccc4b6, gnd: 0x3a342a, hi: 0.74, sun: 0xffe6c8, si: 0.82, skirt: 0x4a4636, lift: [0.016, 0.012, 0.008], gain: [1.0, 0.97, 0.92], sat: 0.76, con: 1.12, rim: [0.85, 0.78, 0.7] },
+  { bg: 0x7e7870, fog: 0x8a847a, sky: 0xccc4b6, gnd: 0x3a342a, hi: 0.74, sun: 0xffe6c8, si: 0.82, skirt: 0x4a4636, lift: [0.016, 0.012, 0.008], gain: [1.0, 0.97, 0.92], sat: 0.86, con: 1.1, rim: [0.9, 0.82, 0.72] },
 ];
 function b3EraEnv() {
   const E = BE_ENV[clamp(S.era | 0, 0, ERAS.length - 1)], s = B3.scene;
@@ -228,12 +229,12 @@ function b3EraEnv() {
 function b3EraGrade(G) {
   const E = BE_ENV[clamp(S.era | 0, 0, ERAS.length - 1)];
   G.lift.setRGB(E.lift[0], E.lift[1], E.lift[2]); G.gain.setRGB(E.gain[0], E.gain[1], E.gain[2]); G.sat = E.sat; G.contrast = E.con;
-  if (R3D.uRim) R3D.uRim.value.setRGB(E.rim[0], E.rim[1], E.rim[2]).multiplyScalar(0.3);
+  if (R3D.uRim) R3D.uRim.value.setRGB(E.rim[0], E.rim[1], E.rim[2]).multiplyScalar(0.42); // 테두리 빛 조금 세게: 군중 속 병사 윤곽
 }
 
 // ---------- 3D: 꾸밈 모델 (절차적 · 버텍스 색) ----------
 // 종류마다 [지오메트리, 진영색 물들임?, 그림자?]. 진영색 조각(천·지붕)은 흰색으로 만들고 인스턴스 색으로 물들인다
-const BE_C = { wood: '#6a4a2a', dark: '#4a3420', hide: '#b48a5a', bronze: '#c08a38', iron: '#3c3c42', cloth: '#f4f0e6', stone: '#b8a078' };
+const BE_C = { wood: '#6a4a2a', dark: '#4a3420', hide: '#b48a5a', bronze: '#c08a38', iron: '#3c3c42', cloth: '#e4ddcc', stone: '#b8a078' };
 function beGeo(kind) {
   const P = R3D.prim, M = R3D.merge;
   return R3D.cached('be|' + kind, () => {

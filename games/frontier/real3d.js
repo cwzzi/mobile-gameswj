@@ -71,7 +71,8 @@ const RA = (() => {
   }
 #endif`);
     };
-    m.customProgramCacheKey = () => 'rasway' + key;
+    const ob = m.onBeforeCompile; m.onBeforeCompile = sh => { ob(sh); fadeHook(sh); };
+    m.customProgramCacheKey = () => 'rasway3' + key;
   }
   // 바위: rock_a 의 붉은 기를 빼고 회색 쪽으로 (채도↓)
   function desatHook(m, k) {
@@ -80,6 +81,51 @@ const RA = (() => {
   { float l = dot(diffuseColor.rgb, vec3(0.3, 0.59, 0.11)); diffuseColor.rgb = mix(vec3(l), diffuseColor.rgb, ${k.toFixed(2)}) * vec3(0.98, 1.0, 1.03); }`);
     };
     m.customProgramCacheKey = () => 'radesat' + k;
+  }
+  // 3인칭에서 카메라 앞 · 카메라와 영주 사이를 가리는 나무를 점무늬(디더)로 걷어낸다. A.U.fade = (영주 가슴 x, y, z, 세기) — 0 이면 아무것도 안 함
+  // 잎 재질은 이미 alphaTest(discard)를 쓰므로 추가 비용은 몇 줄의 계산뿐. 그림자(깊이) 패스엔 영향 없음
+  A.U.fade = { value: new THREE.Vector4(0, 0, 0, 0) }; // w: 0~1 위 시점(좁게) · 1~2 3인칭(넓게 + 카메라 바로 앞)
+  const FADE_VS = `{ vec4 fq = vec4(transformed, 1.0);
+#ifdef USE_INSTANCING
+    fq = instanceMatrix * fq;
+#endif
+    vFW = (modelMatrix * fq).xyz; }`;
+  // 카메라 위치는 viewMatrix 에서 구한다 (Lambert 재질엔 three 가 cameraPosition 유니폼을 채워 주지 않는다)
+  const FADE_FS = `if (uFade.w > 0.0) {
+    vec3 vt = viewMatrix[3].xyz, cp = -vec3(dot(viewMatrix[0].xyz, vt), dot(viewMatrix[1].xyz, vt), dot(viewMatrix[2].xyz, vt));
+    vec3 ab = uFade.xyz - cp; float t = dot(vFW - cp, ab) / max(dot(ab, ab), 1e-4);
+    float dl = length(vFW - (cp + ab * clamp(t, 0.0, 1.0))), tp = step(1.0, uFade.w);
+    float f = max((1.0 - smoothstep(mix(0.18, 0.35, tp), mix(0.55, 0.95, tp), dl)) * (1.0 - smoothstep(0.99, 1.04, t)) * 0.92, tp * (1.0 - smoothstep(0.3, 0.9, length(vFW - cp)))) * (uFade.w - tp);
+    if (fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715)))) < f) discard;
+  }`;
+  function fadeHook(sh) {
+    sh.uniforms.uFade = A.U.fade;
+    sh.vertexShader = 'varying vec3 vFW;\n' + sh.vertexShader.replace('#include <project_vertex>', '#include <project_vertex>\n' + FADE_VS);
+    sh.fragmentShader = 'uniform vec4 uFade;\nvarying vec3 vFW;\n' + sh.fragmentShader.replace('#include <clipping_planes_fragment>', '#include <clipping_planes_fragment>\n' + FADE_FS);
+  }
+  // 산(절벽 스캔): 위를 향한 턱은 이끼·풀색, 높은 곳 윗면은 눈, 나머지는 붉은 기를 뺀 회갈색 바위 → 지형에 녹아들고 산으로 읽힌다
+  function mountainHook(m) {
+    m.onBeforeCompile = sh => {
+      sh.vertexShader = 'varying float vMY;\n' + sh.vertexShader.replace('#include <project_vertex>', `#include <project_vertex>
+  { vec4 mq = vec4(transformed, 1.0);
+#ifdef USE_INSTANCING
+    mq = instanceMatrix * mq;
+#endif
+    vMY = (modelMatrix * mq).y; }`);
+      sh.fragmentShader = 'varying float vMY;\n' + sh.fragmentShader
+        .replace('#include <map_fragment>', `#include <map_fragment>
+  { float l = dot(diffuseColor.rgb, vec3(0.3, 0.59, 0.11)); diffuseColor.rgb = mix(vec3(l), diffuseColor.rgb, 0.28) * vec3(1.0, 0.99, 0.97); diffuseColor.rgb = mix(vec3(0.42), diffuseColor.rgb, 0.85) * 1.12; }`)
+        .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
+  { vec3 wn = inverseTransformDirection(normal, viewMatrix); float up = wn.y;
+    float l = dot(diffuseColor.rgb, vec3(0.3, 0.59, 0.11));
+    float moss = smoothstep(0.55, 0.85, up) * (1.0 - smoothstep(1.6, 2.4, vMY));
+    diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.30, 0.42, 0.19) * (0.75 + 0.7 * l), moss * 0.85);
+    float snow = smoothstep(0.55, 0.9, up) * smoothstep(3.0, 3.5, vMY);
+    diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.88, 0.9, 0.94), snow * 0.7);
+    float foot = 1.0 - smoothstep(0.04, 0.4, vMY); // 산자락: 들판 색으로 녹아들게
+    diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.33, 0.45, 0.22) * (0.8 + 0.4 * l), foot * 0.7); }`);
+    };
+    m.customProgramCacheKey = () => 'ramtn4';
   }
   function convertMat(name, src, rough) {
     const nm = (src && src.name) || '';
@@ -96,12 +142,54 @@ const RA = (() => {
     // 노멀맵: 큰 건물만, '높음' 품질에서만 (이 카메라 거리에선 차이가 작고 텍스처 메모리를 크게 먹는다)
     if (src.normalMap && !leaf && !SMALL.has(name)) { nrm.set(m, src.normalMap); m.normalMap = tier === 'high' ? src.normalMap : null; m.normalScale.set(0.9, 0.9); }
     if (leaf) swayHook(m, name);
-    if (/^rock_/.test(name)) desatHook(m, name === 'rock_a' ? 0.12 : 0.45);
-    if (!leaf && !/^rock_/.test(name) && !crop) m.color.setScalar(1.16); // 구운 AO 때문에 어두운 건물을 게임 조명에 맞게 조금 밝게
+    if (/^rock_/.test(name)) { desatHook(m, name === 'rock_a' ? 0.12 : 0.45); m.color.setScalar(name === 'rock_a' ? 2.5 : 3.1); m.side = THREE.FrontSide; } // 바위 텍스처가 어두워 위에서 보면 시커멓게 보였다
+    if (name === 'mountain_a') mountainHook(m);
+    if (/^scatter_/.test(name)) m.color.setScalar(0.92);
+    if (!leaf && !/^rock_/.test(name) && !crop && !/^scatter_/.test(name)) m.color.setScalar(1.16); // 구운 AO 때문에 어두운 건물을 게임 조명에 맞게 조금 밝게
     allMats.add(m);
     void rough;
     return { mat: m, role: leaf ? 'leaf' : crop ? 'crop' : 'body' };
   }
+  // 법선 손질 (불러올 때 한 번)
+  //  · 바닥 풀/꽃 카드: 법선을 위로 → 지면과 같은 밝기 (세운 카드가 옆을 향한 법선으로 어둡게 나와 위에서 보면 검은 X 자로 보였다)
+  //  · 나무·덤불: 잎 카드 법선을 수관 가운데에서 바깥쪽으로 섞는다 → 카드마다 들쭉날쭉한 명암 대신 둥근 덩어리 명암 (해 반대쪽도 덜 시커멓다)
+  //  · 산: 같은 자리 꼭짓점의 법선을 평균(UV 이음매 무시) → 각진 판 대신 부드러운 비탈
+  function fixNormals(name, g) {
+    const n = g.attributes.normal, p = g.attributes.position;
+    if (!n || !p || n.isInterleavedBufferAttribute || p.isInterleavedBufferAttribute) return;
+    if (/^scatter_/.test(name)) { for (let i = 0; i < n.count; i++) n.setXYZ(i, 0, 1, 0); n.needsUpdate = true; return; }
+    if (/^(tree_|bush)/.test(name)) {
+      const bb = g.boundingBox, cy = bb.min.y + (bb.max.y - bb.min.y) * (name === 'tree_conifer' ? 0.45 : 0.62), ry = Math.max(0.5, (bb.max.y - bb.min.y) * 0.3);
+      const v = new THREE.Vector3(), o = new THREE.Vector3();
+      for (let i = 0; i < n.count; i++) {
+        v.set(p.getX(i), (p.getY(i) - cy) * 0.6, p.getZ(i));
+        const r = Math.hypot(v.x, v.z); if (v.length() < 1e-3) continue;
+        v.normalize(); o.set(n.getX(i), n.getY(i), n.getZ(i));
+        const k = p.getY(i) - bb.min.y < ry && r < (bb.max.x - bb.min.x) * 0.06 ? 0.15 : 0.7; // 줄기는 조금만
+        o.lerp(v, k).normalize(); n.setXYZ(i, o.x, o.y, o.z);
+      }
+      n.needsUpdate = true; return;
+    }
+    if (name === 'mountain_a') {
+      const idx = g.index, key = i => Math.round(p.getX(i) * 50) + ',' + Math.round(p.getY(i) * 50) + ',' + Math.round(p.getZ(i) * 50);
+      const acc = new Map(), a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3(), fn = new THREE.Vector3();
+      const tri = idx ? idx.count / 3 : p.count / 3, vi = k => idx ? idx.getX(k) : k;
+      for (let t = 0; t < tri; t++) {
+        const i0 = vi(t * 3), i1 = vi(t * 3 + 1), i2 = vi(t * 3 + 2);
+        a.fromBufferAttribute(p, i0); b.fromBufferAttribute(p, i1); c.fromBufferAttribute(p, i2);
+        fn.subVectors(c, b).cross(a.clone().sub(b)); // 면적 가중
+        for (const i of [i0, i1, i2]) { const k = key(i); let s = acc.get(k); if (!s) acc.set(k, s = [0, 0, 0]); s[0] += fn.x; s[1] += fn.y; s[2] += fn.z; }
+      }
+      for (let i = 0; i < n.count; i++) {
+        const s = acc.get(key(i)); if (!s) continue;
+        fn.set(s[0], s[1], s[2]).normalize(); o3.set(n.getX(i), n.getY(i), n.getZ(i));
+        if (fn.dot(o3) < 0) continue; // 뒤집힌 면은 그대로
+        n.setXYZ(i, fn.x, fn.y, fn.z);
+      }
+      n.needsUpdate = true;
+    }
+  }
+  const o3 = new THREE.Vector3();
   const tmw = new THREE.Matrix4();
   function ingest(name, gltf) {
     const root = gltf.scene; root.updateMatrixWorld(true);
@@ -111,6 +199,7 @@ const RA = (() => {
       const g = o.geometry.clone(); tmw.copy(o.matrixWorld); g.applyMatrix4(tmw);
       if (g.attributes.color) g.deleteAttribute('color');
       g.computeBoundingBox(); g.computeBoundingSphere(); box.union(g.boundingBox);
+      fixNormals(name, g);
       const { mat, role } = convertMat(name, o.material);
       parts.push({ geo: g, mat, role });
     });
@@ -149,7 +238,10 @@ const RA = (() => {
     const key = kind + '|' + col;
     let m = HZ.mats.get(key); if (m) return m;
     const s = HZ.src[kind];
-    if (kind === 'coat') { m = new THREE.MeshLambertMaterial({ map: s.map || null }); m.color.set(col); m.color.multiplyScalar(1.12); }
+    if (kind === 'coat') { // 흰·회색 말은 텍스처가 이미 밝아 1 을 넘기면 하얗게 날아간다 → 밝은 털은 조금 눌러 결이 보이게
+      m = new THREE.MeshLambertMaterial({ map: s.map || null }); m.color.set(col);
+      const l = m.color.r * 0.3 + m.color.g * 0.59 + m.color.b * 0.11; m.color.multiplyScalar(l > 0.55 ? 0.8 : 1.12);
+    }
     else if (kind === 'cloth') { m = new THREE.MeshLambertMaterial(); m.color.set(col); }
     else { m = new THREE.MeshLambertMaterial(); if (s && s.color) m.color.copy(s.color); }
     HZ.mats.set(key, m); allMats.add(m); if (A.done && R3D.regMat) R3D.regMat(m);

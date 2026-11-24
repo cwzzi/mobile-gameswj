@@ -226,7 +226,82 @@ function foeEra() { return clamp(Math.floor((S.foeLv === undefined ? S.era : S.f
 function foeEraRoll() { return clamp(Math.floor((S.foeLv === undefined ? S.era : S.foeLv) + rr(-0.3, 0.3)), 0, ERAS.length - 1); }
 
 // ---------- 군대 ----------
+// 병사는 마을마다 주둔한다: S.garrison[마을 id] = {병종: 수} · 영주를 따라다니는 출정대: S.field = {병종: 수}
+// S.army 는 둘을 합친 전체 (옛 저장·다른 코드 호환용). 어디서든 S.army 만 바뀌면 armyFix 가 주둔지에 맞춰 준다
 function armyTotal() { let n = 0; for (const k in (S.army || {})) n += S.army[k] | 0; return n; }
+function locObj(loc) {
+  if (loc === 'f' || loc === undefined || loc === null) return S.field || (S.field = {});
+  const g = S.garrison || (S.garrison = {});
+  return g[loc] || (g[loc] = {});
+}
+function locTotal(loc) { const o = locObj(loc); let n = 0; for (const k in o) n += o[k] | 0; return n; }
+function fieldTotal() { return locTotal('f'); }
+function garrisonOf(id) { return locObj(id); }
+// 그 병종이 새로 생기면 갈 마을: 그 병종 훈련 건물이 있는 마을 → 인구가 가장 많은 마을 → 출정대
+function armyHome(ut) {
+  if (!S.towns.length) return 'f';
+  const U = UNITS[ut], b = U && S.buildings.find(b => b.type === U.bld && townById(b.town));
+  if (b) return b.town;
+  return S.towns.reduce((a, t) => t.pop > a.pop ? t : a).id;
+}
+function armyAdd(ut, n, loc) {
+  if (!n) return; if (loc === undefined) loc = armyHome(ut);
+  if (loc !== 'f' && !townById(+loc)) loc = 'f';
+  const o = locObj(loc); o[ut] = (o[ut] | 0) + n; S.army[ut] = (S.army[ut] | 0) + n;
+}
+// n명을 뺀다: pref(주둔지) → 출정대 → 병사가 많은 마을 순. 반환: 실제로 뺀 [{loc, n}]
+function armyPlanTake(ut, n, pref) {
+  const out = [], seen = new Set();
+  const order = [];
+  if (pref !== undefined && pref !== null) order.push(String(pref));
+  order.push('f');
+  for (const id of Object.keys(S.garrison || {}).sort((a, b) => ((S.garrison[b][ut] | 0) - (S.garrison[a][ut] | 0)))) order.push(id);
+  for (const loc of order) {
+    if (n <= 0) break; if (seen.has(loc)) continue; seen.add(loc);
+    const have = locObj(loc === 'f' ? 'f' : loc)[ut] | 0; if (have <= 0) continue;
+    const k = Math.min(have, n); out.push({ loc, n: k }); n -= k;
+  }
+  return out;
+}
+function armyTake(ut, n, pref) {
+  const plan = armyPlanTake(ut, n, pref);
+  for (const p of plan) { const o = locObj(p.loc); o[ut] -= p.n; if (o[ut] <= 0) delete o[ut]; S.army[ut] = Math.max(0, (S.army[ut] | 0) - p.n); if (!S.army[ut]) delete S.army[ut]; }
+  return plan;
+}
+function armyMove(ut, n, from, to) {
+  const o = locObj(from), k = Math.min(n, o[ut] | 0); if (k <= 0) return 0;
+  o[ut] -= k; if (!o[ut]) delete o[ut];
+  const d = locObj(to); d[ut] = (d[ut] | 0) + k;
+  for (const s of soldiers) if (!s.mil && String(s.loc) === String(from) && s.ut === ut) s.loc = '?'; // 보이는 병사는 다시 배치
+  return k;
+}
+// 주둔지 합계를 S.army 에 맞춘다 (옛 저장 · 시대 시작 군대 · 디버그 addArmy)
+function armyFix() {
+  if (!S) return;
+  if (!S.army || typeof S.army !== 'object') S.army = {};
+  const fresh = !S.garrison;
+  if (!S.garrison || typeof S.garrison !== 'object') S.garrison = {};
+  if (!S.field || typeof S.field !== 'object') S.field = {};
+  for (const id of Object.keys(S.garrison)) if (!townById(+id)) { const o = S.garrison[id]; for (const k in o) S.field[k] = (S.field[k] | 0) + (o[k] | 0); delete S.garrison[id]; }
+  const sum = {};
+  for (const loc of ['f', ...Object.keys(S.garrison)]) { const o = locObj(loc); for (const k in o) { if (!UNITS[k] || (o[k] | 0) <= 0) { delete o[k]; continue; } sum[k] = (sum[k] | 0) + (o[k] | 0); } }
+  for (const k of new Set([...Object.keys(sum), ...Object.keys(S.army)])) {
+    if (!UNITS[k]) { delete S.army[k]; continue; }
+    const want = S.army[k] | 0, d = want - (sum[k] | 0);
+    if (d > 0) {
+      S.army[k] = want - d; // armyAdd 가 다시 더한다
+      if (fresh && S.towns.length > 1) { // 옛 저장: 인구 비율대로 여러 마을에 나눠 주둔
+        const tp = S.towns.reduce((a, t) => a + t.pop, 0) || 1; let left = d;
+        const sh = S.towns.map(t => ({ t, f: d * t.pop / tp })).map(o => ({ t: o.t, n: Math.floor(o.f), r: o.f % 1 }));
+        left -= sh.reduce((a, o) => a + o.n, 0); sh.sort((a, b) => b.r - a.r); for (const o of sh) if (left > 0) { o.n++; left--; }
+        for (const o of sh) if (o.n) armyAdd(k, o.n, o.t.id);
+      } else armyAdd(k, d);
+    } else if (d < 0) { S.army[k] = sum[k]; armyTake(k, -d); }
+    if (!S.army[k]) delete S.army[k];
+  }
+}
+// 마을이 공격받을 때 나서는 민병 (주민의 절반, 최소 4명)
+function militiaOf(t) { return t ? Math.max(4, Math.round(t.pop * 0.5)) : 0; }
 function armyCap() {
   const pop = S.towns.reduce((a, t) => a + t.pop, 0), mb = S.buildings.filter(b => MIL_BLD.includes(b.type)).length;
   return Math.min(120, Math.floor((4 + pop / 3 + mb * 3) * (1 + techBonus('armyCap'))));
@@ -255,10 +330,9 @@ function updateTraining(dt) {
     if (armyTotal() >= armyCap()) { b.qt = U.time; if (!armyFullShown) { armyFullShown = true; toast('🪖 군대 정원이 가득 차서 훈련이 멈췄습니다 (인구를 늘리세요)', 3); } continue; }
     armyFullShown = false;
     const ut = b.q.shift(); b.qt = 0;
-    S.army[ut] = (S.army[ut] | 0) + 1;
+    armyAdd(ut, 1, townById(b.town) ? b.town : undefined); // 훈련소가 있는 마을에 주둔
     const cx = (b.x + .5) * T, cy = (b.y + 1) * T;
     floatText(cx, cy - 36, `+1${UNITS[ut].icon}`, '#9ad0ff', 13);
-    if (soldiers.length < SOLDIER_VIS) spawnSoldier(ut, cx, cy);
   }
   // 유지비
   upkeepT += dt;
@@ -269,7 +343,7 @@ function updateTraining(dt) {
     else {
       S.gold = 0;
       const ks = Object.keys(S.army).filter(k => S.army[k] > 0);
-      if (ks.length) { const k = ks[ri(ks.length)]; S.army[k]--; toast(`🪙 급료가 모자라 ${UNITS[k].name} 1명이 떠났습니다`, 2.5); }
+      if (ks.length) { const k = ks[ri(ks.length)]; armyTake(k, 1); toast(`🪙 급료가 모자라 ${UNITS[k].name} 1명이 떠났습니다`, 2.5); }
     }
   }
 }
@@ -282,31 +356,54 @@ function openArmyPanel() {
   renderArmyPanel();
   $('armyPanel').classList.add('show');
 }
+let armySel = null; // 군대 패널에서 고른 마을 id
 function renderArmyPanel() {
-  const tot = armyTotal(), cap = armyCap(), q = armyQueued();
-  const have = Object.keys(UNITS).filter(k => S.army[k] > 0).map(k => `${UNITS[k].icon}${UNITS[k].name} ${S.army[k]}`);
+  armyFix();
+  const tot = armyTotal(), cap = armyCap(), q = armyQueued(), ft = fieldTotal();
+  if (!townById(armySel)) armySel = S.towns.length ? (S.war ? S.war.town : S.towns.reduce((a, t) => t.pop > a.pop ? t : a).id) : null;
+  if (!townById(armySel)) armySel = S.towns.length ? S.towns[0].id : null;
   let h = `<h2>🪖 군대 <span style="font-size:13px;color:#b8c2b0">${tot}/${cap}명${q ? ` · 훈련 중 ${q}` : ''}</span></h2>
-    <div class="sub">${have.length ? have.join(' · ') : '아직 병사가 없습니다.'}<br>유지비 🪙${armyUpkeep()}/10초 · 정원은 인구·군사 건물로 늘어요<br>병사는 들판에서 산적·적 군단과 싸우고, 대규모 전투에도 함께 출전합니다.</div>
-    <div class="seg"><button class="opt${S.armyMode !== 'guard' ? ' sel' : ''}" data-m="follow"><span class="ic">🚩</span><span>따라오기</span></button><button class="opt${S.armyMode === 'guard' ? ' sel' : ''}" data-m="guard"><span class="ic">🏘️</span><span>마을 수비</span></button></div>`;
+    <div class="sub">🚩 <b>출정대 ${ft}명</b>은 영주를 따라다니고, 🏘️ <b>주둔군 ${tot - ft}명</b>은 자기 마을을 지킵니다. 마을이 공격받으면 그 마을 주둔군 + 민병(주민 절반) + 곁의 출정대가 싸워요. 새로 훈련한 병사는 훈련소가 있는 마을에 주둔합니다. 유지비 🪙${armyUpkeep()}/10초</div>`;
+  if (S.towns.length) {
+    h += `<div class="atabs">${S.towns.map(t => `<button class="opt${t.id === armySel ? ' sel' : ''}" data-tw="${t.id}">${S.war && S.war.town === t.id ? '⚔️' : '🏘️'} ${t.name}<small>🪖${locTotal(t.id)} · 👥${t.pop}</small></button>`).join('')}</div>`;
+    const t = townById(armySel), go = locObj(t.id), fo = locObj('f');
+    const types = Object.keys(UNITS).filter(k => (go[k] | 0) || (fo[k] | 0));
+    h += `<div class="gcard"><div class="ghead"><span>🏘️ ${t.name} 주둔 <b>${locTotal(t.id)}</b> <small>+ 민병 ${militiaOf(t)}</small></span><span>🚩 출정대 <b>${ft}</b></span></div>`;
+    if (!types.length) h += `<div class="gempty">병사가 없습니다 · 아래에서 훈련하세요</div>`;
+    for (const k of types) h += `<div class="grow"><span class="gu">${UNITS[k].icon} ${UNITS[k].name}</span><b>${go[k] | 0}</b><button data-mv="out" data-ut="${k}" ${(go[k] | 0) ? '' : 'disabled'}>출정 ▶</button><button data-mv="in" data-ut="${k}" ${(fo[k] | 0) ? '' : 'disabled'}>◀ 주둔</button><b>${fo[k] | 0}</b></div>`;
+    if (types.length) h += `<div class="gall"><button data-mv="allout" ${locTotal(t.id) ? '' : 'disabled'}>🚩 전원 출정대로</button><button data-mv="allin" ${ft ? '' : 'disabled'}>🏘️ 출정대 → ${t.name}</button></div>`;
+    h += `</div>`;
+  }
   const locked = [];
   for (const k in UNITS) {
     const U = UNITS[k];
     if (!unitUnlocked(k)) { locked.push(`${U.icon}${U.name} (🔬${TECH[U.tech].name})`); continue; }
-    const nb = S.buildings.filter(b => b.type === U.bld).length;
+    const bs = S.buildings.filter(b => b.type === U.bld), nb = bs.length;
     const inq = S.buildings.reduce((a, b) => a + (b.q ? b.q.filter(x => x === k).length : 0), 0);
     const err = !nb ? `${BUILD[U.bld].icon}${BUILD[U.bld].name} 필요` : tot + q >= cap ? '정원 가득' : !canAfford(U.cost) ? '자원 부족' : '';
     const role = U.proj === 'shell' ? '포병' : U.role === 'ranged' ? '원거리' : U.role === 'cav' ? '기병' : U.armor ? '중보병' : '보병';
-    h += `<button class="opt" data-u="${k}" ${err ? 'disabled' : ''}><span class="ic">${U.icon}</span><span>${U.name} 훈련 <span style="font-size:12px;opacity:.8">${role} · ${U.time}초</span><small>${costText(U.cost)} · 보유 ${S.army[k] | 0}${inq ? ` · 대기 ${inq}` : ''}${err ? ' · ' + err : ''}</small></span></button>`;
+    const tn = [...new Set(bs.map(b => townById(b.town)).filter(Boolean).map(t => t.name))].join('·');
+    h += `<button class="opt" data-u="${k}" ${err ? 'disabled' : ''}><span class="ic">${U.icon}</span><span>${U.name} 훈련 <span style="font-size:12px;opacity:.8">${role} · ${U.time}초</span><small>${costText(U.cost)} · 보유 ${S.army[k] | 0}${inq ? ` · 대기 ${inq}` : ''}${tn ? ` · → ${tn}` : ''}${err ? ' · ' + err : ''}</small></span></button>`;
   }
   if (locked.length) h += `<div class="lockbox">🔒 ${locked.join(' · ')}</div>`;
   if (!S.buildings.some(b => MIL_BLD.includes(b.type))) h += `<div class="lockbox">영토 안에서 <b>건설</b> → ⚔️ 병영 · 🎯 궁술장 · 🐴 마구간${techHas('steam') ? ' · 🏭 공장' : ''}을 지으면 병사를 훈련할 수 있어요</div>`;
   h += `<button class="close" data-a="close">닫기</button>`;
-  $('armyPanel').innerHTML = h;
+  const el = $('armyPanel'), sc = el.scrollTop;
+  el.innerHTML = h; el.scrollTop = sc;
 }
 $('armyPanel').addEventListener('click', e => {
   const b = e.target.closest('button'); if (!b || b.disabled) return;
   if (b.dataset.u) { const err = trainUnit(b.dataset.u); if (err) toast(err, 1.6); else save(); renderArmyPanel(); return; }
-  if (b.dataset.m) { S.armyMode = b.dataset.m; for (const s of soldiers) s.post = null; renderArmyPanel(); save(); return; }
+  if (b.dataset.tw !== undefined) { armySel = +b.dataset.tw; renderArmyPanel(); return; }
+  if (b.dataset.mv) {
+    const t = townById(armySel); if (!t) return;
+    const m = b.dataset.mv, ut = b.dataset.ut;
+    if (m === 'out') armyMove(ut, 1, t.id, 'f');
+    else if (m === 'in') armyMove(ut, 1, 'f', t.id);
+    else if (m === 'allout') for (const k of Object.keys(locObj(t.id))) armyMove(k, locObj(t.id)[k], t.id, 'f');
+    else if (m === 'allin') for (const k of Object.keys(locObj('f'))) armyMove(k, locObj('f')[k], 'f', t.id);
+    soldierRealloc(); renderArmyPanel(); save(); return;
+  }
   $('armyPanel').classList.remove('show'); paused = false;
 });
 
@@ -326,8 +423,15 @@ function soldierHurt(s, dmg) {
   s.hp -= dmg; s.hit = 0.15;
   if (s.hp > 0) return;
   const i = soldiers.indexOf(s); if (i >= 0) soldiers.splice(i, 1);
-  S.army[s.ut] = Math.max(0, (S.army[s.ut] | 0) - 1);
-  floatText(s.x, s.y - 30, `💀${UNITS[s.ut].name}`, '#ff9a8a', 12);
+  if (s.mil) { // 민병(마을 주민)이 쓰러짐 → 그 마을 인구가 준다
+    const t = townById(s.loc), n = s.rep || 1;
+    if (S.war) S.war.milLeft = Math.max(0, (S.war.milLeft | 0) - n);
+    if (t) { const lv = townLevel(t); t.pop = Math.max(1, t.pop - n); if (townLevel(t) !== lv) recomputeOwner(); }
+    floatText(s.x, s.y - 30, `💀민병 ${n}명`, '#ff9a8a', 12);
+  } else {
+    armyTake(s.ut, 1, s.loc);
+    floatText(s.x, s.y - 30, `💀${UNITS[s.ut].name}`, '#ff9a8a', 12);
+  }
   emit(s.x, s.y - 10, 10, { color: ['#4fa3ff', '#fff'], smin: 40, smax: 120, lmin: .3, lmax: .6, grav: 200 });
 }
 // frac: 적 한 방이 줄 수 있는 최대 체력 비율 (근접 10% · 원거리 7%), 맞은 직후엔 잠깐 무적
@@ -353,43 +457,92 @@ function fireShot(x, y, tx, ty, team, kind, dmg) {
     emit(x + (tx - x) / d * 16, y - 14 + (ty - y) / d * 16, 4, { color: ['#fff2a0', '#ffb030'], kind: 'spark', smin: 60, smax: 140, ang: Math.atan2(ty - y, tx - x), spread: 0.35, lmin: .06, lmax: .12 });
   }
 }
-let soldierSpawnT = 0;
+let soldierSpawnT = 0, soldierWantMap = null, soldierWantT = 0;
+function soldierRealloc() { soldierWantMap = null; }
+// 오픈월드에 보일 병사 수 (출정대 먼저 14명까지, 나머지 자리는 마을 주둔군이 나눠 씀 · 공격받는 마을 우선)
+function soldierWant() {
+  const want = {};
+  let slots = SOLDIER_VIS;
+  const pick = (loc, cap) => {
+    const o = locObj(loc), left = Object.assign({}, o), ks = Object.keys(left); let n = 0;
+    while (n < cap && ks.some(k => left[k] > 0)) for (const k of ks) { if (n >= cap) break; if (left[k] > 0) { left[k]--; want[loc + '|' + k] = (want[loc + '|' + k] || 0) + 1; n++; } }
+    return n;
+  };
+  slots -= pick('f', Math.min(14, slots));
+  const ids = S.towns.map(t => t.id).filter(id => locTotal(id) > 0);
+  const wt = S.war && S.war.field ? S.war.town : null;
+  if (wt !== null && ids.includes(wt)) { ids.splice(ids.indexOf(wt), 1); ids.unshift(wt); }
+  for (let j = 0; j < ids.length && slots > 0; j++) {
+    const per = j === 0 && ids[0] === wt ? Math.min(slots, 12) : Math.max(1, Math.floor(slots / (ids.length - j)));
+    slots -= pick(ids[j], Math.min(per, slots));
+  }
+  return want;
+}
+function soldierTownPost(s, t) {
+  if (!s.post || s.post.town !== t.id) { const a = rand() * Math.PI * 2, r = rr(1.5, 2.8) * T; s.post = { town: t.id, x: (t.x + .5) * T + Math.cos(a) * r, y: (t.y + 1) * T + Math.sin(a) * r * 0.7 }; }
+  return s.post;
+}
 function soldierAnchor(s, i) {
   const p = S.player;
-  if (S.armyMode === 'guard' && S.towns.length) {
-    const t = S.towns[i % S.towns.length];
-    if (!s.post || s.post.town !== t.id) { const a = rand() * Math.PI * 2, r = rr(1.5, 2.8) * T; s.post = { town: t.id, x: (t.x + .5) * T + Math.cos(a) * r, y: (t.y + 1) * T + Math.sin(a) * r * 0.7 }; }
-    return s.post;
-  }
+  if (s.loc !== 'f') { const t = townById(+s.loc); if (t) return soldierTownPost(s, t); }
+  if (S.armyMode === 'guard' && S.towns.length) return soldierTownPost(s, S.towns[i % S.towns.length]);
   const a = i * 2.4 + Math.PI, r = 34 + (i % 3) * 16;
   return { x: p.x + Math.cos(a) * r, y: p.y + Math.sin(a) * r * 0.75 };
+}
+// 들판 전투(아니오): 공격받는 마을의 주민이 민병으로 나선다 (최대 8명이 보이고 한 명이 rep 명을 대표)
+function syncMilitia() {
+  const w = S.war, on = w && w.field && townById(w.town);
+  if (!on) { for (let i = soldiers.length - 1; i >= 0; i--) if (soldiers[i].mil) soldiers.splice(i, 1); return; }
+  if (w.milLeft === undefined) w.milLeft = militiaOf(townById(w.town));
+  if (soldiers.some(s => s.mil) || w.milLeft <= 0) return; // 살아 있는 민병이 있으면 그대로 (불러오기 뒤엔 남은 수만큼 다시 나선다)
+  const t = townById(w.town), figs = Math.min(8, w.milLeft), rep = Math.ceil(w.milLeft / figs);
+  let left = w.milLeft;
+  for (let k = 0; k < figs && left > 0; k++) {
+    const r = Math.min(rep, left); left -= r;
+    const s = spawnSoldier(ERA_BASIC[S.era], (t.x + .5) * T + rr(-20, 20), (t.y + 1.4) * T);
+    const m = repHpMul(r); s.mil = true; s.rep = r; s.loc = t.id; s.am = m; s.hp = s.maxHp = Math.round(s.maxHp * 0.8 * m);
+  }
 }
 function updateArmyWorld(dt) {
   const p = S.player;
   updateTraining(dt);
   // 군대 수와 보이는 병사 맞추기
-  const cnt = {};
+  soldierWantT -= dt;
+  if (!soldierWantMap || soldierWantT <= 0) { armyFix(); soldierWantMap = soldierWant(); soldierWantT = 1; }
+  syncMilitia();
+  const want = soldierWantMap, cnt = {};
   for (let i = soldiers.length - 1; i >= 0; i--) {
-    const s = soldiers[i]; cnt[s.ut] = (cnt[s.ut] || 0) + 1;
-    if (cnt[s.ut] > (S.army[s.ut] | 0)) { soldiers.splice(i, 1); cnt[s.ut]--; }
+    const s = soldiers[i]; if (s.mil) continue;
+    if (s.loc === undefined) s.loc = '?';
+    if (s.loc === '?') continue;
+    const key = s.loc + '|' + s.ut; cnt[key] = (cnt[key] || 0) + 1;
+    if (cnt[key] > (want[key] || 0)) { soldiers.splice(i, 1); cnt[key]--; }
+  }
+  for (let i = soldiers.length - 1; i >= 0; i--) { // 옮겨진 병사: 자리가 빈 곳으로
+    const s = soldiers[i]; if (s.mil || s.loc !== '?') continue;
+    const key = Object.keys(want).find(k => k.endsWith('|' + s.ut) && (cnt[k] || 0) < want[k]);
+    if (key) { s.loc = key.split('|')[0]; if (s.loc !== 'f') s.loc = +s.loc; s.post = null; cnt[key] = (cnt[key] || 0) + 1; } else soldiers.splice(i, 1);
   }
   soldierSpawnT -= dt;
-  if (soldierSpawnT <= 0 && soldiers.length < SOLDIER_VIS) {
+  if (soldierSpawnT <= 0) {
     soldierSpawnT = 0.7;
     let best = null, bv = 0;
-    for (const k in S.army) { const miss = (S.army[k] | 0) - (cnt[k] || 0); if (miss > bv) { bv = miss; best = k; } }
+    for (const k in want) { const miss = want[k] - (cnt[k] || 0); if (miss > bv) { bv = miss; best = k; } }
     if (best) {
-      const home = S.towns.length ? S.towns.reduce((a, t) => dist2(p.x, p.y, (t.x + .5) * T, (t.y + .5) * T) < dist2(p.x, p.y, (a.x + .5) * T, (a.y + .5) * T) ? t : a) : null;
-      if (home) spawnSoldier(best, (home.x + .5) * T, (home.y + 1.4) * T); else spawnSoldier(best, p.x - 30, p.y);
+      const [ls, ut] = best.split('|'), loc = ls === 'f' ? 'f' : +ls;
+      const home = loc !== 'f' ? townById(loc) : S.towns.length ? S.towns.reduce((a, t) => dist2(p.x, p.y, (t.x + .5) * T, (t.y + .5) * T) < dist2(p.x, p.y, (a.x + .5) * T, (a.y + .5) * T) ? t : a) : null;
+      const s = home ? spawnSoldier(ut, (home.x + .5) * T, (home.y + 1.4) * T) : spawnSoldier(ut, p.x - 30, p.y);
+      s.loc = loc;
     }
   }
-  soldiers.forEach((s, i) => {
-    const U = UNITS[s.ut], st = soldierStats(s.ut), anc = soldierAnchor(s, i);
+  let fi = 0;
+  soldiers.forEach(s => {
+    const U = UNITS[s.ut], st = soldierStats(s.ut), am = s.am || 1, anc = soldierAnchor(s, s.loc === 'f' ? fi++ : 0);
     s.hit = Math.max(0, s.hit - dt); s.swing = Math.max(0, s.swing - dt); s.atk -= dt; s.tgtT -= dt;
     const own = owner[Math.floor(s.y / T) * W + Math.floor(s.x / T)] >= 0;
     if (own && s.hp < s.maxHp) s.hp = Math.min(s.maxHp, s.hp + dt * 0.25);
     const da = Math.hypot(anc.x - s.x, anc.y - s.y);
-    if (S.armyMode !== 'guard' && da > T * 16) { s.x = anc.x + rr(-20, 20); s.y = anc.y + rr(-20, 20); s.tgt = null; } // 너무 멀어지면 따라잡기
+    if (S.armyMode !== 'guard' && s.loc === 'f' && da > T * 16) { s.x = anc.x + rr(-20, 20); s.y = anc.y + rr(-20, 20); s.tgt = null; } // 너무 멀어지면 따라잡기
     if (s.tgtT <= 0 || (s.tgt && !bandits.includes(s.tgt))) {
       s.tgtT = rr(0.3, 0.6);
       const e = nearest(bandits, s.x, s.y, T * 6);
@@ -404,12 +557,12 @@ function updateArmyWorld(dt) {
         if (d < R * 0.45) { tx = s.x - (e.x - s.x); ty = s.y - (e.y - s.y); stop = 0; }
         else if (d > R * 0.9) { tx = e.x; ty = e.y; stop = R * 0.8; }
         else { tx = s.x; ty = s.y; }
-        if (d <= R && s.atk <= 0) { s.atk = U.reload * rr(0.9, 1.2); s.swing = 0.25; s.face = e.x > s.x ? 1 : -1; fireShot(s.x, s.y - 14, e.x, e.y - 12, 0, U.proj, st.atk); }
+        if (d <= R && s.atk <= 0) { s.atk = U.reload * rr(0.9, 1.2); s.swing = 0.25; s.face = e.x > s.x ? 1 : -1; fireShot(s.x, s.y - 14, e.x, e.y - 12, 0, U.proj, st.atk * am); }
       } else {
         tx = e.x; ty = e.y; stop = 20;
         if (d < 26 && s.atk <= 0) {
           s.atk = U.role === 'cav' ? 0.8 : 1; s.swing = 0.25; s.face = e.x > s.x ? 1 : -1;
-          e.hp -= st.atk; e.hit = 0.15;
+          e.hp -= st.atk * am; e.hit = 0.15;
           const a = Math.atan2(e.y - s.y, e.x - s.x); e.kx = Math.cos(a) * (U.role === 'cav' ? 200 : 110); e.ky = Math.sin(a) * (U.role === 'cav' ? 200 : 110);
           emit(e.x, e.y - 14, 5, { color: ['#fff', '#9ad0ff'], kind: 'spark', smin: 60, smax: 160, lmin: .12, lmax: .25, ang: a, spread: 0.9 });
           if (e.hp <= 0) killBandit(e);
@@ -471,7 +624,7 @@ function foeStrike(b, tgt, d) {
   if (d < 24 && b.atk <= 0) {
     b.atk = U.role === 'cav' ? 1.2 : 1.1; b.swing = 0.25;
     const dmg = (b.cmd ? 2 : 1) * (U.armor || U.role === 'cav' ? 1.5 : 1);
-    if (tgt === p) playerHurt(Math.round(dmg), 0.10); else soldierHurt(tgt, dmg);
+    if (tgt === p) playerHurt(Math.round(dmg), 0.10); else soldierHurt(tgt, dmg * (b.am || 1)); // 대표 병사(여러 명)는 병사에게 더 세게
   }
   return true;
 }

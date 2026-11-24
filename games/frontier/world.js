@@ -357,7 +357,7 @@ function killBandit(b) {
   const i = bandits.indexOf(b); if (i >= 0) bandits.splice(i, 1);
   const loot = 4 + (b.loot || 0);
   S.gold += loot; floatText(b.x, b.y - 20, `+${loot}🪙`, '#ffe27a'); gainExp(5);
-  if (b.war && S.war && !bandits.some(x => x.war)) fieldWarWin();
+  if (b.war && S.war) { if (!b.cmd) S.war.men = Math.max(0, (S.war.men | 0) - (b.rep || 1)); if (!bandits.some(x => x.war) && warReserve() <= 0) fieldWarWin(); }
   emit(b.x, b.y - 10, 14, { color: ['#a52a2a', '#fff', '#ffd54a'], smin: 50, smax: 160, lmin: .3, lmax: .6, grav: 200 });
 }
 
@@ -369,6 +369,7 @@ function startWarEvent() {
   const f = ri(FE.factions.length);
   const diff = (1 + S.warsWon * 0.35 + S.towns.length * 0.1) * FE.diff;
   S.war = { town: town.id, diff, faction: f, field: false, era: fe };
+  warSetForce(S.war); // 적 병력 (battle.js warMenEra)
   askWar();
 }
 // 전쟁이 나면 "대규모 전투로 전환?"을 묻는다. 네 → 전장 액션, 아니오 → 지금 화면에서 적 군단 방어
@@ -377,14 +378,17 @@ function askWar() {
   paused = true; actHeld = false; auto = null;
   const w = S.war, f = warFaction(w), t = townById(w.town);
   const we = w.era !== undefined ? w.era : S.era, FE = ERAS[we], rel = we > S.era ? '<b style="color:#ff8a7a">우리보다 앞선 문명!</b>' : we < S.era ? '우리보다 뒤처진 문명' : '우리와 같은 시대';
-  const army = armyTotal(), deploy = Math.min(30, army);
+  warSetForce(w); armyFix();
+  const gar = t ? locTotal(t.id) : 0, fld = fieldTotal(), mil = militiaOf(t), ours = gar + fld + mil, foe = w.men;
   const kd = kByWar(w), KC = kd && kCiv(kd);
   $('warPanel').innerHTML = `<h2>⚔️ ${KC ? KC.icon + ' ' + KC.name : f.name} 침공!</h2>
     <div class="sub">${josa(f.name, '이가')} <b>${t ? t.name : '마을'}</b>${josaP(t ? t.name : '마을', '으로로')} 진군하고 있습니다. 적 위협도 ${'★'.repeat(Math.min(5, Math.max(1, Math.round(w.diff))))}</div>
     <div class="foeciv">적 문명 <b>${FE.icon} ${FE.name}</b> · ${rel}<br><small>주력: ${mixText(warMix(w))}</small>${KC ? `<br><small>💪 ${KC.strong} · ⚠️ ${KC.weak}</small>` : ''}</div>
+    <div class="forcebox">🔵 우리 수비군 <b class="a">${ours}명</b> <small>= ${t ? t.name : '마을'} 주둔 ${gar}${fld ? ` + 출정대 ${fld}` : ''} + 민병 ${mil}</small><br>🔴 적 침공군 <b class="e">${foe}명</b>${KC ? ` <small>(${KC.name} 병력의 60%)</small>` : ''}
+      <div class="vs" style="margin:4px 0 0"><div class="fb"><i style="width:${ours / Math.max(1, ours + foe) * 100}%"></i><em></em></div></div></div>
     <div style="font-size:17px;font-weight:800;margin:4px 0 12px;text-align:center">대규모 전투로 전환하시겠습니까?</div>
-    <button class="opt primary" data-a="go"><span class="ic">⚔️</span><span>네<small>전장으로 이동해 민병 ${allyCount()}명${deploy ? ` + 훈련병 ${deploy}명` : ''}과 함께 수많은 적을 직접 쓸어버립니다. 적장을 쓰러뜨리면 승리${deploy ? ' · 쓰러진 병사는 군대에서 빠집니다' : ''}</small></span></button>
-    <button class="opt" data-a="field"><span class="ic">🛡️</span><span>아니오<small>지금 화면에서 마을로 다가오는 적 군단(${warbandSize(w)}명)을 ${army ? `병사 ${army}명·` : '직접·'}망루로 막아냅니다</small></span></button>`;
+    <button class="opt primary" data-a="go"><span class="ic">⚔️</span><span>네<small>전장에서 수비군 ${ours}명과 함께 적 ${foe}명을 직접 쓸어버립니다. 적장을 쓰러뜨리거나 적 병력을 바닥내면 승리 · 쓰러진 병사·민병은 실제로 줄어듭니다</small></span></button>
+    <button class="opt" data-a="field"><span class="ic">🛡️</span><span>아니오<small>지금 화면에서 마을로 다가오는 적 군단(${foe}명, 대표 ${warbandFigs(w)}명씩)을 주둔군·민병·망루로 막아냅니다</small></span></button>`;
   $('warPanel').classList.add('show');
 }
 $('warPanel').addEventListener('click', e => {
@@ -400,27 +404,49 @@ $('warBtn').addEventListener('click', () => {
   const a = Math.atan2(e.y - p.y, e.x - p.x), dirs = ['동', '남동', '남', '남서', '서', '북서', '북', '북동'];
   toast(`가장 가까운 적은 <b>${dirs[(Math.round(a / (Math.PI / 4)) + 8) % 8]}쪽</b> ${Math.round(Math.hypot(e.x - p.x, e.y - p.y) / T)}칸 거리`, 2.5);
 });
-function warbandSize(w) { // 플레이어의 마을 수·군대 규모·승전 횟수에 맞춰 (적 시대는 조금만 반영)
-  const base = 3 + S.towns.length * 1.2 + Math.min(20, armyTotal()) * 0.3 + Math.min(6, S.warsWon) * 0.5;
-  return Math.min(16, Math.round(base * (0.85 + 0.15 * Math.max(1, w.diff))) + 1);
-}
-function spawnWarband() {
-  const w = S.war, t = townById(w.town); if (!t) { S.war = null; return; }
+// 들판 전투: 적 침공군(S.war.men)을 대표 병사로 (한 번에 최대 16명, 한 명이 rep 명 · 체력 최대 ×3) 내보낸다
+function warbandLive() { return clamp(3 + S.towns.length * 2 + S.era * 2 + Math.min(3, S.warsWon || 0), 5, 16); } // 한꺼번에 보이는 적 (초반엔 적게, 나머지는 물결로)
+function warbandRep(w) { return Math.max(1, Math.ceil((w.men0 || w.men || 1) / 24)); }
+function warbandFigs(w) { return Math.min(warbandLive(), Math.ceil((w.men || 1) / warbandRep(w))); }
+function warAliveMen() { let n = 0; for (const b of bandits) if (b.war && !b.cmd) n += (b.rep || 1); return n; }
+function warReserve() { const w = S.war; return w ? Math.max(0, (w.men | 0) - warAliveMen()) : 0; }
+function warMenLeft() { let n = warReserve(); for (const b of bandits) if (b.war && !b.cmd) n += (b.rep || 1) * clamp(b.hp / b.maxHp, 0, 1); return n; }
+function warSpawnPoint(t) {
   let sx = null, sy = null;
   for (let k = 0; k < 3000 && sx === null; k++) {
     const a = rand() * Math.PI * 2, d = rr(16, 28), x = Math.round(t.x + Math.cos(a) * d), y = Math.round(t.y + Math.sin(a) * d);
     if (neighborsLand(x, y) && owner[y * W + x] < 0 && Math.hypot(x * T - S.player.x, y * T - S.player.y) > T * 14) { sx = x; sy = y; }
   }
   if (sx === null) { sx = t.x + townRadius(t) + 2; sy = t.y; if (Math.hypot(sx * T - S.player.x, sy * T - S.player.y) < T * 10) sx = t.x - townRadius(t) - 2; }
-  const n = warbandSize(w) - 1, hp = 3 + Math.round(w.diff * 0.7), we = w.era !== undefined ? w.era : S.era;
-  const mk = cmd => { const ut = cmd ? null : pickMix(warMix(w)), mh = cmd ? Math.round(14 * w.diff) : Math.max(2, Math.round(hp * UNITS[ut].hp));
-    return { war: true, cmd, ut, x: (sx + .5) * T + rr(-40, 40), y: (sy + .5) * T + rr(-40, 40), hp: mh, maxHp: mh,
+  return { sx, sy };
+}
+function spawnWarband(wave) {
+  const w = S.war, t = townById(w.town); if (!t) { S.war = null; return; }
+  warSetForce(w);
+  if (!w.sp || !wave) w.sp = warSpawnPoint(t);
+  const { sx, sy } = w.sp;
+  const hp = 3 + Math.round(w.diff * 0.7), rep0 = warbandRep(w), mix = warMix(w);
+  const mk = (cmd, ut, rep) => { const m = repHpMul(rep), mh = cmd ? Math.round(14 * w.diff) : Math.max(2, Math.round(hp * UNITS[ut].hp * m));
+    return { war: true, cmd, ut: cmd ? null : ut, rep: cmd ? 0 : rep, am: cmd ? 1 : m, x: (sx + .5) * T + rr(-40, 40), y: (sy + .5) * T + rr(-40, 40), hp: mh, maxHp: mh,
     t: 0, vx: 0, vy: 0, atk: rr(0.8, 2.2), walk: rand() * 6, loot: 0, raidT: 0, prog: 0, bestD: 1e9 }; };
-  for (let i = 0; i < n; i++) bandits.push(mk(false));
-  bandits.push(mk(true));
+  let left = warReserve(), alive = bandits.filter(b => b.war).length, made = 0;
+  // 병종 비율대로 (처음 물결엔 병종마다 한 명씩)
+  const plan = mixGroups(mix, left);
+  const order = []; for (const g of plan) order.push(g.ut);
+  while (left > 0 && alive < warbandLive()) {
+    const ut = order.length ? order.shift() : pickMix(mix), rep = Math.min(rep0, left);
+    const nb = mk(false, ut, rep); if (!canStand(nb.x, nb.y, 9)) { nb.x = (sx + .5) * T; nb.y = (sy + .5) * T; } // 산·물 위에 서지 않게
+    bandits.push(nb); left -= rep; alive++; made++;
+  }
+  if (!wave && !bandits.some(b => b.war && b.cmd)) { const c = mk(true); if (!canStand(c.x, c.y, 9)) { c.x = (sx + .5) * T; c.y = (sy + .5) * T; } bandits.push(c); }
+  if (wave) toast(`🏴 적 증원 ${made}명(×${rep0})이 몰려옵니다 · 남은 적 ${Math.ceil(warMenLeft())}명`, 2.5);
 }
 function warUnitAI(b, dt) {
   const p = S.player, t = S.war && townById(S.war.town);
+  if (t && !canStand(b.x, b.y, 9)) { // 밀려서 산·물 위에 올라섰으면 (영주가 닿을 수 없음) 마을 쪽 땅으로 내려온다
+    const tx = (t.x + .5) * T, ty = (t.y + 1.3) * T, d = Math.hypot(tx - b.x, ty - b.y) || 1;
+    for (let k = 1; k <= 8; k++) { const nx = b.x + (tx - b.x) / d * T * k * 0.5, ny = b.y + (ty - b.y) / d * T * k * 0.5; if (canStand(nx, ny, 9)) { b.x = nx; b.y = ny; break; } }
+  }
   const dp = Math.hypot(p.x - b.x, p.y - b.y);
   let tx, ty, foe = null;
   const sol = dp < T * 7 ? null : nearestSoldier(b.x, b.y, T * 5);
@@ -441,7 +467,7 @@ function warUnitAI(b, dt) {
     if (b.raidT <= 0) {
       b.raidT = 3; b.swing = 0.25;
       const steal = Math.min(S.gold, 5), lv = townLevel(t);
-      S.gold -= steal; if (t.pop > 1) t.pop--;
+      S.gold -= steal; if (t.pop > 1) { t.pop--; if (S.war && S.war.milLeft > 0) S.war.milLeft--; }
       floatText(tx, ty - 40, `👥-1${steal ? ' 🪙-' + steal : ''}`, '#ff7a7a');
       if (townLevel(t) !== lv) recomputeOwner();
       if (!b.warned) { b.warned = true; toast(`🏴 적 군단이 ${t.name}에 침입했습니다!`, 2.5); }
@@ -453,19 +479,24 @@ function warUnitAI(b, dt) {
 }
 function fieldWarWin() {
   const w = S.war, t = w && townById(w.town);
-  const gold = 30 + Math.round(w.diff * 20) + kWarResult(w, true);
+  const gold = 30 + Math.round(w.diff * 20) + kWarResult(w, true, w.men0 || 0);
   S.gold += gold; S.warsWon++; rulerStat('wars'); gainExp(40);
   S.war = null; S.warT = 0; S.nextWar = 150 + ri(80);
-  banner('방어 성공!', `${warFaction(w).name} 격퇴 · 🪙+${gold} · 경험치 +40`, 3);
+  banner('방어 성공!', `${warFaction(w).name} ${w.men0 || ''}명 격퇴 · 🪙+${gold} · 경험치 +40`, 3);
   save();
 }
-// 대규모 전투 민병 수 (훈련된 군대는 따로 S.army)
-function allyCount() { return Math.min(24, 4 + Math.floor(S.towns.reduce((a, t) => a + t.pop, 0) / 4)); }
 function onBattleEnd(win, st) {
   const w = S.war; const t = w && townById(w.town);
-  if (st.lost) for (const k in st.lost) S.army[k] = Math.max(0, (S.army[k] | 0) - st.lost[k]); // 전사한 훈련병
+  // 전사자를 실제 주둔지·출정대에서 뺀다 · 민병 전사자는 그 마을 인구에서
+  let milLost = 0;
+  for (const g of st.loss || []) {
+    if (g.aux) continue;
+    if (g.mil) { const mt = townById(g.src); if (mt) mt.pop = Math.max(1, mt.pop - g.lost); milLost += g.lost; }
+    else armyTake(g.ut, g.lost, g.src);
+  }
+  soldierRealloc();
   S.war = null; S.warT = 0; S.nextWar = 150 + ri(80);
-  const kx = kWarResult(w, win), kd = kByWar(w);
+  const kx = kWarResult(w, win, st.eArmy || 0, st.eMil || 0), kd = kByWar(w);
   if (win) {
     const gold = 40 + st.kos + Math.round(w.diff * 30) + kx;
     S.gold += gold; S.warsWon++; rulerStat('wars');
@@ -477,10 +508,10 @@ function onBattleEnd(win, st) {
     gainExp(Math.floor(st.exp / 2));
     toast(`원정 실패… 🪙-${lost} · 군대가 퇴각했습니다`, 3.5);
   } else {
-    if (t) { t.pop = Math.max(1, Math.floor(t.pop / 2)); }
+    if (t) { t.pop = Math.max(1, Math.floor(t.pop * 0.7)); } // 민병 전사자에 더해 약탈
     const lost = Math.floor(S.gold * 0.25); S.gold -= lost;
     gainExp(Math.floor(st.exp / 2));
-    toast(`패배… ${t ? t.name + ' 인구 절반 손실, ' : ''}🪙-${lost}`, 3.5);
+    toast(`패배… ${t ? t.name + ' 약탈당함 (인구 -30%), ' : ''}🪙-${lost}`, 3.5);
   }
   S.player.hp = heroMaxHp();
   recomputeOwner(); save();
@@ -672,7 +703,11 @@ function updateWorld(dt) {
 
   // 전쟁
   if (S.towns.length) {
-    if (S.war) { if (S.war.field && !bandits.some(b => b.war)) spawnWarband(); }
+    if (S.war && S.war.field) { // 들판 전투: 첫 물결 / 살아 있는 적이 적어지면 남은 병력이 증원으로
+      const alive = bandits.filter(b => b.war && !b.cmd).length;
+      if (!bandits.some(b => b.war)) { if (warReserve() > 0) spawnWarband(); else fieldWarWin(); }
+      else if (alive <= Math.floor(warbandLive() / 3) && warReserve() > 0) spawnWarband(true);
+    }
     else { S.warT += dt; if (S.warT > S.nextWar && !(typeof evBusy === 'function' && evBusy())) startWarEvent(); }
   }
 
@@ -1021,14 +1056,29 @@ function load() {
     S = o; bandits.length = 0; villagers.length = 0; soldiers.length = 0; shots.length = 0; envoys.length = 0;
     computeDerived(); kOwner.fill(-1);
     if (S.kingdoms && S.kingdoms.length) kRecompute(); // 왕국 땅을 먼저 (마을 영토가 겹치지 않게)
-    recomputeOwner(); kInit(); applyEraTheme();
+    recomputeOwner(); kInit(); applyEraTheme(); armyFix(); // 옛 저장: 군대를 마을 주둔군으로 나눔
     toast('이어서 플레이합니다', 1.5);
     if (S.war && !S.war.field) setTimeout(askWar, 600);
     return true;
   } catch (e) { return false; }
 }
 
+// 들판 전투: 적 대표 병사·민병 머리 위 "×N" (3D 화면 위 2D, drawWorld3D 다음에 그린다)
+const warPr = {};
+function warRepTags() {
+  if (!S.war || !S.war.field || typeof USE3D === 'undefined' || !USE3D || typeof R3D === 'undefined') return;
+  const p = S.player, ks = clamp(R3D.ppu(p.x / T, 0, p.y / T) / 32, 0.85, 1.5);
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  const tag = (e, team, mil, n) => {
+    R3D.project(e.x / T, 2.05 + (UNITS[e.ut] && UNITS[e.ut].role === 'cav' ? 0.5 : 0), e.y / T, warPr);
+    if (!warPr.vis || warPr.x < -20 || warPr.y < -20 || warPr.x > VW + 20 || warPr.y > VH + 20) return;
+    repTag(ctx, warPr.x + 14 * ks, warPr.y, n, team, mil, ks);
+  };
+  for (const b of bandits) if (b.war && b.rep > 1) tag(b, 1, false, Math.ceil(b.rep * clamp(b.hp / b.maxHp, 0, 1)));
+  for (const s of soldiers) if (s.mil && s.rep > 1) tag(s, 0, true, s.rep);
+}
 function hudWorld() {
+  warRepTags();
   $('rWood').textContent = S.wood; $('rStone').textContent = S.stone; $('rGold').textContent = S.gold;
   $('rHp').textContent = Math.ceil(S.player.hp); $('rTowns').textContent = S.towns.length;
   $('rPop').textContent = S.towns.reduce((a, t) => a + t.pop, 0); $('rLv').textContent = S.hero.lv;
@@ -1044,7 +1094,7 @@ function hudWorld() {
   $('techBtn').classList.toggle('nag', !rs && S.towns.length > 0 && TECHS.some(t => !techAvail(t)));
   $('diploBtn').classList.toggle('war', !!(S.kingdoms && S.kingdoms.some(k => k.st === 'war')));
   const wb = $('warBtn');
-  if (S.war && S.war.field) { wb.style.display = 'block'; wb.textContent = `⚔️ 적 군단 ${bandits.filter(b => b.war).length}명 · 위치`; }
+  if (S.war && S.war.field) { wb.style.display = 'block'; const t = townById(S.war.town); wb.textContent = `⚔️ 적 ${Math.ceil(warMenLeft())}명 vs 아군 ${(t ? locTotal(t.id) : 0) + fieldTotal() + (S.war.milLeft | 0)}명 · 위치`; }
   else wb.style.display = 'none';
   const eb = $('eraBtn'), rd = !!N && eraReady();
   eb.style.display = rd ? 'block' : 'none';

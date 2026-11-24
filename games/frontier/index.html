@@ -70,6 +70,46 @@
   #techPanel .sub, #armyPanel .sub { font-size: 12px; margin-bottom: 6px; line-height: 1.4; }
   #techPanel .close, #armyPanel .close { position: sticky; bottom: 0; margin-bottom: 0; border-radius: 12px; margin-top: 4px; box-shadow: 0 -6px 14px rgba(0,0,0,.45); min-height: 46px; }
   body.battle .sideBtn { display: none !important; }
+  /* 병력: 전장 위 양쪽 병력 막대 · 군대(주둔) 패널 · 출정 선택 · 결과 손실 */
+  #bForce { flex: 1; min-width: 0; max-width: 190px; border-radius: 10px; padding: 4px 8px; font-size: 11px; font-weight: 700; }
+  #bForce .fr { display: flex; align-items: center; gap: 5px; line-height: 15px; }
+  #bForce .fr span { flex: none; color: #cfe3ff; }
+  #bForce .fr.fe span { color: #ffc2b8; }
+  #bForce .fb { flex: 1; height: 7px; background: rgba(0,0,0,.55); border-radius: 4px; overflow: hidden; }
+  #bForce .fb i { display: block; height: 100%; width: 100%; border-radius: 4px; background: linear-gradient(#7cc0ff, #2f6fd0); transition: width .25s; }
+  #bForce .fe .fb i { background: linear-gradient(#ff9a88, #c0301f); }
+  #bForce b { flex: none; min-width: 28px; text-align: right; font-variant-numeric: tabular-nums; }
+  .atabs { display: flex; gap: 6px; overflow-x: auto; margin: 0 0 6px; padding-bottom: 2px; }
+  .atabs .opt { flex: none; width: auto; margin: 0; padding: 5px 10px; min-height: 40px; font-size: 13px; display: block; text-align: center; }
+  .atabs .opt.sel { border: 2px solid var(--accent); box-shadow: inset 0 0 14px -4px var(--accent); }
+  .atabs .opt small { margin-top: 0; font-size: 11px; }
+  .gcard { border: 1px solid var(--line); border-radius: 12px; background: rgba(0,0,0,.22); padding: 6px 8px; margin-bottom: 8px; }
+  .ghead { display: flex; justify-content: space-between; gap: 6px; font-size: 12.5px; color: #dfe6d6; margin-bottom: 4px; }
+  .ghead small { color: #b8c2b0; }
+  .gempty { font-size: 12px; color: #b8c2b0; padding: 6px 0; text-align: center; }
+  .grow, .srow { display: flex; align-items: center; gap: 5px; padding: 3px 0; border-top: 1px solid rgba(255,255,255,.06); font-size: 13px; }
+  .grow .gu, .srow .gu { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .grow b { width: 26px; text-align: center; font-variant-numeric: tabular-nums; }
+  .grow button, .gall button, .srow button { min-height: 36px; border-radius: 9px; border: 1px solid var(--line); background: #34463a; color: var(--txt); font-size: 12.5px; padding: 0 8px; }
+  .grow button:disabled, .gall button:disabled, .srow button:disabled { opacity: .35; }
+  .gall { display: flex; gap: 6px; margin-top: 5px; }
+  .gall button { flex: 1; }
+  .srow button { width: 38px; font-size: 17px; font-weight: 800; padding: 0; }
+  .srow button.all { width: 46px; font-size: 12px; font-weight: 600; padding: 0; }
+  .srow .sn { width: 58px; text-align: center; font-variant-numeric: tabular-nums; font-weight: 800; }
+  .srow .sn small { display: block; font-size: 10.5px; font-weight: 400; color: #b8c2b0; margin: 0; }
+  .vs { display: flex; align-items: center; gap: 8px; margin: 8px 0; font-size: 13px; }
+  .vs .fb { flex: 1; height: 10px; border-radius: 5px; overflow: hidden; display: flex; background: rgba(0,0,0,.4); }
+  .vs .fb i { display: block; height: 100%; background: linear-gradient(#7cc0ff, #2f6fd0); }
+  .vs .fb em { display: block; height: 100%; flex: 1; background: linear-gradient(#ff9a88, #c0301f); }
+  .vs b { font-variant-numeric: tabular-nums; }
+  .losses { margin: 8px 0 10px; display: grid; gap: 6px; }
+  .lrow { border-radius: 10px; padding: 6px 10px; background: rgba(0,0,0,.25); border-left: 4px solid #4fa3ff; display: grid; grid-template-columns: auto 1fr; gap: 0 8px; font-size: 13px; }
+  .lrow.foe { border-left-color: #e0503f; }
+  .lrow b { text-align: right; }
+  .lrow small { grid-column: 1 / 3; color: #d8d0c0; font-size: 12px; }
+  .forcebox { font-size: 13px; background: rgba(0,0,0,.28); border-radius: 10px; padding: 7px 10px; margin-bottom: 10px; line-height: 1.55; }
+  .forcebox b.a { color: #9ad0ff; } .forcebox b.e { color: #ffab9e; }
   #warBtn { top: calc(176px + env(safe-area-inset-top)); left: 8px; display: none; min-height: 44px; padding: 10px 14px; border-radius: 12px; border: 2px solid #ffb4a8;
     background: linear-gradient(#e0503f, #a52a20); color: #fff; font-weight: 800; font-size: 14px; animation: pulse 1s infinite; }
   @keyframes pulse { 50% { box-shadow: 0 0 0 6px rgba(224,80,63,.35); } }
@@ -222,6 +262,7 @@
   <div id="bTop">
     <div id="bHero" class="glass"><b id="bName">영주</b> <span id="bLv"></span>
       <div class="barw" id="bHp"><i></i></div><div class="barw" id="bMg"><i></i></div></div>
+    <div id="bForce" class="glass"><div class="fr"><span>아군</span><div class="fb"><i id="bFaBar"></i></div><b id="bFa">0</b></div><div class="fr fe"><span>적군</span><div class="fb"><i id="bFeBar"></i></div><b id="bFe">0</b></div></div>
     <div id="bKo">0<small>KO</small></div>
   </div>
   <div id="bObj" class="glass"></div>
@@ -243,6 +284,7 @@
 <div id="startPanel" class="panel"></div>
 <div id="techPanel" class="panel"></div>
 <div id="armyPanel" class="panel"></div>
+<div id="sortiePanel" class="panel"></div>
 <div id="kPanel" class="panel"></div>
 <div id="evPanel" class="panel"></div>
 <div id="menuPanel" class="panel help">

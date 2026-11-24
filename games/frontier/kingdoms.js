@@ -41,6 +41,10 @@ const kIx = (arr, e) => arr[clamp(e | 0, 0, arr.length - 1)]; // 시대 배열�
 function kEra(k) { return clamp(Math.floor(k.lv + 1e-6), 0, ERAS.length - 1); }
 function kCapLv(k) { return clamp(1 + Math.floor(k.pow / 22), 1, 5); }
 function kRadius(k) { return 2 + kCapLv(k) + (kEra(k) >= 3 ? 1 : 0); }
+// 왕국 병력: k.men (정규군 머릿수). 국력·시대로 정해지는 상한까지 천천히 다시 모이고, 전투에서 잃으면 줄어든다
+function kMenCap(k) { return Math.round((20 + k.pow * 0.9) * (0.8 + kEra(k) * 0.25) * kCiv(k).diff); }
+function kMilitia(k) { return Math.round(5 + k.pow * 0.2); } // 수도가 공격받으면 나서는 민병
+function kMen(k) { const c = kMenCap(k); if (k.men === undefined || k.men > c) k.men = c; return k.men; } // 국력이 줄면 병력 상한도 준다
 function kTitle(k) { return kIx(kCiv(k).titles, kEra(k)); }
 function kRuler(k) { return `${kTitle(k)} ${k.ruler}`; }
 const kFacCache = new Map();
@@ -169,6 +173,7 @@ function kTick(dt) {
     if (C.id === 'sage') target += Math.min(12, S.buildings.filter(b => b.type === 'school').length * 3);
     if (C.id === 'sea' && S.kingdoms.some(o => o !== k && o.st === 'war')) target -= 8;
     k.rel = clamp(k.rel + (target - k.rel) * sdt / 150, -100, 100);
+    const mc = kMenCap(k); if (kMen(k) < mc) k.men = Math.min(mc, k.men + mc / 300 * sdt * (k.st === 'war' ? 0.6 : 1)); // 병력 재건
     // 선전포고
     const coming = envoys.some(e => e.k === i);
     if (k.st !== 'war' && k.rel <= C.warAt && !kBusy() && !coming) { kEnvoy(i, 'declare'); return; }
@@ -208,15 +213,20 @@ function kInvade(i) {
   k.warT = 150 + ri(70);
   const e = kEra(k), diff = (1 + S.warsWon * 0.3 + S.towns.length * 0.1) * ERAS[e].diff * C.diff * (0.8 + k.pow / 250);
   S.war = { town: t.id, diff, faction: 0, field: false, era: e, kingdom: i };
+  warSetForce(S.war); // 침공군 = 그 왕국 병력의 60%
   askWar();
 }
-// 우리가 수도로 쳐들어간다 (대규모 전투)
+// 우리가 수도로 쳐들어간다 (대규모 전투): 먼저 출정 병력을 고른다 (적 수비 = 그 왕국 병력 전부 + 수도 민병)
 function kAttack(i) {
   const k = S.kingdoms[i], C = kCiv(k), t = kMainTown(k); if (!t || S.war) return;
   const e = kEra(k), diff = (1.2 + S.warsWon * 0.3 + S.towns.length * 0.1) * ERAS[e].diff * C.diff * (0.9 + k.pow / 200);
-  S.war = { town: t.id, diff, faction: 0, field: false, era: e, kingdom: i, attack: true };
-  dismount(); startBattle(S.war);
-  banner(`${C.name} 수도 공격!`, `${kIx(C.boss, e)}${josaP(kIx(C.boss, e), '을를')} 쓰러뜨려라`, 3);
+  const men = Math.max(6, Math.round(kMen(k))), mil = kMilitia(k);
+  openSortie({ title: `${C.icon} ${C.name} 수도 공격`, foe: `${kRuler(k)}의 수비군`, men, mil, mix: kIx(C.mix, e) }, sel => {
+    S.war = { town: t.id, diff, faction: 0, field: false, era: e, kingdom: i, attack: true, sortie: sel };
+    warSetForce(S.war);
+    dismount(); startBattle(S.war);
+    banner(`${C.name} 수도 공격!`, `${kIx(C.boss, e)}${josaP(kIx(C.boss, e), '을를')} 쓰러뜨려라`, 3);
+  });
 }
 function kDeclare(i, byUs) {
   const k = S.kingdoms[i];
@@ -225,10 +235,12 @@ function kDeclare(i, byUs) {
   save();
 }
 function kPeace(i) { const k = S.kingdoms[i]; k.st = 'peace'; k.rel = Math.max(k.rel, kCiv(k).warAt + 25); k.score = 0; k.warT = 0; save(); }
-// 전쟁 결과 (world.js fieldWarWin / onBattleEnd 에서 부른다)
-function kWarResult(w, win) {
+// 전쟁 결과 (world.js fieldWarWin / onBattleEnd 에서 부른다) · lost: 그 왕국이 잃은 정규군 · milLost: 수도 민병 손실
+function kWarResult(w, win, lost, milLost) {
   const k = kByWar(w); if (!k) return 0;
   const C = kCiv(k);
+  k.men = Math.max(0, kMen(k) - (lost || 0));
+  if (milLost) k.pow = Math.max(0, k.pow - milLost * 0.15);
   if (win) {
     k.score += w.attack ? 2 : 1; k.pow = Math.max(0, k.pow - (w.attack ? 35 : 12));
     if (C.id === 'horse') k.rel += 10; // 용맹을 존중
@@ -389,7 +401,7 @@ function renderDiplo() {
   S.kingdoms.forEach((k, i) => {
     if (only !== undefined && only !== i) return;
     const C = kCiv(k), dist = kMainTown(k) ? Math.round(Math.hypot(k.x - kMainTown(k).x, k.y - kMainTown(k).y)) : 0;
-    h += `<div class="kcard" style="--kc:${C.color}"><div class="khead">${kCrest(k)}<div><b style="font-size:16px">${C.name}</b><div class="sub" style="margin:0">${kRuler(k)} · ${kEraTxt(k)} · 수도 Lv${kCapLv(k)}${dist ? ` · ${dist}칸` : ''}</div></div></div>
+    h += `<div class="kcard" style="--kc:${C.color}"><div class="khead">${kCrest(k)}<div><b style="font-size:16px">${C.name}</b><div class="sub" style="margin:0">${kRuler(k)} · ${kEraTxt(k)} · 수도 Lv${kCapLv(k)}${dist ? ` · ${dist}칸` : ''}<br>🪖 병력 약 ${Math.round(kMen(k))}명 <small>(최대 ${kMenCap(k)})</small></div></div></div>
       <div class="sub" style="margin:4px 0 2px">${C.people} · 성향 <b>${C.trait}</b></div>${kTraitBox(k)}${kRelBar(k)}<div class="kbtns">`;
     const b = (a, ic, label, sub, dis) => { h += `<button class="opt" data-k="${i}" data-a="${a}" ${dis ? 'disabled' : ''}><span class="ic">${ic}</span><span>${label}<small>${sub}</small></span></button>`; };
     if (k.st !== 'war') {
@@ -399,7 +411,7 @@ function renderDiplo() {
       if (k.st === 'trade' || k.st === 'ally') b('cut', '✂️', k.st === 'ally' ? '동맹 깨기' : '교역 끊기', '관계 -25', false);
       b('war', '⚔️', '선전포고', `주력: ${mixText(kIx(C.mix, kEra(k)))}${C.id === 'sea' ? '' : ''} · 다른 왕국 관계도 변함`, !!S.war);
     } else {
-      b('attack', '🏹', '수도로 진격 (대규모 전투)', `이기면 약탈 · 국력 크게 감소 · 전승 ${k.score}`, !!S.war);
+      b('attack', '🏹', '수도로 진격 (대규모 전투)', `수비군 약 ${Math.round(kMen(k)) + kMilitia(k)}명 · 출정할 병사를 고릅니다 · 이기면 약탈 · 전승 ${k.score}`, !!S.war || !armyTotal());
       const pc = Math.round(40 * (1 + S.era * 0.5));
       b('sue', '🕊️', '강화 제의', k.score >= 2 ? '그들도 지쳤습니다 · 무료로 평화' : `🪙${pc} 배상 · 전승 2회면 무료`, k.score < 2 && S.gold < pc);
     }

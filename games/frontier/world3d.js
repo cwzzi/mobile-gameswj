@@ -85,6 +85,11 @@ vec4 gW = vec4(1.0, 0.0, 0.0, 0.0); vec2 gP = vWP.xz, gQ = gP * uRGs;
 #endif
   gW /= max(dot(gW, vec4(1.0)), 0.001);
   diffuseColor.rgb *= (0.9 + 0.17 * dA) * (0.93 + 0.14 * dB);
+  { // 큰 얼룩(약 50칸 주기): 풀밭이 마른 곳(누런 풀) · 짙은 곳으로 나뉘어 한 가지 초록으로 칠한 느낌이 덜하다
+    float dC = texture2D(uDetail, gP * 0.021 + 0.71).r; // 텍스처 읽기 1번 추가 (낮음 품질 포함)
+    vec3 tone = mix(vec3(0.84, 0.96, 0.86), vec3(1.1, 1.03, 0.76), smoothstep(0.32, 0.68, dC * 0.8 + dB * 0.2));
+    diffuseColor.rgb *= mix(vec3(1.0), tone, gW.r * 0.85 + gW.a * 0.4);
+  }
   if (uRG > 0.5) {
     vec3 aG = texture2D(uGa, gQ).rgb / max(texture2D(uGa, gQ, 12.0).rgb, vec3(0.02));
     vec3 aD = texture2D(uDa, gQ * 1.13 + 0.31).rgb / max(texture2D(uDa, gQ, 12.0).rgb, vec3(0.02));
@@ -94,7 +99,7 @@ vec4 gW = vec4(1.0, 0.0, 0.0, 0.0); vec2 gP = vWP.xz, gQ = gP * uRGs;
     t = mix(vec3(dot(t, vec3(0.3, 0.59, 0.11))), t, 0.5); // 사진 고유의 색 차이는 반만 (마른 풀색 빼기)
     diffuseColor.rgb *= mix(vec3(1.0), clamp(t, 0.25, 2.2), uRGk);
   }
-  { float l = dot(diffuseColor.rgb, vec3(0.3, 0.59, 0.11)); diffuseColor.rgb = max(mix(vec3(l), diffuseColor.rgb, 1.15), 0.0); }
+  { float l = dot(diffuseColor.rgb, vec3(0.3, 0.59, 0.11)); diffuseColor.rgb = max(mix(vec3(l), diffuseColor.rgb, 1.0), 0.0); }
 }
 #endif`;
 const W3_RG_NRM = `#include <normal_fragment_maps>
@@ -132,7 +137,7 @@ function w3dGroundMat(tex, rep, splat) {
         sh.fragmentShader.replace('#include <map_fragment>', W3_GROUND_MAP).replace('#include <normal_fragment_maps>', W3_GROUND_NRM);
     }
   };
-  m.customProgramCacheKey = () => 'w3ground3' + (splat ? 'S' : '') + (RG ? 'R' : '');
+  m.customProgramCacheKey = () => 'w3ground4' + (splat ? 'S' : '') + (RG ? 'R' : '');
   return m;
 }
 // 물: 노멀맵 2겹(흐름) + 하늘 반사(프레넬) + 해/달 반짝임 + 가까운 불빛 8개의 반사(물 위로 길게 번지는 빛)
@@ -261,7 +266,7 @@ function w3dInit() {
   water.position.set(W / 2, -0.1, H / 2); water.renderOrder = 1; scene.add(water);
   const waves = null, wtex = null;
   const detail = w3dDetailTex();
-  const blobs = R3D.blobs(scene, 160);
+  const blobs = R3D.blobs(scene, 240);
 
   // 숲 재질: 바람에 흔들림 + 벌목 중인 칸은 크게 흔들림
   const uTime = { value: 0 }, uChop = { value: new THREE.Vector3(-99, -99, 0) };
@@ -323,13 +328,14 @@ function w3dReset() {
     W3.chunks.push({ cx, cz, box: new THREE.Box3(new THREE.Vector3(cx * CK - 2, -1, cz * CK - 2), new THREE.Vector3(cx * CK + CK + 2, 3.5, cz * CK + CK + 2)), ground: null, gDirty: true, props: null, pDirty: true });
   const ch = W3.ch = new Float32Array((W + 1) * (H + 1));
   for (let vz = 0; vz <= H; vz++) for (let vx = 0; vx <= W; vx++) {
-    let allW = true, md = 9;
+    let nW = 0, md = 9;
     for (const [dx, dz] of [[-1, -1], [0, -1], [-1, 0], [0, 0]]) {
       const x = vx + dx, z = vz + dz;
-      if (tileAt(x, z) !== WATER) { allW = false; break; }
-      md = Math.min(md, (x < 0 || z < 0 || x >= W || z >= H) ? 6 : waterDepth[z * W + x]);
+      if (tileAt(x, z) !== WATER) continue;
+      nW++; md = Math.min(md, (x < 0 || z < 0 || x >= W || z >= H) ? 6 : waterDepth[z * W + x]);
     }
-    ch[vz * (W + 1) + vx] = allW ? -(0.2 + 0.075 * Math.min(md, 6)) : 0;
+    // 물가 꼭짓점도 물 칸 수만큼 조금 낮춘다 → 수면(-0.1)과 만나는 물가선이 계단 대신 모서리가 깎인 사선이 된다
+    ch[vz * (W + 1) + vx] = nW === 4 ? -(0.2 + 0.075 * Math.min(md, 6)) : nW === 3 ? -0.17 : nW === 2 ? -0.065 : 0;
   }
   w3dBuildMask();
   for (let i = 0; i < W * H; i++) w3dSplatPx(i);
@@ -345,10 +351,10 @@ const W3_WATER_BED = ['#1d4669', '#d4c189', '#8fc4a0', '#4f9ea2', '#357f98', '#2
 function w3dBaseCol(t, x, y) {
   const h = hash2(x, y), patch = hash2(x >> 2, (y >> 2) + 777);
   if (t === WATER) return W3_WATER_BED[(x < 0 || y < 0 || x >= W || y >= H) ? 6 : waterDepth[y * W + x] || 6];
-  if (t === SAND) return shadeHex('#e6d39a', 0.95 + h * 0.08);
-  if (t === FOREST) return shadeHex('#4a8338', 0.9 + h * 0.08 + patch * 0.06);
-  if (t === MOUNTAIN || t === GOLD) return shadeHex('#828c66', 0.92 + h * 0.1);
-  return shadeHex('#74b552', 0.9 + h * 0.06 + patch * 0.1);
+  if (t === SAND) return shadeHex('#cbb784', 0.95 + h * 0.07);
+  if (t === FOREST) return shadeHex('#4a7c36', 0.9 + h * 0.08 + patch * 0.06);
+  if (t === MOUNTAIN || t === GOLD) return shadeHex('#7c8462', 0.92 + h * 0.1);
+  return shadeHex('#6fa24e', 0.9 + h * 0.06 + patch * 0.1);
 }
 const w3dSmall = document.createElement('canvas'); w3dSmall.width = w3dSmall.height = CK + 2;
 const w3dSmallG = w3dSmall.getContext('2d');
@@ -380,7 +386,7 @@ function w3dPaint(c) {
   for (let j = -1; j <= CK; j++) for (let i = -1; i <= CK; i++) {
     const x = x0 + i, y = y0 + j, t = tileAt(x, y);
     if (t === WATER) hasWater = true;
-    w3dSmallG.fillStyle = t === WATER ? '#e2cf96' : w3dBaseCol(t, x, y); w3dSmallG.fillRect(i + 1, j + 1, 1, 1);
+    w3dSmallG.fillStyle = t === WATER ? '#d8c48e' : w3dBaseCol(t, x, y); w3dSmallG.fillRect(i + 1, j + 1, 1, 1);
   }
   g.setTransform(1, 0, 0, 1, 0, 0); g.imageSmoothingEnabled = true;
   g.drawImage(w3dSmall, 0, 0, CK + 2, CK + 2, -P, -P, (CK + 2) * P, (CK + 2) * P);
@@ -411,7 +417,7 @@ function w3dPaint(c) {
       const nt = tileAt(x + dx, y + dy);
       if (t !== WATER && nt === WATER) {
         const gr = dx ? g.createLinearGradient(px + (dx > 0 ? P : 0), 0, px + (dx > 0 ? P - 6 : 6), 0) : g.createLinearGradient(0, py + (dy > 0 ? P : 0), 0, py + (dy > 0 ? P - 6 : 6));
-        if (t !== SAND) { gr.addColorStop(0, 'rgba(230,212,156,.85)'); gr.addColorStop(1, 'rgba(230,212,156,0)'); }
+        if (t !== SAND) { gr.addColorStop(0, 'rgba(218,198,142,.82)'); gr.addColorStop(1, 'rgba(218,198,142,0)'); }
         else { gr.addColorStop(0, 'rgba(170,150,100,.45)'); gr.addColorStop(1, 'rgba(170,150,100,0)'); }
         g.fillStyle = gr; g.fillRect(px, py, P, P);
       } else if (t === WATER && nt !== WATER) {
@@ -576,6 +582,7 @@ function w3dRealFill() {
     if (W3.rpool) for (const k in W3.rpool) W3.rpool[k] && W3.rpool[k].dispose();
     W3.rpool = {}; for (const k of W3_RKINDS) W3.rpool[k] = RA.pool(k, W3.scene, lowQ); W3.rpoolV = RA.ver; W3.rpoolLow = lowQ; W3.realDirty = true;
   }
+  const tpS = !!W3.tpOn; if (W3.rfTP !== tpS) { W3.rfTP = tpS; W3.realDirty = true; } // 바닥 풀 카드는 3인칭에서만 (위에서 보면 가는 X 자 무늬로만 보였다)
   const moved = Math.abs(W3.tx - (W3.rfX || -99)) + Math.abs(W3.tz - (W3.rfZ || -99)) > 0.15;
   if (!moved && !W3.realDirty) return;
   W3.rfX = W3.tx; W3.rfZ = W3.tz; W3.realDirty = false;
@@ -584,16 +591,17 @@ function w3dRealFill() {
   for (const c of W3.chunks) {
     if (!c.real || !c.props || !c.props.visible) continue;
     for (const k in c.real) {
+      if (k === 'scatter_grass' && !tpS) continue;
       const L = c.real[k], buf = w3dRealBuf[k], rad = W3_RRAD[k] || (k.startsWith('tree') ? (low ? 1.2 : 2.0) : 0.8), sc = k.startsWith('scatter');
       for (const e of L) { if (sc && Math.abs(e.x - W3.tx) + Math.abs(e.z - W3.tz) > 20) continue; sph.center.set(e.x, 0.6, e.z); sph.radius = rad; if (F.intersectsSphere(sph)) buf[cnt[k]++] = e; }
     }
   }
-  for (const k of W3_RKINDS) { const P = W3.rpool[k]; if (P) P.fill(w3dRealBuf[k], cnt[k], !low && k !== 'bush' && k !== 'mountain_a' && !k.startsWith('scatter'), k === 'rock_a' || k === 'rock_b' || k === 'mountain_a' || k.startsWith('scatter')); }
+  for (const k of W3_RKINDS) { const P = W3.rpool[k]; if (P) P.fill(w3dRealBuf[k], cnt[k], !low && k !== 'bush' && k !== 'mountain_a' && !k.startsWith('scatter'), k === 'mountain_a' || k.startsWith('scatter')); }
 }
 // ---------- 사실적 환경 모델 (real3d.js) ----------
 function w3dRealOK() { return typeof RA !== 'undefined' && RA.ok; }
 const W3_TREE_SPOTS = [[], [[0.5, 0.5]], [[0.3, 0.36], [0.7, 0.66]], [[0.28, 0.3], [0.74, 0.38], [0.46, 0.76]]];
-const W3_RTINT = { tree_broadleaf_a: new THREE.Color(0.86, 1.06, 0.72), tree_broadleaf_b: new THREE.Color(0.8, 1.0, 0.74), tree_conifer: new THREE.Color(0.82, 0.98, 0.86), bush: new THREE.Color(0.86, 1.04, 0.72), scatter_grass: new THREE.Color(1.1, 1.65, 0.8), scatter_flowers: new THREE.Color(1.1, 1.3, 0.85) };
+const W3_RTINT = { tree_broadleaf_a: new THREE.Color(0.86, 1.06, 0.72), tree_broadleaf_b: new THREE.Color(0.8, 1.0, 0.74), tree_conifer: new THREE.Color(0.95, 1.12, 0.95), bush: new THREE.Color(1.2, 1.42, 1.0), scatter_grass: new THREE.Color(1.1, 1.65, 0.8), scatter_flowers: new THREE.Color(1.1, 1.3, 0.85) };
 // 타일 하나의 숲/바위/덤불을 목록에 넣는다. 처리했으면 true (그 칸의 예전 나무·바위는 건너뜀)
 function w3dRealProps(RL, t, x, y, i, h, low, L) {
   const col = (k, v, d) => { const c = new THREE.Color(); const b = 0.88 + v * 0.22; c.setRGB(b, b * (0.97 + ((v * 7) % 1) * 0.06), b * (0.95 + ((v * 13) % 1) * 0.08)); if (W3_RTINT[k]) c.multiply(W3_RTINT[k]); if (d) c.multiplyScalar(d); return c; };
@@ -620,7 +628,7 @@ function w3dRealProps(RL, t, x, y, i, h, low, L) {
     }
     if (first === (y - by) * 2 + (x - bx)) {
       const hh = hash2(bx + 5, by + 9), s = [0, 0.07, 0.08, 0.09, 0.1][n] * (0.9 + hash2(bx, by + 13) * 0.3);
-      const v = 0.92 + hh * 0.16, c = gold ? new THREE.Color(v * 1.45, v * 1.1, v * 0.6) : new THREE.Color(v, v * 1.01, v * 1.03);
+      const v = 0.92 + hh * 0.16, c = gold ? new THREE.Color(v * 1.18, v * 1.04, v * 0.8) : new THREE.Color(v, v * 1.01, v * 1.03);
       RL.mountain_a.push({ x: sx / n + (hh - 0.5) * 0.2, z: sz / n + (hash2(bx + 2, by) - 0.5) * 0.2, y: -0.04, ry: hh * 6.28, s, sy: 1.0 + hash2(bx, by + 3) * 0.3, c });
     }
     if (t === GOLD) L.nug2.push([x + 0.5, y + 0.5, h * 6.28, 1, 1, h]);
@@ -889,7 +897,10 @@ function w3dPalisadeGeo() {
   });
 }
 // ---------- 모습 ----------
-const W3_HS = 1.4; // 말 크기
+const W3_HS = 1.4; // 말 크기 (사람과 같이 W3_PK 를 곱해 그린다)
+// 오픈월드 축척: 사람·말은 읽히도록 실제보다 크게 그리지만, 예전엔 집보다 커서 마을이 장난감처럼 보였다
+// → 사람·말 0.8배(위 시점), 건물·성은 조금 키운다. 3인칭에선 W3_TP.hk 로 더 작게(집·나무 크기에 맞춰)
+const W3_PK = 0.8, W3_BK = [1.12, 1.22, 1.12];
 const W3_WIN = new THREE.Color('#ff9a44'), W3_FIRE = new THREE.Color('#ff7a26');
 const W3_WINB = { house: 1, school: 1, market: 1, barracks: 1, lumber: 1, mine: 1, stable: 1, factory: 1 }; // 밤에 창/문간 불이 켜지는 건물
 const W3_BSCALE = { school: [1.25, 1.35, 1.25], house: [1.25, 1.4, 1.25], tower: [1.15, 1.45, 1.15], market: [1.2, 1.35, 1.2], farm: [1, 1.3, 1], factory: [1.4, 1.55, 1.4] };
@@ -998,11 +1009,11 @@ function w3dTownLamps(t, m) {
 const W3_KEYS = [
   [0.00, '#ff9060', 0.06, '#8496c4', '#2a2434', 0.40, '#b08c98', '#5a6aa8', '#f0a080', '#1c3050', '#3a6a80', 1.10, 0.7, 1.0, 1.05, 1.05, '#0a0412', '#fff0e0', 0.38, 0.6],
   [0.035, '#ffb070', 0.55, '#a8b8d8', '#4a4040', 0.48, '#d4b8a8', '#7a98d0', '#ffd0a0', '#1c4a70', '#4a9aaa', 1.05, 0.45, 1.3, 1.08, 1.04, '#060408', '#fff4e4', 0.32, 0.0],
-  [0.09, '#ffe2bc', 0.92, '#c4daf4', '#5e6a48', 0.52, '#c8d8e4', '#6aa4e4', '#e4ecf4', '#1b5d8c', '#46c2cf', 1.0, 0.25, 1.7, 1.08, 1.04, '#000000', '#ffffff', 0.26, 0.0],
-  [0.25, '#fff6e8', 1.0, '#d0e6ff', '#6a7a4c', 0.55, '#bcd4e8', '#5d9be0', '#dcecf8', '#1b5d8c', '#46c2cf', 1.08, 0.22, 1.8, 1.06, 1.07, '#000000', '#ffffff', 0.24, 0.0],
-  [0.40, '#ffe0b4', 0.98, '#d4dcec', '#6a6844', 0.52, '#d4d4cc', '#6a9ad8', '#f2e2c8', '#1d5a86', '#48b8c4', 1.08, 0.28, 1.6, 1.08, 1.07, '#020000', '#fff8f0', 0.28, 0.0],
-  [0.465, '#ff9a58', 0.85, '#d0a49a', '#4a3a32', 0.5, '#e0a080', '#7a7cb4', '#ffb070', '#1c3c64', '#2e7088', 1.1, 0.5, 1.2, 1.14, 1.06, '#0a0204', '#fff0dc', 0.34, 0.2],
-  [0.50, '#ff6030', 0.12, '#8a6a92', '#2a2030', 0.44, '#8a5e78', '#3a4a8a', '#e87850', '#1a2a4c', '#3a4a60', 1.12, 0.8, 1.0, 1.08, 1.06, '#0a0418', '#ffe8dc', 0.42, 0.7],
+  [0.09, '#ffe2bc', 0.92, '#c4daf4', '#5e6a48', 0.52, '#c8d8e4', '#6aa4e4', '#e4ecf4', '#18557e', '#3aa6b4', 1.0, 0.25, 1.7, 1.08, 1.04, '#000000', '#ffffff', 0.26, 0.0],
+  [0.25, '#fff6e8', 1.0, '#d0e6ff', '#6a7a4c', 0.55, '#bcd4e8', '#5d9be0', '#dcecf8', '#18557e', '#3aa6b4', 1.08, 0.22, 1.8, 1.06, 1.07, '#000000', '#ffffff', 0.24, 0.0],
+  [0.40, '#ffe0b4', 0.98, '#d4dcec', '#6a6844', 0.52, '#d4d4cc', '#6a9ad8', '#f2e2c8', '#1a5480', '#3c9eae', 1.08, 0.28, 1.6, 1.08, 1.07, '#020000', '#fff8f0', 0.28, 0.0],
+  [0.465, '#ff9a58', 0.9, '#d4aca0', '#5a4a3a', 0.6, '#e0a080', '#7a7cb4', '#ffb070', '#1c3c64', '#2e7088', 1.1, 0.5, 1.2, 1.14, 1.06, '#0a0204', '#fff0dc', 0.34, 0.2],
+  [0.50, '#ff6a38', 0.22, '#9a7ca2', '#3c3238', 0.54, '#8a5e78', '#3a4a8a', '#e87850', '#1a2a4c', '#3a4a60', 1.12, 0.8, 1.0, 1.08, 1.06, '#0a0418', '#ffe8dc', 0.42, 0.7],
   [0.56, '#7f98e6', 0.14, '#3c4c8c', '#141828', 0.38, '#28325e', '#1a2450', '#4a4a7a', '#0a1430', '#14283a', 1.18, 1.0, 0.75, 0.95, 1.08, '#020818', '#e8eeff', 0.48, 1.0],
   [0.64, '#9fb6ff', 0.24, '#28386e', '#0a0e1c', 0.26, '#0c1430', '#0a1230', '#1c2448', '#050c1c', '#0c1c2a', 1.22, 1.1, 0.65, 0.9, 1.1, '#000616', '#e0e8ff', 0.5, 1.0],
   [0.86, '#9fb6ff', 0.32, '#28386e', '#0a0e1c', 0.32, '#0c1430', '#0a1230', '#1c2448', '#050c1c', '#0c1c2a', 1.22, 1.1, 0.65, 0.9, 1.1, '#000616', '#e0e8ff', 0.5, 1.0],
@@ -1083,6 +1094,7 @@ function drawWorld3D() {
   const now = performance.now(), dt = Math.min(0.1, (now - W3.lastT) / 1000); W3.lastT = now;
   R3D.tick(dt);
   W3.frame++;
+  if (typeof EVCAM !== 'undefined' && EVCAM.k > 0.3 && w3dRealOK()) w3dCollide(S.player);
   const p = S.player, tm = S.time, px = p.x / T, pz = p.y / T;
   W3.uTime.value = tm;
 
@@ -1096,7 +1108,10 @@ function drawWorld3D() {
   cam.lookAt(W3.tx + sx, 0, W3.tz + sz);
   // 3인칭 (사람 찾기 등 '장면 속으로'): 위에서 내려다보는 시점 → 영주 어깨 뒤 낮은 시점으로 부드럽게
   const ek = typeof EVCAM !== 'undefined' ? EVCAM.k : 0;
-  const hk = w3dTPCam(cam, px, pz, ek);
+  const hk = w3dTPCam(cam, px, pz, ek), pk = W3_PK + (1 - hk) / (1 - W3_TP.hk) * (W3_TP.hk - W3_PK); // pk: 사람·말 배율 (위 W3_PK → 3인칭 W3_TP.hk)
+  W3.pk = pk;
+  // 나무 걷어내기: 카메라와 영주 사이(+ 3인칭이면 카메라 바로 앞)의 잎을 점무늬로 (real3d.js fadeHook)
+  if (typeof RA !== 'undefined' && RA.U && RA.U.fade) RA.U.fade.value.set(px, (p.mounted ? 1.25 : 0.8) * pk * 1.45, pz, ek > 0.5 ? 1 + ek : 0.85);
   cam.updateMatrixWorld();
   W3.pm.multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse); W3.frustum.setFromProjectionMatrix(W3.pm);
 
@@ -1227,8 +1242,9 @@ function drawWorld3D() {
       let flag = null; if (bg.flag) { flag = w3dFlag(col, 0.3, 0.19); flag.mesh.position.set(...bg.flag); group.add(flag.mesh); }
       return { group, flag, sc: W3_BSCALE[b.type] || [1, 1, 1] };
     });
-    r.m.group.position.set(x, 0, z); r.m.group.scale.set(...r.m.sc); if (r.m.ry !== undefined) r.m.group.rotation.y = r.m.ry;
+    r.m.group.position.set(x, 0, z); if (b.type === 'farm') r.m.group.scale.set(...r.m.sc); else r.m.group.scale.set(r.m.sc[0] * W3_BK[0], r.m.sc[1] * W3_BK[1], r.m.sc[2] * W3_BK[2]); if (r.m.ry !== undefined) r.m.group.rotation.y = r.m.ry;
     if (r.m.flag) w3dWave(r.m.flag, tm);
+    if (b.type !== 'farm') BL.add(x, z, b.type === 'tower' ? 0.4 : 0.68); // 건물 밑 접지 그늘 (낮음 품질은 그림자맵이 없어 떠 보였다)
     if (W3_STACKS[b.type] && !rb && !ab) { const sc = r.m.sc; for (const st of W3_STACKS[b.type]) smoke.push(x + st[0] * sc[0], st[1] * sc[1], z + st[2] * sc[2], 1, 0.32, b.x * 7 + b.y + st[0]); }
     if (b.type === 'tower') lights.push({ x, y: 1.75, z: z + 0.3, col: LE.col, k: 2.6, glow: 0.7, pool: 1.7, fire: S.era === 0, real: true, r: 5 });
     else if (W3_WINB[b.type] && hash2(b.x * 3 + 1, b.y * 5 + 2) < litFrac) lights.push({ x: x + 0.05, y: 0.45, z: z + 0.5, col: W3_WIN, k: 1.5, glow: 0.42, pool: 0.95 });
@@ -1316,7 +1332,7 @@ function drawWorld3D() {
     if (ek < 0.5) bars.push({ x: px, y: 2.05 + (p.mounted ? R3D.mountUp(W3_HS) - 0.05 : 0), z: pz, f: p.hp / heroMaxHp(), col: '#4c4' });
     W3.slash.visible = swing > 0;
     if (swing > 0) {
-      W3.slash.position.set(px, (p.mounted ? 0.75 + R3D.mountUp(W3_HS) * 0.93 : 0.75) * hk, pz); W3.slash.scale.setScalar(1.4 * hk); W3.slash.rotation.y = -(p.dir || 0);
+      W3.slash.position.set(px, (p.mounted ? 0.75 + R3D.mountUp(W3_HS) * 0.93 : 0.75) * pk, pz); W3.slash.scale.setScalar(1.4 * pk); W3.slash.rotation.y = -(p.dir || 0);
       W3.slash.material.opacity = Math.min(1, swing * 5);
     }
   }
@@ -1325,8 +1341,8 @@ function drawWorld3D() {
     for (const [, r] of W3.dyn) {
       if (r.seen !== W3.frame) continue;
       const m = r.m, gp = m.group;
-      if (m.look && m.pose) { gp.scale.setScalar((m.look.scale || 1) * hk); gp.position.y *= hk; }
-      else if (r.pk.startsWith('horse|')) gp.scale.setScalar(W3_HS * hk);
+      if (m.look && m.pose) { gp.scale.setScalar((m.look.scale || 1) * pk); gp.position.y *= pk; }
+      else if (r.pk.startsWith('horse|')) gp.scale.setScalar(W3_HS * pk);
     }
   }
   for (const [o, r] of W3.dyn) if (r.seen !== W3.frame) w3dDrop(o, r);
@@ -1369,32 +1385,38 @@ function drawWorld3D() {
   R3D.overlay();
   const g = ctx, pr = {};
   const ppu = R3D.ppu(W3.tx, 0, W3.tz), ks = clamp(ppu / 32, 0.85, 1.6);
-  for (const l of labels) {
-    R3D.project(l.x, l.y, l.z, pr); if (!pr.vis) continue;
-    g.textAlign = 'center'; g.font = `800 ${Math.round(12 * ks)}px system-ui, sans-serif`;
-    const tw = g.measureText(l.s).width + 12 * ks, hh = 17 * ks;
-    g.fillStyle = 'rgba(0,0,0,.55)'; rrect(g, pr.x - tw / 2, pr.y - hh, tw, hh, hh / 2); g.fill();
-    g.fillStyle = '#fff'; g.fillText(l.s, pr.x, pr.y - 4.5 * ks);
-    if (l.war) { g.font = `${Math.round(20 * ks)}px system-ui`; g.fillText('⚔️', pr.x + tw / 2 + 12 * ks, pr.y - 2 + Math.sin(tm * 6) * 2); }
+  { // 마을 이름표: 화면 축척과 거의 무관한 작은 크기 (3인칭에서 화면을 가리던 큰 이름표 → 작게, 가까우면 흐리게)
+    const kl = clamp(ppu / 32, 0.8, 1.05);
+    for (const l of labels) {
+      R3D.project(l.x, l.y, l.z, pr); if (!pr.vis) continue;
+      let a = 1;
+      if (ek > 0.3) { const d = Math.hypot(l.x - W3.cam.position.x, l.z - W3.cam.position.z); a = clamp((d - 3) / 4, 0, 1) * clamp((24 - d) / 6, 0, 1); if (a <= 0.02) continue; }
+      g.globalAlpha = a; g.textAlign = 'center'; g.font = `800 ${Math.round(11 * kl)}px system-ui, sans-serif`;
+      const tw = g.measureText(l.s).width + 11 * kl, hh = 16 * kl;
+      g.fillStyle = 'rgba(0,0,0,.5)'; rrect(g, pr.x - tw / 2, pr.y - hh, tw, hh, hh / 2); g.fill();
+      g.fillStyle = '#fff'; g.fillText(l.s, pr.x, pr.y - 4.3 * kl);
+      if (l.war) { g.font = `${Math.round(18 * kl)}px system-ui`; g.fillText('⚔️', pr.x + tw / 2 + 11 * kl, pr.y - 2 + Math.sin(tm * 6) * 2); }
+    }
+    g.globalAlpha = 1;
   }
   drawShots3D(g, shots, pr, ks, 0.85, 14);
   for (const c of coins) { R3D.project(c.x + 0.25, c.y, c.z, pr); g.fillStyle = '#ffd34d'; g.strokeStyle = '#7a5200'; g.lineWidth = 1; g.beginPath(); g.arc(pr.x, pr.y, 3.5 * ks, 0, 7); g.fill(); g.stroke(); }
   for (const b of bars) {
-    R3D.project(b.x, b.y * hk, b.z, pr); if (!pr.vis) continue;
+    R3D.project(b.x, b.y * pk, b.z, pr); if (!pr.vis) continue;
     const w = 28 * ks, hgt = 5 * ks;
     g.fillStyle = 'rgba(0,0,0,.6)'; rrect(g, pr.x - w / 2, pr.y, w, hgt, hgt / 2); g.fill();
     g.fillStyle = b.col; rrect(g, pr.x - w / 2 + 1, pr.y + 1, (w - 2) * clamp(b.f, 0, 1), hgt - 2, (hgt - 2) / 2); g.fill();
   }
   // 파티클 (게임 픽셀 좌표 → 지면 근처 높이로 투영)
-  const pk = ppu / T;
+  const ppk = ppu / T;
   for (const q of parts) {
     R3D.project(q.x / T, 0.35, q.y / T, pr); if (!pr.vis) continue;
     const a = clamp(q.life / q.max, 0, 1);
     g.globalAlpha = q.kind === 'smoke' ? a * 0.45 : a;
     if (ek > 0.3 && q.kind === 'smoke') continue; // 3인칭: 땅 높이에 붙여 그리는 연기·흙먼지는 눈앞에서 커다란 얼룩이 되므로 생략
-    const qk = ek > 0.001 ? Math.min(pk, R3D.ppu(q.x / T, 0.35, q.y / T) / T) : pk; // 3인칭: 가까운 것만 크게 (원근)
+    const qk = ek > 0.001 ? Math.min(ppk, R3D.ppu(q.x / T, 0.35, q.y / T) / T) : ppk; // 3인칭: 가까운 것만 크게 (원근)
     g.fillStyle = q.color; const sz = q.size * qk;
-    if (q.kind === 'spark') { g.strokeStyle = q.color; g.lineWidth = sz * 0.6; g.beginPath(); g.moveTo(pr.x, pr.y); g.lineTo(pr.x - q.vx * 0.04 * pk, pr.y - q.vy * 0.04 * pk); g.stroke(); }
+    if (q.kind === 'spark') { g.strokeStyle = q.color; g.lineWidth = sz * 0.6; g.beginPath(); g.moveTo(pr.x, pr.y); g.lineTo(pr.x - q.vx * 0.04 * ppk, pr.y - q.vy * 0.04 * ppk); g.stroke(); }
     else if (q.kind === 'ring') { if (ek > 0.5) continue; g.strokeStyle = q.color; g.lineWidth = 3 * a; g.beginPath(); g.arc(pr.x, pr.y, sz, 0, 7); g.stroke(); }
     else { g.beginPath(); g.arc(pr.x, pr.y, sz, 0, 7); g.fill(); }
   }
@@ -1417,14 +1439,65 @@ function drawWorld3D() {
 
 
 // ---------- 3인칭 시점 (event.js 의 EVCAM: k 0 = 위에서 · 1 = 어깨 뒤, yaw = 바라보는 방향, 0 = 북쪽(-z)) ----------
-const W3_TP = { hk: 0.6, back: 1.65, up: 1.5, side: 0.32, ahead: 4, lookY: 0.8, fov: 56, fovP: 70, far: 44, fogD: 15 };
-function w3dTPBlock(ptx, ptz, x, z) { // 숲 칸 · 건물 칸 · 마을 중심 (영주가 서 있는 칸은 빼고)
+const W3_TP = { hk: 0.6, back: 1.65, up: 1.5, side: 0.32, ahead: 4, lookY: 0.8, fov: 56, fovP: 70, far: 28, fogD: 14 }; // far: 안개 끝(fogD × 1.95)까지만 그린다 (마을 건너편까지 그리면 100만 삼각형)
+// 3인칭: 영주가 건물·성채·성벽·말뚝 울타리를 뚫고 지나가지 않게, 그리기 직전에 밖으로 밀어낸다 (world.js 이동 규칙은 그대로 · 장면 속 사건에서만)
+function w3dPushBox(p, cx, cz, hx, hz, r) {
+  const x = p.x / T, z = p.y / T, dx = x - cx, dz = z - cz, ox = hx + r - Math.abs(dx), oz = hz + r - Math.abs(dz);
+  if (ox <= 0 || oz <= 0) return;
+  const nx = ox < oz ? x + (dx < 0 ? -ox : ox) : x, nz = ox < oz ? z : z + (dz < 0 ? -oz : oz);
+  if (passable(nx * T, nz * T)) { p.x = nx * T; p.y = nz * T; }
+}
+function w3dCollide(p) {
+  const r = 0.16;
+  for (let it = 0; it < 2; it++) {
+    const x = p.x / T, z = p.y / T;
+    for (const b of w3dBldList()) {
+      if (b.type === 'farm' || Math.abs(b.x + 0.5 - x) > 1.4 || Math.abs(b.y + 0.5 - z) > 1.4) continue;
+      const tw = b.type === 'tower';
+      w3dPushBox(p, b.x + 0.5, b.y + 0.5, tw ? 0.22 : 0.44, tw ? 0.22 : 0.36, r);
+    }
+    for (const t of S.kingdoms ? S.towns.concat(S.kingdoms) : S.towns) {
+      const cx = t.x + 0.5, cz = t.y + 0.5; if (Math.abs(cx - x) > 2.4 || Math.abs(cz - z) > 2.4) continue;
+      const rec = W3.dyn.get(t), C = rec && rec.m.body && rec.m.body.col; if (!C) continue;
+      if (C.box) w3dPushBox(p, cx + C.box[0], cz + C.box[1], C.box[2], C.box[3], r);
+      if (C.wall) { // 네모 성벽 4면 (앞면 가운데는 성문)
+        const [hs, hw, gw] = C.wall, th = 0.07;
+        w3dPushBox(p, cx, cz - hs, hw, th, r); w3dPushBox(p, cx - hs, cz, th, hw, r); w3dPushBox(p, cx + hs, cz, th, hw, r);
+        const sw = (hw - gw) / 2; w3dPushBox(p, cx - gw - sw, cz + hs, sw, th, r); w3dPushBox(p, cx + gw + sw, cz + hs, sw, th, r);
+      }
+      if (C.ring) { // 둥근 말뚝 울타리 (앞쪽 출입구)
+        const dx = p.x / T - cx, dz = p.y / T - cz, d = Math.hypot(dx, dz), R = C.ring;
+        if (d > 0.01 && Math.abs(d - R) < 0.07 + r && dz / d < 0.93) {
+          const nd = d < R ? R - 0.07 - r : R + 0.07 + r, nx = cx + dx / d * nd, nz = cz + dz / d * nd;
+          if (passable(nx * T, nz * T)) { p.x = nx * T; p.y = nz * T; }
+        }
+      }
+    }
+  }
+}
+// 카메라를 막는 것: 산 칸 + 건물·성채 상자(조금 넉넉히). 숲은 막지 않는다 — 카메라 앞 잎은 점무늬로 걷어내므로(real3d fadeHook) 숲에서도 시야가 넓다
+function w3dTPBoxes(px, pz) {
+  const L = W3.tpBox || (W3.tpBox = []); L.length = 0;
+  if (!w3dRealOK()) return L;
+  for (const b of w3dBldList()) {
+    if (b.type === 'farm' || Math.abs(b.x + 0.5 - px) > 3.5 || Math.abs(b.y + 0.5 - pz) > 3.5) continue;
+    const tw = b.type === 'tower';
+    L.push(b.x + 0.5, b.y + 0.5, tw ? 0.32 : 0.56, tw ? 0.32 : 0.48);
+  }
+  for (const t of S.kingdoms ? S.towns.concat(S.kingdoms) : S.towns) {
+    const cx = t.x + 0.5, cz = t.y + 0.5; if (Math.abs(cx - px) > 5 || Math.abs(cz - pz) > 5) continue;
+    const rec = W3.dyn.get(t), C = rec && rec.m.body && rec.m.body.col;
+    if (C && C.box) L.push(cx + C.box[0], cz + C.box[1], C.box[2] + 0.15, C.box[3] + 0.15);
+    else if (!C) L.push(cx, cz, 1.1, 1.1); // 예전 모델: 마을 중심 전체
+  }
+  return L;
+}
+function w3dTPBlock(ptx, ptz, x, z) {
   const tx = Math.floor(x), tz = Math.floor(z), t = tileAt(tx, tz);
-  if (tx === ptx && tz === ptz) return false;
-  if (t === FOREST || t === MOUNTAIN || t === GOLD) return true;
-  for (const b of w3dBldList()) if (b.x === tx && b.y === tz) return true;
-  if (S.kingdoms) for (const k of S.kingdoms) if (Math.abs(x - k.x - 0.5) < 1.1 && Math.abs(z - k.y - 0.5) < 1.1) return true;
-  for (const tw of S.towns) if (Math.abs(x - tw.x - 0.5) < 1.1 && Math.abs(z - tw.y - 0.5) < 1.1) return true;
+  if ((t === MOUNTAIN || t === GOLD) && !(tx === ptx && tz === ptz)) return true;
+  if (!w3dRealOK() && t === FOREST && !(tx === ptx && tz === ptz)) return true; // 귀여운 스타일 나무는 걷어내기가 없다
+  const L = W3.tpBox;
+  if (L) for (let i = 0; i < L.length; i += 4) if (Math.abs(x - L[i]) < L[i + 2] && Math.abs(z - L[i + 1]) < L[i + 3]) return true;
   return false;
 }
 const w3dTA = new THREE.Vector3(), w3dTB = new THREE.Vector3(), w3dLA = new THREE.Vector3(), w3dLB = new THREE.Vector3();
@@ -1439,11 +1512,12 @@ function w3dTPCam(cam, px, pz, k) {
   // 카메라와 영주 사이에 숲·건물이 있으면 카메라를 영주 쪽으로 당긴다 (나무 속에 카메라가 박히지 않게)
   let bk = P.back;
   const ptx = Math.floor(px), ptz = Math.floor(pz);
-  for (let d = 0.35; d <= P.back + 0.3; d += 0.2) if (w3dTPBlock(ptx, ptz, px - fx * d + rx * P.side * d / P.back, pz - fz * d + rz * P.side * d / P.back)) { bk = Math.max(0.8, d - 0.3); break; }
+  w3dTPBoxes(px, pz);
+  for (let d = 0.3; d <= P.back + 0.3; d += 0.15) if (w3dTPBlock(ptx, ptz, px - fx * d + rx * P.side * d / P.back, pz - fz * d + rz * P.side * d / P.back)) { bk = Math.max(0.45, d - 0.25); break; }
   W3.tpBack = W3.tpBack === undefined || k < 0.05 ? bk : W3.tpBack + (bk - W3.tpBack) * (bk < W3.tpBack ? 0.35 : 0.06);
   const B = W3.tpBack, sd = P.side * B / P.back, pf = (P.back - B) / P.back; // pf: 당겨진 정도 → 조금 높이고 더 내려다봐서 영주가 화면에 남게
   w3dTA.copy(cam.position); w3dLA.set(W3.tx, 0, W3.tz);
-  w3dTB.set(px - fx * B + rx * sd, P.up + pf * 0.45, pz - fz * B + rz * sd);
+  w3dTB.set(px - fx * B + rx * sd, P.up + pf * 0.9, pz - fz * B + rz * sd); // 벽에 붙으면 더 높이 올라가 어깨 너머로 내려다본다
   const ah = P.ahead * (1 - 0.7 * pf);
   w3dLB.set(px + fx * ah + rx * P.side * 0.5, P.lookY - pf * 1.4, pz + fz * ah + rz * P.side * 0.5);
   // 높이는 늦게 내려오고(위에서 다가가는 느낌) 가로 위치는 먼저 따라간다
@@ -1544,37 +1618,40 @@ function w3dRealBldMake(b, k) {
 // 마을 중심: 시대 집(크게) 또는 성채(Lv3+ · 고대 이후) + 울타리(부족·고대 = 나무 말뚝, 중세+ = 돌 성벽) + 우물 · 모닥불
 const w3dPoleGeo = () => R3D.cached('w3pole6', () => R3D.merge([{ g: R3D.prim.cyl(0.018, 0.018, 0.62, 4), c: '#3a2a1a', p: [0, 0.31, 0] }]));
 function w3dRealTown(lv, era) {
-  const g = new THREE.Group(), disp = [];
+  const g = new THREE.Group(), disp = [], col = { box: null, wall: null, ring: null }; // col: 3인칭 충돌용 (마을 중심 기준)
   let top, fx = 0, fz = 0, camp = null;
   const keep = era >= 1 && lv >= 3 && RA.has('castle_keep');
   if (keep) {
-    const s = [0, 0, 0, 0.082, 0.092, 0.102][lv] * (era >= 3 ? 1.06 : 1), k = RA.group('castle_keep', true);
+    const s = [0, 0, 0, 0.082, 0.092, 0.102][lv] * (era >= 3 ? 1.06 : 1) * 1.15, k = RA.group('castle_keep', true);
     k.scale.setScalar(s); k.position.z = -0.22; g.add(k);
     top = RA.height('castle_keep') * s; fz = -0.22;
     const b = RA.box('castle_keep'); // 깃대: 가장 높은 탑 위 (상자 가운데)
+    col.box = [(b.min.x + b.max.x) / 2 * s, -0.22 + (b.min.z + b.max.z) / 2 * s, (b.max.x - b.min.x) / 2 * s * 0.92, (b.max.z - b.min.z) / 2 * s * 0.92];
     fx = (b.min.x + b.max.x) / 2 * s; fz += (b.min.z + b.max.z) / 2 * s;
   } else {
-    const hk = W3_RHOUSE[clamp(era, 0, ERAS.length - 1)], f = W3_RHFIT[hk] || [1, 1], s = RA.fit(hk, 1.3 + lv * 0.1);
+    const hk = W3_RHOUSE[clamp(era, 0, ERAS.length - 1)], f = W3_RHFIT[hk] || [1, 1], s = RA.fit(hk, (1.3 + lv * 0.1) * 1.1);
     const hm = RA.group(hk, true); hm.scale.set(s, s * f[1], s); hm.position.z = -0.12; g.add(hm);
     top = RA.height(hk) * s * f[1]; fz = -0.12;
+    { const b = RA.box(hk); col.box = [0, -0.12, (b.max.x - b.min.x) / 2 * s * 0.85, (b.max.z - b.min.z) / 2 * s * 0.85]; }
   }
   if (era <= 1 && RA.has('palisade')) { // 나무 말뚝 고리 (앞쪽 출입구)
     const R = 1.3 + lv * 0.035, sp = 0.13, n = Math.round(Math.PI * 2 * R / (4.01 * sp)), list = [];
     for (let k = 0; k < n; k++) {
       const a = (k + 0.5) / n * Math.PI * 2; if (Math.cos(a) > 0.95) continue;
-      list.push({ x: Math.sin(a) * R, z: Math.cos(a) * R, ry: a, s: sp, sx: Math.PI * 2 * R / n / (4.01 * sp) * 1.05, sy: 0.95 + hash2(k, lv) * 0.12 });
+      list.push({ x: Math.sin(a) * R, z: Math.cos(a) * R, ry: a, s: sp, sx: Math.PI * 2 * R / n / (4.01 * sp) * 1.05, sy: (0.95 + hash2(k, lv) * 0.12) * 1.25 });
     }
-    const pi = RA.inst('palisade', list, { shadow: true }); if (pi) { g.add(pi); disp.push(pi); }
+    const pi = RA.inst('palisade', list, { shadow: true }); if (pi) { g.add(pi); disp.push(pi); col.ring = R; }
   } else if (era >= 2 && era <= 3 && RA.has('wall_stone')) { // 돌 성벽 (네모, 앞쪽 가운데 성문 자리 비움) — 근대 도시는 성벽을 헐었다
     const hs = 1.36, sw = 0.088 + lv * 0.004, side = hs * 2 + 0.2, n = Math.max(3, Math.round(side / (8 * sw)) | 1), seg = side / n, list = [];
     for (let k = 0; k < n; k++) {
       const u = -side / 2 + (k + 0.5) * seg, sx = seg / (8 * sw) * 1.02;
-      if (k !== (n - 1) / 2) list.push({ x: u, z: hs, ry: 0, s: sw, sx });
-      list.push({ x: u, z: -hs, ry: Math.PI, s: sw, sx });
-      list.push({ x: -hs, z: u, ry: -Math.PI / 2, s: sw, sx });
-      list.push({ x: hs, z: u, ry: Math.PI / 2, s: sw, sx });
+      const sy = 1.35; // 성벽을 사람 키보다 높게
+      if (k !== (n - 1) / 2) list.push({ x: u, z: hs, ry: 0, s: sw, sx, sy });
+      list.push({ x: u, z: -hs, ry: Math.PI, s: sw, sx, sy });
+      list.push({ x: -hs, z: u, ry: -Math.PI / 2, s: sw, sx, sy });
+      list.push({ x: hs, z: u, ry: Math.PI / 2, s: sw, sx, sy });
     }
-    const wi = RA.inst('wall_stone', list, { shadow: true }); if (wi) { g.add(wi); disp.push(wi); }
+    const wi = RA.inst('wall_stone', list, { shadow: true }); if (wi) { g.add(wi); disp.push(wi); col.wall = [hs, side / 2, seg / 2]; }
   }
   if (RA.has('well')) { const w = RA.group('well', true); w.scale.setScalar(0.17); w.position.set(0.92, 0, 0.8); w.rotation.y = -0.5; g.add(w); }
   if (era <= 2 && RA.has('campfire')) { const c = RA.group('campfire', false); c.scale.setScalar(0.24); c.position.set(-0.88, 0, 0.82); g.add(c); camp = [-0.88, 0.82]; }
@@ -1586,7 +1663,7 @@ function w3dRealTown(lv, era) {
     stacks = W3_STACKS.factory.map(st => [fx0 + st[0] * sc[0] * fs, st[1] * sc[1] * fs, fz0 + st[2] * sc[2] * fs]);
   }
   const pole = new THREE.Mesh(w3dPoleGeo(), R3D.mats.vc); pole.position.set(fx, top - 0.06, fz); pole.castShadow = true; g.add(pole);
-  return { group: g, top: top + 0.6, flag: [fx + 0.02, top + 0.53, fz], camp, stacks, dispose() { for (const d of disp) d.userData.dispose(); } };
+  return { group: g, top: top + 0.6, flag: [fx + 0.02, top + 0.53, fz], camp, stacks, col, dispose() { for (const d of disp) d.userData.dispose(); } };
 }
 function w3dRealTownDraw(t, x, z, col, AV, labels, lights, LE, lampN, tm) {
   if (!RA.has(W3_RHOUSE[clamp(S.era | 0, 0, ERAS.length - 1)])) return false;

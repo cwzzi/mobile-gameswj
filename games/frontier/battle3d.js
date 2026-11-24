@@ -150,7 +150,7 @@ function b3Resize() {
   if (!B3) return;
   const c = B3.cam; c.aspect = VW / VH;
   const t = Math.tan(c.fov / 2 * Math.PI / 180);
-  B3.dist = clamp(c.aspect < 1 ? 6.0 / (t * c.aspect) : 6.8 / t, 14, 60);
+  B3.dist = clamp(c.aspect < 1 ? 5.2 / (t * c.aspect) : 6.0 / t, 13, 52); // 조금 가까이: 병사·장비가 더 크게 보이게 (예전 6.0 / 6.8)
   c.far = B3.dist * 3; c.updateProjectionMatrix();
   B3.scene.fog.near = B3.dist * 0.95; B3.scene.fog.far = B3.dist * 2.4;
   const sh = clamp(Math.round(B3.dist * 0.6), 12, 24), sc = B3.sun.shadow.camera;
@@ -342,6 +342,7 @@ function drawBattle3D() {
   R3D.tick(dt); B3.frame++;
   if (typeof RA !== 'undefined' && RA.U) { RA.U.time.value = B.t; RA.U.chop.value.z = 0; }
   const H = B.hero, tm = B.t, hx = H.x / T, hz = H.y / T, S3 = B3;
+  if (typeof RA !== 'undefined' && RA.U && RA.U.fade) RA.U.fade.value.set(hx, 1.1, hz, 0.85); // 영웅을 가리는 나무 잎은 점무늬로 걷어낸다 (real3d.js)
 
   // 카메라
   const kf = 1 - Math.exp(-dt * 8);
@@ -548,7 +549,7 @@ function b3Grade(H) {
   G.lift.setRGB(0.014, 0.004, 0.024); G.gain.setRGB(1.05, 0.98, 0.9);
   R3D.renderer.toneMappingExposure = R3D.fx && R3D.fx.on ? 1 : 1.1;
   if (R3D.uWin) { R3D.uWin.value = 0.55; R3D.uWinLit.value = 0.55; } // 해 질 녘: 창문 몇 개에 불
-  if (R3D.uRim) R3D.uRim.value.setRGB(1.0, 0.72, 0.45).multiplyScalar(0.3);
+  if (R3D.uRim) R3D.uRim.value.setRGB(1.0, 0.72, 0.45).multiplyScalar(0.42);
   if (typeof b3EraGrade === 'function') b3EraGrade(G); // 시대별 색감 (battleEra.js)
 }
 function b3Hero(H, tm, dt, hx, hz, pose) {
