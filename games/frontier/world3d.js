@@ -1465,6 +1465,8 @@ function drawWorld3D() {
 
 // ---------- 3인칭 시점 (event.js 의 EVCAM: k 0 = 위에서 · 1 = 어깨 뒤, yaw = 바라보는 방향, 0 = 북쪽(-z)) ----------
 const W3_TP = { hk: 0.6, back: 1.65, up: 1.5, side: 0.32, ahead: 4, lookY: 0.8, fov: 56, fovP: 70, far: 28, fogD: 14 }; // far: 안개 끝(fogD × 1.95)까지만 그린다 (마을 건너편까지 그리면 100만 삼각형)
+// 자유 탐험(event.js FREE): 넓은 땅이 멀리까지 보이게 안개·그리는 거리를 늘린 3인칭 (먼 나무는 LOD 라 사건 3인칭보다 조금만 무겁다)
+const W3_TPF = Object.assign({}, W3_TP, { far: 46, fogD: 23, up: 1.7 });
 // 3인칭: 영주가 건물·성채·성벽·말뚝 울타리를 뚫고 지나가지 않게, 그리기 직전에 밖으로 밀어낸다 (world.js 이동 규칙은 그대로 · 장면 속 사건에서만)
 function w3dPushBox(p, cx, cz, hx, hz, r) {
   const x = p.x / T, z = p.y / T, dx = x - cx, dz = z - cz, ox = hx + r - Math.abs(dx), oz = hz + r - Math.abs(dz);
@@ -1532,7 +1534,7 @@ function w3dTPCam(cam, px, pz, k) {
     return 1;
   }
   W3.tpOn = true;
-  const e = k * k * (3 - 2 * k), P = W3_TP, yaw = EVCAM.yaw;
+  const e = k * k * (3 - 2 * k), P = typeof FREE !== 'undefined' && FREE ? W3_TPF : W3_TP, yaw = EVCAM.yaw;
   const fx = Math.sin(yaw), fz = -Math.cos(yaw), rx = Math.cos(yaw), rz = Math.sin(yaw);
   // 카메라와 영주 사이에 숲·건물이 있으면 카메라를 영주 쪽으로 당긴다 (나무 속에 카메라가 박히지 않게)
   let bk = P.back;
