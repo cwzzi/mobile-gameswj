@@ -550,6 +550,7 @@ function b3Grade(H) {
   G.lift.setRGB(0.014, 0.004, 0.024); G.gain.setRGB(1.05, 0.98, 0.9);
   R3D.renderer.toneMappingExposure = R3D.fx && R3D.fx.on ? 1 : 1.1;
   if (R3D.uWin) { R3D.uWin.value = 0.55; R3D.uWinLit.value = 0.55; } // 해 질 녘: 창문 몇 개에 불
+  if (R3D.uUp) R3D.uUp.value.setRGB(1.0, 0.56, 0.26).multiplyScalar(0.12);
   if (R3D.uRim) R3D.uRim.value.setRGB(1.0, 0.72, 0.45).multiplyScalar(0.42);
   if (typeof b3EraGrade === 'function') b3EraGrade(G); // 시대별 색감 (battleEra.js)
 }

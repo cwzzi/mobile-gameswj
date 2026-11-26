@@ -74,6 +74,18 @@ const RA = (() => {
     const ob = m.onBeforeCompile; m.onBeforeCompile = sh => { ob(sh); fadeHook(sh); };
     m.customProgramCacheKey = () => 'rasway3' + key;
   }
+  // 밤 건물 조명: 벽 아래쪽이 횃불·등불에 비친 듯 따뜻하게 밝다 (모델 높이 m 기준, 4 m 위로 갈수록 옅어짐).
+  // 실제 광원이 아니라 재질의 발광 한 줄이라 비용은 거의 없다. 세기 R3D.uUp(색 × 세기)은 장면이 시간에 맞춰 정한다
+  if (!R3D.uUp) R3D.uUp = { value: new THREE.Color(0, 0, 0) };
+  function upHook(m, key) {
+    m.onBeforeCompile = sh => {
+      sh.uniforms.uUp = R3D.uUp;
+      sh.vertexShader = 'varying float vUpY;\n' + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n  vUpY = position.y;');
+      sh.fragmentShader = 'uniform vec3 uUp;\nvarying float vUpY;\n' + sh.fragmentShader.replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
+  totalEmissiveRadiance += uUp * diffuseColor.rgb * (exp(-max(vUpY, 0.0) * 0.55) * 0.9 + 0.12);`);
+    };
+    m.customProgramCacheKey = () => 'raup' + key;
+  }
   // 바위: rock_a 의 붉은 기를 빼고 회색 쪽으로 (채도↓)
   function desatHook(m, k) {
     m.onBeforeCompile = sh => {
@@ -145,7 +157,8 @@ const RA = (() => {
     if (/^rock_/.test(name)) { desatHook(m, name === 'rock_a' ? 0.12 : 0.45); m.color.setScalar(name === 'rock_a' ? 2.5 : 3.1); m.side = THREE.FrontSide; } // 바위 텍스처가 어두워 위에서 보면 시커멓게 보였다
     if (name === 'mountain_a') mountainHook(m);
     if (/^scatter_/.test(name)) m.color.setScalar(0.92);
-    if (!leaf && !/^rock_/.test(name) && !crop && !/^scatter_/.test(name)) m.color.setScalar(1.16); // 구운 AO 때문에 어두운 건물을 게임 조명에 맞게 조금 밝게
+    if (!leaf && !/^rock_/.test(name) && !crop && !/^scatter_/.test(name)) m.color.setScalar(1.16);
+    if (!leaf && !/^rock_/.test(name) && !crop && !/^scatter_/.test(name) && name !== 'mountain_a') upHook(m, src.normalMap ? 'n' : ''); // 구운 AO 때문에 어두운 건물을 게임 조명에 맞게 조금 밝게
     allMats.add(m);
     void rough;
     return { mat: m, role: leaf ? 'leaf' : crop ? 'crop' : 'body' };

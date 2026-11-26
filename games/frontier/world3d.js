@@ -1073,7 +1073,8 @@ function w3dLighting(src) {
   R3D.renderer.toneMappingExposure = R3D.fx && R3D.fx.on ? 1 : K.ex;
   // 창문: 밤이면 켜짐. 시대·인구가 클수록 켜진 창이 많다
   const pop = S.towns.reduce((s, t) => s + t.pop, 0);
-  if (R3D.uWin) { R3D.uWin.value = on * 1.15; R3D.uWinLit.value = clamp(0.3 + S.era * 0.14 + pop / 300, 0.2, 0.95); }
+  if (R3D.uWin) { R3D.uWin.value = on * 1.6; R3D.uWinLit.value = clamp(0.42 + S.era * 0.14 + pop / 300, 0.3, 0.97); }
+  if (R3D.uUp) R3D.uUp.value.setRGB(1.0, 0.56, 0.26).multiplyScalar(on * (0.8 + S.era * 0.1)); // 밤: 건물 아랫벽에 횃불·등불빛 (시대가 갈수록 밝게)
   R3D.mats.glow.emissiveIntensity = on * 1.8;
   if (R3D.uRim) R3D.uRim.value.setRGB(1.0, 0.93, 0.8).multiplyScalar(0.28).lerp(w3dC1.setRGB(0.45, 0.55, 1.0).multiplyScalar(0.14), on);
   // 물
