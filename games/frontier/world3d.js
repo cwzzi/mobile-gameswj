@@ -100,6 +100,10 @@ vec4 gW = vec4(1.0, 0.0, 0.0, 0.0); vec2 gP = vWP.xz, gQ = gP * uRGs;
     diffuseColor.rgb *= mix(vec3(1.0), clamp(t, 0.25, 2.2), uRGk);
   }
   { float l = dot(diffuseColor.rgb, vec3(0.3, 0.59, 0.11)); diffuseColor.rgb = max(mix(vec3(l), diffuseColor.rgb, 1.0), 0.0); }
+  { // 숲 바닥: 나무 그늘 아래라 어둡고 낙엽·흙빛 (잎 사이로 보이는 바닥이 형광 초록으로 튀지 않게)
+    float fl = dot(diffuseColor.rgb, vec3(0.3, 0.59, 0.11));
+    diffuseColor.rgb = mix(diffuseColor.rgb, mix(vec3(fl), diffuseColor.rgb, 0.55) * vec3(0.62, 0.6, 0.48), gW.a * 0.85);
+  }
 }
 #endif`;
 const W3_RG_NRM = `#include <normal_fragment_maps>
@@ -247,6 +251,7 @@ function w3dInit() {
   sun.castShadow = true; sun.shadow.mapSize.set(1024, 1024);
   const sc = sun.shadow.camera; sc.left = -21; sc.right = 21; sc.top = 21; sc.bottom = -21; sc.near = 1; sc.far = 110;
   sun.shadow.bias = -0.0006; sun.shadow.normalBias = 0.03;
+  sc.layers.enable(1); // 레이어 1: 그림자만 드리우는 가벼운 나무 대역 (real3d RA.pool proxy)
   scene.add(sun, sun.target);
   R3D.regScene(scene); R3D.regLight(sun);
   const pts = [];
@@ -574,29 +579,48 @@ function w3dBuildProps(c) {
 // 보이는 청크의 사실적 나무·바위·덤불 중 화면(+그림자 여유) 안의 것만 모델별 InstancedMesh 하나씩에 채운다
 const W3_RKINDS = ['tree_broadleaf_a', 'tree_broadleaf_b', 'tree_conifer', 'bush', 'rock_a', 'rock_b', 'mountain_a', 'scatter_grass', 'scatter_flowers'];
 const W3_RRAD = { mountain_a: 2.6, scatter_grass: 0.6, scatter_flowers: 0.6 };
-const w3dRealBuf = {};
+const w3dRealBuf = {}, w3dRealBufF = {};
+// 나무 LOD: 화면 가운데(영주 근처)에서 W3_RNEAR 칸 밖의 나무는 잎 카드 절반짜리(1.3배)로 그린다.
+// 위에서 내려다보는 거리에선 모양 차이가 거의 안 보이고 나무 삼각형이 크게 준다 (3인칭이면 카메라에서 W3_RNEAR_TP 밖)
+const W3_RNEAR = 7, W3_RNEAR_TP = 9;
 function w3dRealFill() {
   if (!w3dRealOK()) return;
   const lowQ = R3D.quality && R3D.quality() === 'low';
   if (!W3.rpool || W3.rpoolV !== RA.ver || W3.rpoolLow !== lowQ) { // 낮음 품질은 잎 카드 절반짜리 나무
     if (W3.rpool) for (const k in W3.rpool) W3.rpool[k] && W3.rpool[k].dispose();
-    W3.rpool = {}; for (const k of W3_RKINDS) W3.rpool[k] = RA.pool(k, W3.scene, lowQ); W3.rpoolV = RA.ver; W3.rpoolLow = lowQ; W3.realDirty = true;
+    if (W3.rpoolF) for (const k in W3.rpoolF) W3.rpoolF[k] && W3.rpoolF[k].dispose();
+    W3.rpool = {}; W3.rpoolF = {};
+    for (const k of W3_RKINDS) {
+      const tree = k.startsWith('tree');
+      W3.rpool[k] = RA.pool(k, W3.scene, lowQ, tree ? 3 : 0);
+      if (tree && !lowQ) W3.rpoolF[k] = RA.pool(k, W3.scene, true, 3);
+    }
+    W3.rpoolV = RA.ver; W3.rpoolLow = lowQ; W3.realDirty = true;
   }
   const tpS = !!W3.tpOn; if (W3.rfTP !== tpS) { W3.rfTP = tpS; W3.realDirty = true; } // 바닥 풀 카드는 3인칭에서만 (위에서 보면 가는 X 자 무늬로만 보였다)
-  const moved = Math.abs(W3.tx - (W3.rfX || -99)) + Math.abs(W3.tz - (W3.rfZ || -99)) > 0.15;
+  const cp = W3.cam.position, ox = tpS ? cp.x : W3.tx, oz = tpS ? cp.z : W3.tz;
+  const moved = Math.abs(ox - (W3.rfX || -99)) + Math.abs(oz - (W3.rfZ || -99)) > 0.15;
   if (!moved && !W3.realDirty) return;
-  W3.rfX = W3.tx; W3.rfZ = W3.tz; W3.realDirty = false;
-  const low = R3D.quality && R3D.quality() === 'low', sph = w3dSphere, F = W3.frustum;
-  const cnt = {}; for (const k of W3_RKINDS) { cnt[k] = 0; if (!w3dRealBuf[k]) w3dRealBuf[k] = []; }
+  W3.rfX = ox; W3.rfZ = oz; W3.realDirty = false;
+  const low = R3D.quality && R3D.quality() === 'low', sph = w3dSphere, F = W3.frustum, nr2 = (tpS ? W3_RNEAR_TP : W3_RNEAR) ** 2;
+  const cnt = {}, cntF = {}; for (const k of W3_RKINDS) { cnt[k] = 0; cntF[k] = 0; if (!w3dRealBuf[k]) { w3dRealBuf[k] = []; w3dRealBufF[k] = []; } }
   for (const c of W3.chunks) {
     if (!c.real || !c.props || !c.props.visible) continue;
     for (const k in c.real) {
       if (k === 'scatter_grass' && !tpS) continue;
-      const L = c.real[k], buf = w3dRealBuf[k], rad = W3_RRAD[k] || (k.startsWith('tree') ? (low ? 1.2 : 2.0) : 0.8), sc = k.startsWith('scatter');
-      for (const e of L) { if (sc && Math.abs(e.x - W3.tx) + Math.abs(e.z - W3.tz) > 20) continue; sph.center.set(e.x, 0.6, e.z); sph.radius = rad; if (F.intersectsSphere(sph)) buf[cnt[k]++] = e; }
+      const L = c.real[k], buf = w3dRealBuf[k], bufF = w3dRealBufF[k], lod = !!W3.rpoolF[k], rad = W3_RRAD[k] || (k.startsWith('tree') ? (low ? 1.2 : 2.0) : 0.8), sc = k.startsWith('scatter');
+      for (const e of L) {
+        if (sc && Math.abs(e.x - W3.tx) + Math.abs(e.z - W3.tz) > 20) continue;
+        sph.center.set(e.x, 0.6, e.z); sph.radius = rad; if (!F.intersectsSphere(sph)) continue;
+        if (lod && (e.x - ox) ** 2 + (e.z - oz) ** 2 > nr2) bufF[cntF[k]++] = e; else buf[cnt[k]++] = e;
+      }
     }
   }
-  for (const k of W3_RKINDS) { const P = W3.rpool[k]; if (P) P.fill(w3dRealBuf[k], cnt[k], !low && k !== 'bush' && k !== 'mountain_a' && !k.startsWith('scatter'), k === 'mountain_a' || k.startsWith('scatter')); }
+  for (const k of W3_RKINDS) {
+    const sh = !low && k !== 'bush' && k !== 'mountain_a' && !k.startsWith('scatter'), rc = k === 'mountain_a' || k.startsWith('scatter');
+    const P = W3.rpool[k]; if (P) P.fill(w3dRealBuf[k], cnt[k], sh, rc);
+    const PF = W3.rpoolF[k]; if (PF) PF.fill(w3dRealBufF[k], cntF[k], sh, rc);
+  }
 }
 // ---------- 사실적 환경 모델 (real3d.js) ----------
 function w3dRealOK() { return typeof RA !== 'undefined' && RA.ok; }

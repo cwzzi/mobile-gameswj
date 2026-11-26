@@ -235,17 +235,145 @@ function b3EraGrade(G) {
 // ---------- 3D: 꾸밈 모델 (절차적 · 버텍스 색) ----------
 // 종류마다 [지오메트리, 진영색 물들임?, 그림자?]. 진영색 조각(천·지붕)은 흰색으로 만들고 인스턴스 색으로 물들인다
 const BE_C = { wood: '#6a4a2a', dark: '#4a3420', hide: '#b48a5a', bronze: '#c08a38', iron: '#3c3c42', cloth: '#e4ddcc', stone: '#b8a078' };
+// ---- 꾸밈 재질: 버텍스 색 × 절차 질감(나무결·천 짜임·가죽 이음선·흙·돌 줄눈). 텍스처 파일 없이 셰이더 안에서 계산 (UV 불필요) ----
+// 조각 종류(attribute bk): 0 나무 1 천 2 금속 3 흙·돌 4 둥근 천막(이음선) 5 버들 6 석재 줄눈
+const BE_V = new THREE.Vector3(), BE_Z = new THREE.Vector3(0, 0, 1), BE_Q = new THREE.Quaternion(), BE_M4 = new THREE.Matrix4(), BE_ONE = new THREE.Vector3(1, 1, 1), BE_MID = new THREE.Vector3(), BE_CC = new THREE.Color(), BE_HSL = {};
+let beTexMat = null;
+function beMatTex() {
+  if (beTexMat) return beTexMat;
+  const m = new THREE.MeshLambertMaterial({ vertexColors: true });
+  m.onBeforeCompile = sh => {
+    sh.vertexShader = 'attribute float bk;\nvarying vec3 vLP;\nvarying float vK;\n' + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n  vLP = position; vK = bk;');
+    sh.fragmentShader = `varying vec3 vLP;
+varying float vK;
+float bh(vec3 p) { p = fract(p * 0.3183099 + 0.1); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
+float bn(vec3 x) {
+  vec3 i = floor(x), f = fract(x); f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(mix(bh(i), bh(i + vec3(1.0, 0.0, 0.0)), f.x), mix(bh(i + vec3(0.0, 1.0, 0.0)), bh(i + vec3(1.0, 1.0, 0.0)), f.x), f.y),
+             mix(mix(bh(i + vec3(0.0, 0.0, 1.0)), bh(i + vec3(1.0, 0.0, 1.0)), f.x), mix(bh(i + vec3(0.0, 1.0, 1.0)), bh(i + vec3(1.0, 1.0, 1.0)), f.x), f.y), f.z);
+}
+` + sh.fragmentShader.replace('#include <color_fragment>', `#include <color_fragment>
+  {
+    vec3 p = vLP; float k = vK + 0.5, f = 1.0;
+    float aa = 1.0 - smoothstep(0.35, 0.9, length(fwidth(p)) * 20.0); // 멀리서는 잔무늬를 지워 반짝임(모아레) 방지
+    if (k < 1.0) { // 나무: 세 방향 결을 섞는다
+      float g = bn(vec3(p.x * 26.0, p.y * 4.0, p.z * 26.0)) + bn(vec3(p.x * 4.0, p.y * 26.0, p.z * 26.0)) + bn(vec3(p.x * 26.0, p.y * 26.0, p.z * 4.0));
+      f = 0.52 + 0.64 * g;
+    } else if (k < 2.0 || (k > 4.0 && k < 5.0)) { // 천(가죽): 날실·씨실 + 얼룩 + 이음선
+      float wv = 0.9 + 0.1 * sin(p.y * 95.0) * sin((p.x + p.z) * 95.0);
+      f = (0.8 + 0.4 * bn(p * 3.2)) * mix(1.0, wv, aa);
+      if (k > 4.0) { float t = fract(atan(p.z, p.x) * 1.2732395); float sm = min(t, 1.0 - t); f *= 1.0 - 0.28 * (1.0 - smoothstep(0.0, 0.035, sm)); }
+    } else if (k < 3.0) { f = 0.78 + 0.34 * bn(p * vec3(60.0, 14.0, 60.0)) + 0.12 * bn(p * 30.0); }
+    else if (k < 4.0) { f = 0.62 + 0.55 * bn(p * 7.0) + 0.2 * bn(p * 26.0) - 0.1; }
+    else if (k < 6.0) { float a = atan(p.z, p.x) * 2.5464791; float cw = floor(a); float rows = 0.82 + 0.18 * sin(p.y * 70.0 + mod(cw, 2.0) * 3.14159); float stk = 0.85 + 0.15 * abs(sin(a * 3.14159)); f = (0.7 + 0.5 * bn(p * 9.0)) * mix(1.0, rows * stk, aa); }
+    else { float row = floor(p.y * 5.0); float col = floor((p.x + p.z) * 2.6 + row * 0.5); float ln = min(fract(p.y * 5.0), 1.0 - fract(p.y * 5.0)); float lv = min(fract((p.x + p.z) * 2.6 + row * 0.5), 1.0 - fract((p.x + p.z) * 2.6 + row * 0.5)); float mort = 1.0 - 0.35 * (1.0 - smoothstep(0.0, 0.05, min(ln, lv * 0.7))) * aa; f = mort * (0.85 + 0.3 * bh(vec3(row, col, 3.0))) * (0.85 + 0.3 * bn(p * 14.0)); }
+    f *= 0.74 + 0.26 * smoothstep(0.0, 0.5, p.y); // 땅에 닿은 곳이 어둡게 (접지감)
+    diffuseColor.rgb *= f;
+  }`);
+  };
+  m.customProgramCacheKey = () => 'bepropv1';
+  return (beTexMat = m);
+}
+// 색으로 재질 종류 추정 (조각에 k 가 없을 때)
+function beKind(c) {
+  BE_CC.set(c); BE_CC.getHSL(BE_HSL);
+  if (BE_HSL.l > 0.78) return 1;
+  if (BE_HSL.s < 0.18 && BE_HSL.l < 0.55) return 2;
+  if (BE_HSL.h > 0.07 && BE_HSL.h < 0.15 && BE_HSL.s > 0.45 && BE_HSL.l > 0.4) return 2;
+  if (BE_HSL.h < 0.04 || BE_HSL.h > 0.5) return 1;
+  return 0;
+}
+// R3D.merge + 조각 종류 attribute + (sm: true 인 조각만) 용접 법선으로 부드럽게
+function beMK(parts) {
+  const g = R3D.merge(parts), n = g.attributes.position.count, bk = new Float32Array(n), P = g.attributes.position.array, N = g.attributes.normal.array, rng = [];
+  let o = 0;
+  parts.forEach((pt, pi) => {
+    const c = pt.g.index ? pt.g.index.count : pt.g.attributes.position.count, k = pt.k !== undefined ? pt.k : beKind(pt.c);
+    for (let i = 0; i < c; i++) bk[o + i] = k;
+    if (pt.sm) rng.push([o, o + c, pi]);
+    o += c;
+  });
+  for (const [a, b, pi] of rng) {
+    const acc = new Map(), key = i => pi + '|' + Math.round(P[i * 3] * 400) + ',' + Math.round(P[i * 3 + 1] * 400) + ',' + Math.round(P[i * 3 + 2] * 400);
+    for (let i = a; i < b; i++) { const kk = key(i); let v = acc.get(kk); if (!v) acc.set(kk, v = [0, 0, 0]); v[0] += N[i * 3]; v[1] += N[i * 3 + 1]; v[2] += N[i * 3 + 2]; }
+    for (let i = a; i < b; i++) { const v = acc.get(key(i)), l = Math.hypot(v[0], v[1], v[2]) || 1; N[i * 3] = v[0] / l; N[i * 3 + 1] = v[1] / l; N[i * 3 + 2] = v[2] / l; }
+  }
+  g.setAttribute('bk', new THREE.BufferAttribute(bk, 1));
+  return g;
+}
+// 가는 줄·장대: a → b 를 잇는 얇은 상자
+function beRope(a, b, t, c, k, sm) {
+  BE_V.set(b[0] - a[0], b[1] - a[1], b[2] - a[2]); const L = BE_V.length() || 0.01, g = new THREE.BoxGeometry(t, t, L);
+  BE_Q.setFromUnitVectors(BE_Z, BE_V.normalize()); BE_MID.set((a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2);
+  g.applyMatrix4(BE_M4.compose(BE_MID, BE_Q, BE_ONE));
+  return { g, c, k };
+}
+// 회전체 (프로필 [반지름, 높이] 아래→위)
+function beLathe(pts, seg, c, k, sm) { return { g: new THREE.LatheGeometry(pts.map(q => new THREE.Vector2(q[0], q[1])), seg), c, k, sm: sm !== false }; }
+// 삼각형 목록 [[x,y,z]…] → 지오메트리. 법선이 ctr 바깥을 보도록 감는 방향을 맞춘다
+function beTris(list, ctr) {
+  const a = [];
+  for (let i = 0; i < list.length; i += 3) {
+    let A = list[i], B = list[i + 1], C = list[i + 2];
+    const ux = B[0] - A[0], uy = B[1] - A[1], uz = B[2] - A[2], vx = C[0] - A[0], vy = C[1] - A[1], vz = C[2] - A[2];
+    const nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+    const cx = (A[0] + B[0] + C[0]) / 3 - ctr[0], cy = (A[1] + B[1] + C[1]) / 3 - ctr[1], cz = (A[2] + B[2] + C[2]) / 3 - ctr[2];
+    if (nx * cx + ny * cy + nz * cz < 0) { const t = B; B = C; C = t; }
+    a.push(A[0], A[1], A[2], B[0], B[1], B[2], C[0], C[1], C[2]);
+  }
+  const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(a, 3)); return g;
+}
+// 처진 능선 천막 (고대): 능선이 가운데로 처지고 처마가 물결치는 A자 지붕 + 앞뒤 장대 + 고정 줄
+function beRidgeTent(P) {
+  const n = 6, L = 1.0, W = 0.8, H = 1.2, sag = 0.12, t = [], xs = [], rd = [], ev = [], ew = [];
+  for (let i = 0; i <= n; i++) { const u = i / n; xs.push(-L + 2 * L * u); rd.push(H - sag * Math.sin(Math.PI * u)); ev.push(i === 0 || i === n ? 0.02 : i % 2 ? 0 : 0.08); ew.push(W + 0.07 * Math.sin(Math.PI * u)); }
+  for (const s of [1, -1]) for (let i = 0; i < n; i++) {
+    const A = [xs[i], ev[i], s * ew[i]], B = [xs[i + 1], ev[i + 1], s * ew[i + 1]], C = [xs[i + 1], rd[i + 1], 0], D = [xs[i], rd[i], 0];
+    t.push(A, B, C, A, C, D);
+  }
+  for (const e of [-1, 1]) { const j = e < 0 ? 0 : n; t.push([e * L, ev[j], -ew[j]], [e * L, ev[j], ew[j]], [e * L, rd[j], 0]); }
+  const parts = [{ g: beTris(t, [0, 0.3, 0]), c: '#d8c8a2', k: 1 }, { g: beTris([[L + 0.012, 0, -0.27], [L + 0.012, 0, 0.27], [L + 0.012, 0.85, 0]], [0, 0.4, 0]), c: '#2e2418', k: 1 }];
+  for (const e of [-1, 1]) {
+    parts.push({ g: P.cyl(0.028, 0.034, H + 0.3, 5), c: BE_C.dark, p: [e * (L + 0.03), (H + 0.3) / 2, 0], k: 0 });
+    parts.push(beRope([e * (L + 0.03), H + 0.22, 0], [e * (L + 0.95), 0.02, 0], 0.016, '#b8a880', 1));
+    parts.push({ g: P.box(0.03, 0.14, 0.03), c: BE_C.dark, p: [e * (L + 0.95), 0.06, 0], r: [0, 0, -e * 0.4], k: 0 });
+  }
+  for (const i of [2, 4]) for (const s of [1, -1]) {
+    parts.push(beRope([xs[i], ev[i] + 0.02, s * ew[i]], [xs[i], 0.02, s * (ew[i] + 0.6)], 0.016, '#b8a880', 1));
+    parts.push({ g: P.box(0.03, 0.14, 0.03), c: BE_C.dark, p: [xs[i], 0.06, s * (ew[i] + 0.6)], r: [s * 0.4, 0, 0], k: 0 });
+  }
+  return beMK(parts);
+}
+// 통(술통): 배 불룩한 회전체 + 쇠테 + 뚜껑. 서 있는 통을 만든 뒤 위치·기울기를 입힌다
+function beBarrel(pos, rot, col) {
+  const xf = new THREE.Matrix4().compose(new THREE.Vector3(pos[0], pos[1], pos[2]), new THREE.Quaternion().setFromEuler(new THREE.Euler(rot[0], rot[1], rot[2])), new THREE.Vector3(1, 1, 1));
+  const mk = (g, c, k, sm, y) => { if (y) g.translate(0, y, 0); g.applyMatrix4(xf); return { g, c, k, sm }; };
+  const lid = new THREE.CircleGeometry(0.19, 8); lid.rotateX(-Math.PI / 2);
+  return [
+    mk(new THREE.LatheGeometry([[0.19, 0], [0.235, 0.12], [0.25, 0.28], [0.235, 0.43], [0.19, 0.55]].map(q => new THREE.Vector2(q[0], q[1])), 8), col, 0, true, 0),
+    mk(lid, '#8a6a42', 0, false, 0.552),
+    mk(new THREE.CylinderGeometry(0.247, 0.247, 0.04, 8, 1, true), '#2a2a2a', 2, true, 0.1),
+    mk(new THREE.CylinderGeometry(0.247, 0.247, 0.04, 8, 1, true), '#2a2a2a', 2, true, 0.45),
+  ];
+}
+// 바퀴: 테 + 바퀴살 + 허브 (축 = z)
+function beWheel(P, r, x, y, z, rim, hub) {
+  const L = [{ g: new THREE.TorusGeometry(r, 0.03, 3, 10), c: rim, p: [x, y, z], k: 0 }, { g: P.cyl(0.055, 0.055, 0.1, 5), c: hub, p: [x, y, z], r: [Math.PI / 2, 0, 0], k: 0 }];
+  for (let k = 0; k < 2; k++) L.push({ g: P.box(r * 2 - 0.03, 0.04, 0.04), c: rim, p: [x, y, z], r: [0, 0, k * Math.PI / 2 + 0.3], k: 0 });
+  return L;
+}
 function beGeo(kind) {
-  const P = R3D.prim, M = R3D.merge;
+  const P = R3D.prim, M = beMK;
   return R3D.cached('be|' + kind, () => {
     switch (kind) {
-      case 'tent': return M([ // 가죽 원뿔 천막 + 장대
-        { g: P.cone(0.85, 1.9, 8), c: BE_C.hide, p: [0, 0.95, 0] },
-        { g: P.cone(0.3, 0.55, 3), c: '#3a2818', p: [0, 0.27, 0.68], s: [1, 1, 0.3] },
-        { g: P.cyl(0.03, 0.03, 0.9, 4), c: BE_C.dark, p: [0.1, 2.0, 0], r: [0, 0, 0.3] }, { g: P.cyl(0.03, 0.03, 0.9, 4), c: BE_C.dark, p: [-0.1, 2.0, 0], r: [0, 0, -0.3] },
-        { g: P.cyl(0.03, 0.03, 0.9, 4), c: BE_C.dark, p: [0, 2.0, 0.1], r: [0.3, 0, 0] },
-        { g: P.box(0.5, 0.06, 0.04), c: '#a83a24', p: [0, 1.0, 0.5], r: [0.42, 0, 0] },
-      ]);
+      case 'tent': { // 가죽 티피: 살짝 휜 옆선 + 아래 덧댄 띠 + 문 + 꼭대기로 삐져나온 장대
+        const L = [
+          beLathe([[0.9, 0], [0.86, 0.3], [0.7, 0.8], [0.5, 1.3], [0.28, 1.75], [0.14, 2.0], [0, 2.1]], 10, BE_C.hide, 4),
+          beLathe([[0.915, 0], [0.885, 0.2]], 10, '#8a6a44', 4),
+          { g: P.box(0.4, 0.75, 0.04), c: '#2e2016', p: [0, 0.4, 0.835], r: [-0.3, 0, 0], k: 1 },
+        ];
+        for (let i = 0; i < 7; i++) { const a = i / 7 * Math.PI * 2 + 0.3, T = [0.04 * Math.cos(a), 2.5, 0.04 * Math.sin(a)], B = [0.9 * Math.cos(a), 0, 0.9 * Math.sin(a)]; L.push(beRope([T[0] + (B[0] - T[0]) * 0.5, T[1] + (B[1] - T[1]) * 0.5, T[2] + (B[2] - T[2]) * 0.5], T, 0.04, BE_C.dark, 0)); }
+        return M(L); }
       case 'totem': return M([
         { g: P.cyl(0.17, 0.2, 0.7, 6), c: '#7a4a28', p: [0, 0.35, 0] }, { g: P.box(0.38, 0.42, 0.38), c: '#a8402a', p: [0, 0.9, 0] },
         { g: P.box(0.08, 0.08, 0.04), c: '#f0e0b0', p: [0.09, 0.95, 0.2] }, { g: P.box(0.08, 0.08, 0.04), c: '#f0e0b0', p: [-0.09, 0.95, 0.2] },
@@ -254,35 +382,40 @@ function beGeo(kind) {
         { g: P.cone(0.05, 0.4, 4), c: '#f4ecd8', p: [0.12, 2.4, 0], r: [0, 0, -0.4] }, { g: P.cone(0.05, 0.4, 4), c: '#c03a24', p: [-0.12, 2.4, 0], r: [0, 0, 0.4] },
       ]);
       case 'rack': return M([
-        { g: P.cyl(0.04, 0.05, 1.5, 4), c: BE_C.dark, p: [-0.6, 0.75, 0] }, { g: P.cyl(0.04, 0.05, 1.5, 4), c: BE_C.dark, p: [0.6, 0.75, 0] },
-        { g: P.cyl(0.035, 0.035, 1.4, 4), c: BE_C.wood, p: [0, 1.4, 0], r: [0, 0, Math.PI / 2] },
-        { g: P.box(0.55, 0.75, 0.03), c: '#c8a070', p: [-0.28, 0.98, 0] }, { g: P.box(0.45, 0.6, 0.03), c: '#9a7048', p: [0.3, 1.05, 0] },
+        { g: P.cyl(0.04, 0.05, 1.5, 5), c: BE_C.dark, p: [-0.6, 0.75, 0] }, { g: P.cyl(0.04, 0.05, 1.5, 5), c: BE_C.dark, p: [0.6, 0.75, 0] },
+        { g: P.cyl(0.035, 0.035, 1.4, 5), c: BE_C.wood, p: [0, 1.4, 0], r: [0, 0, Math.PI / 2] },
+        { g: P.cyl(0.3, 0.3, 0.05, 10), c: '#c8a070', p: [-0.3, 0.98, 0.04], r: [Math.PI / 2, 0, 0], k: 1 }, { g: P.ico(0.07, 0), c: BE_C.bronze, p: [-0.3, 0.98, 0.09], k: 2 },
+        { g: P.cyl(0.26, 0.26, 0.05, 10), c: '#9a7048', p: [0.28, 1.0, 0.04], r: [Math.PI / 2, 0, 0], k: 1 }, { g: P.ico(0.06, 0), c: BE_C.bronze, p: [0.28, 1.0, 0.09], k: 2 },
+        ...[-0.35, 0.05, 0.4].flatMap((x, i) => [beRope([x, 0, 0.5], [x + 0.03 * i, 1.95, -0.02], 0.03, BE_C.wood, 0), { g: P.cone(0.04, 0.17, 4), c: '#a8a8a0', p: [x + 0.03 * i, 2.04, -0.02], r: [-0.27, 0, 0], k: 2 }]),
       ]);
-      case 'chariot': { const wh = (z) => ({ g: P.cyl(0.36, 0.36, 0.06, 10), c: '#5a3a1e', p: [-0.05, 0.36, z], r: [Math.PI / 2, 0, 0] });
-        return M([
-          { g: P.box(0.62, 0.42, 0.62), c: '#8a5a2a', p: [0, 0.62, 0] }, { g: P.box(0.66, 0.08, 0.66), c: BE_C.bronze, p: [0, 0.86, 0] },
-          wh(0.36), wh(-0.36), { g: P.cyl(0.03, 0.03, 0.82, 4), c: BE_C.dark, p: [-0.05, 0.36, 0], r: [Math.PI / 2, 0, 0] },
-          { g: P.cyl(0.03, 0.03, 1.3, 4), c: BE_C.wood, p: [0.9, 0.5, 0], r: [0, 0, Math.PI / 2 - 0.15] },
-          { g: P.box(0.08, 0.06, 0.9), c: BE_C.wood, p: [1.5, 0.6, 0] },
-        ]); }
+      case 'chariot': return M([
+        { g: P.box(0.62, 0.42, 0.62), c: '#8a5a2a', p: [0, 0.62, 0] }, { g: P.box(0.66, 0.08, 0.66), c: BE_C.bronze, p: [0, 0.86, 0], k: 2 },
+        ...beWheel(P, 0.36, -0.05, 0.36, 0.36, '#5a3a1e', BE_C.dark), ...beWheel(P, 0.36, -0.05, 0.36, -0.36, '#5a3a1e', BE_C.dark), { g: P.cyl(0.03, 0.03, 0.82, 4), c: BE_C.dark, p: [-0.05, 0.36, 0], r: [Math.PI / 2, 0, 0] },
+        { g: P.cyl(0.03, 0.03, 1.3, 4), c: BE_C.wood, p: [0.9, 0.5, 0], r: [0, 0, Math.PI / 2 - 0.15] },
+        { g: P.box(0.08, 0.06, 0.9), c: BE_C.wood, p: [1.5, 0.6, 0] },
+      ]);
       case 'standard': return M([
         { g: P.cyl(0.035, 0.04, 2.9, 5), c: BE_C.wood, p: [0, 1.45, 0] }, { g: P.cyl(0.24, 0.24, 0.04, 12), c: BE_C.bronze, p: [0, 2.85, 0], r: [Math.PI / 2, 0, 0] },
         { g: P.cone(0.09, 0.25, 4), c: BE_C.bronze, p: [0, 3.12, 0] }, { g: P.box(0.7, 0.05, 0.05), c: BE_C.bronze, p: [0, 2.45, 0] },
       ]);
-      case 'standardC': return M([{ g: P.box(0.6, 0.7, 0.03), c: BE_C.cloth, p: [0, 2.07, 0.03] }]);
-      case 'tentA': return M([ // 삼각 천막 (가로로 누운 삼각기둥)
-        { g: P.cyl(0.85, 0.85, 1.9, 3), c: '#d8c8a2', p: [0, 0.43, 0], r: [0, 0, Math.PI / 2], s: [1, 1, 1] },
-        { g: P.box(0.05, 1.5, 0.05), c: BE_C.dark, p: [0.98, 0.75, 0] }, { g: P.box(0.05, 1.5, 0.05), c: BE_C.dark, p: [-0.98, 0.75, 0] },
+      case 'standardC': return M([0, 1, 2, 3].map(i => ({ g: P.box(0.152, 0.7, 0.025), c: BE_C.cloth, p: [-0.225 + i * 0.15, 2.07, 0.03 + 0.03 * Math.sin(i * 1.9 + 0.5)], r: [0, 0.24 * Math.cos(i * 1.9), 0], k: 1 })));
+      case 'tentA': return beRidgeTent(P);
+      case 'zigg': return M([ // 계단 신전 (석재 줄눈)
+        { g: P.box(3.0, 0.55, 3.0), c: '#c8a46a', p: [0, 0.27, 0], k: 6 }, { g: P.box(2.3, 0.55, 2.3), c: '#bc9860', p: [0, 0.82, 0], k: 6 },
+        { g: P.box(1.6, 0.55, 1.6), c: '#c8a46a', p: [0, 1.37, 0], k: 6 }, { g: P.box(0.9, 0.6, 0.9), c: '#a8402a', p: [0, 1.95, 0], k: 6 },
+        { g: P.box(0.5, 1.7, 0.7), c: '#d4b47a', p: [0, 0.85, 1.4], r: [0.55, 0, 0], k: 6 },
       ]);
-      case 'zigg': return M([ // 계단 신전
-        { g: P.box(3.0, 0.55, 3.0), c: '#c8a46a', p: [0, 0.27, 0] }, { g: P.box(2.3, 0.55, 2.3), c: '#bc9860', p: [0, 0.82, 0] },
-        { g: P.box(1.6, 0.55, 1.6), c: '#c8a46a', p: [0, 1.37, 0] }, { g: P.box(0.9, 0.6, 0.9), c: '#a8402a', p: [0, 1.95, 0] },
-        { g: P.box(0.5, 1.7, 0.7), c: '#d4b47a', p: [0, 0.85, 1.4], r: [0.55, 0, 0] },
-      ]);
-      case 'pavilion': return M([ { g: P.cyl(0.85, 0.85, 1.0, 10), c: '#f2ece0', p: [0, 0.5, 0] }, { g: P.cyl(0.03, 0.03, 0.5, 4), c: BE_C.dark, p: [0, 2.0, 0] } ]);
-      case 'pavilionR': return M([ { g: P.cone(1.02, 0.95, 10), c: BE_C.cloth, p: [0, 1.47, 0] }, { g: P.box(0.03, 0.18, 0.3), c: BE_C.cloth, p: [0, 2.2, 0.15] } ]);
+      case 'pavilion': { // 중세 둥근 천막: 벽 + 문 + 지붕 줄 + 꼭대기 장대
+        const L = [
+          beLathe([[0.82, 0], [0.87, 0.15], [0.86, 0.6], [0.82, 1.1]], 10, '#f2ece0', 4),
+          { g: P.box(0.36, 0.62, 0.05), c: '#3a2c1e', p: [0, 0.36, 0.88], k: 1 },
+          { g: P.cyl(0.025, 0.025, 0.6, 4), c: BE_C.dark, p: [0, 2.3, 0], k: 0 }, { g: P.ico(0.05, 0), c: BE_C.bronze, p: [0, 2.62, 0], k: 2 },
+        ];
+        for (let i = 0; i < 6; i++) { const a = i / 6 * Math.PI * 2 + 0.5; L.push(beRope([0.96 * Math.cos(a), 1.05, 0.96 * Math.sin(a)], [1.9 * Math.cos(a), 0.02, 1.9 * Math.sin(a)], 0.018, '#b8a880', 1)); L.push({ g: P.box(0.035, 0.16, 0.035), c: BE_C.dark, p: [1.9 * Math.cos(a), 0.06, 1.9 * Math.sin(a)], k: 0 }); }
+        return M(L); }
+      case 'pavilionR': return M([ beLathe([[0.99, 1.02], [0.95, 1.08], [0.74, 1.38], [0.43, 1.72], [0.12, 2.0], [0, 2.08]], 10, BE_C.cloth, 4), { g: P.cone(0.11, 0.34, 3), c: BE_C.cloth, p: [0.17, 2.45, 0], r: [0, 0, -Math.PI / 2], s: [1, 1, 0.12], k: 1 } ]);
       case 'banner': return M([ { g: P.cyl(0.035, 0.04, 3.2, 5), c: BE_C.wood, p: [0, 1.6, 0] }, { g: P.box(0.7, 0.05, 0.05), c: BE_C.dark, p: [0, 3.05, 0.05] }, { g: P.ico(0.07, 0), c: '#d8b040', p: [0, 3.25, 0] } ]);
-      case 'bannerC': return M([ { g: P.box(0.6, 1.3, 0.03), c: BE_C.cloth, p: [0, 2.38, 0.07] }, { g: P.cone(0.3, 0.3, 3), c: BE_C.cloth, p: [0, 1.6, 0.07], r: [Math.PI, 0, 0], s: [1, 1, 0.1] } ]);
+      case 'bannerC': return M([...[0, 1, 2, 3].map(i => ({ g: P.box(0.152, 1.3, 0.025), c: BE_C.cloth, p: [-0.225 + i * 0.15, 2.38, 0.07 + 0.035 * Math.sin(i * 1.9 + 0.5)], r: [0, 0.22 * Math.cos(i * 1.9), 0], k: 1 })), { g: P.cone(0.3, 0.3, 3), c: BE_C.cloth, p: [0, 1.6, 0.07], r: [Math.PI, 0, 0], s: [1, 1, 0.1], k: 1 } ]);
       case 'trebuchet': return M([
         { g: P.box(2.2, 0.16, 0.16), c: BE_C.wood, p: [0, 0.1, 0.55] }, { g: P.box(2.2, 0.16, 0.16), c: BE_C.wood, p: [0, 0.1, -0.55] },
         { g: P.box(0.14, 2.2, 0.14), c: BE_C.wood, p: [-0.35, 1.05, 0.5], r: [0, 0, -0.32] }, { g: P.box(0.14, 2.2, 0.14), c: BE_C.wood, p: [0.35, 1.05, 0.5], r: [0, 0, 0.32] },
@@ -296,17 +429,18 @@ function beGeo(kind) {
         { g: P.box(0.06, 2.6, 0.06), c: BE_C.wood, p: [0, 1.25, 0.22] }, { g: P.box(0.06, 2.6, 0.06), c: BE_C.wood, p: [0, 1.25, -0.22] },
         ...[0.3, 0.75, 1.2, 1.65, 2.1].map(y => ({ g: P.box(0.05, 0.05, 0.46), c: '#8a6a40', p: [0, y, 0] })),
       ]);
-      case 'cannon': return M([ // +x 방향
-        { g: P.cyl(0.12, 0.16, 1.25, 8), c: '#3e3c3a', p: [0.25, 0.48, 0], r: [0, 0, -Math.PI / 2 + 0.08] },
-        { g: P.cyl(0.18, 0.18, 0.08, 8), c: '#2e2c2a', p: [-0.36, 0.43, 0], r: [0, 0, Math.PI / 2] },
+      case 'cannon': return M([ // +x 방향 · 포신에 보강 테 · 살 있는 바퀴
+        { g: P.cyl(0.12, 0.16, 1.25, 8), c: '#3e3c3a', p: [0.25, 0.48, 0], r: [0, 0, -Math.PI / 2 + 0.08], k: 2 },
+        ...[-0.45, 0.0, 0.5].map(t => ({ g: new THREE.CylinderGeometry(0.148 - t * 0.032, 0.148 - t * 0.032, 0.06, 8, 1, true), c: '#2a2826', p: [0.25 + t * 0.997, 0.48 + t * 0.08, 0], r: [0, 0, -Math.PI / 2 + 0.08], k: 2 })),
+        { g: P.cyl(0.18, 0.18, 0.08, 8), c: '#2e2c2a', p: [-0.36, 0.43, 0], r: [0, 0, Math.PI / 2], k: 2 },
         { g: P.box(0.9, 0.18, 0.34), c: '#6a4a2a', p: [-0.15, 0.32, 0] }, { g: P.box(1.0, 0.1, 0.12), c: '#5a3a20', p: [-0.8, 0.12, 0], r: [0, 0, 0.18] },
-        { g: P.cyl(0.32, 0.32, 0.06, 12), c: '#5a3a1e', p: [0.0, 0.32, 0.25], r: [Math.PI / 2, 0, 0] }, { g: P.cyl(0.32, 0.32, 0.06, 12), c: '#5a3a1e', p: [0.0, 0.32, -0.25], r: [Math.PI / 2, 0, 0] },
-        { g: P.ico(0.09, 0), c: '#222', p: [-0.4, 0.06, 0.45] }, { g: P.ico(0.09, 0), c: '#222', p: [-0.55, 0.06, 0.5] }, { g: P.ico(0.09, 0), c: '#222', p: [-0.47, 0.18, 0.47] },
+        ...beWheel(P, 0.31, 0.0, 0.32, 0.25, '#5a3a1e', '#2e2c2a'), ...beWheel(P, 0.31, 0.0, 0.32, -0.25, '#5a3a1e', '#2e2c2a'),
+        { g: P.ico(0.09, 0), c: '#222', p: [-0.4, 0.06, 0.45], k: 2 }, { g: P.ico(0.09, 0), c: '#222', p: [-0.55, 0.06, 0.5], k: 2 }, { g: P.ico(0.09, 0), c: '#222', p: [-0.47, 0.18, 0.47], k: 2 },
       ]);
       case 'fieldgun': return w3dFieldGunGeo();
-      case 'sandbag': { // 모래주머니 둑 (+x 방향으로 길게 · 3단)
+      case 'sandbag': { // 모래주머니 둑 (+x 방향으로 길게 · 3단): 불룩한 자루
         const L = [];
-        for (let row = 0; row < 3; row++) for (let k = 0; k < 3 - (row === 2 ? 1 : 0); k++) L.push({ g: P.box(0.34, 0.15, 0.28), c: (row + k) % 2 ? '#a8966a' : '#9a8860', p: [-0.32 + k * 0.32 + (row % 2) * 0.16, 0.08 + row * 0.14, row * -0.02], r: [0, (k - 1) * 0.06, 0], s: [1, 1, 1] });
+        for (let row = 0; row < 3; row++) for (let k = 0; k < 3 - (row === 2 ? 1 : 0); k++) L.push({ g: P.ico(0.17, 0), c: (row + k) % 2 ? '#a8966a' : '#9a8860', p: [-0.32 + k * 0.32 + (row % 2) * 0.16, 0.08 + row * 0.13, row * -0.02], r: [(k - 1) * 0.1, (k - 1) * 0.12 + row * 0.2, (row - 1) * 0.08], s: [1.08, 0.58 + (k % 2) * 0.06, 0.88], k: 1 });
         return M(L);
       }
       case 'tpole': return M([ // 전신주 (가로대는 진행 방향에 수직)
@@ -317,16 +451,20 @@ function beGeo(kind) {
         { g: P.box(0.5, 0.012, 0.012), c: '#1a1a1a', p: [0.25, 2.88, 0.4], r: [0, 0, -0.05] }, { g: P.box(0.5, 0.012, 0.012), c: '#1a1a1a', p: [0.75, 2.88, 0.4], r: [0, 0, 0.05] },
         { g: P.box(0.5, 0.012, 0.012), c: '#1a1a1a', p: [0.25, 2.88, -0.4], r: [0, 0, -0.05] }, { g: P.box(0.5, 0.012, 0.012), c: '#1a1a1a', p: [0.75, 2.88, -0.4], r: [0, 0, 0.05] },
       ]);
-      case 'gabion': return M([ { g: P.cyl(0.36, 0.34, 0.75, 8), c: '#8a7448', p: [0, 0.37, 0] }, { g: P.cyl(0.33, 0.33, 0.04, 8), c: '#4a3e2a', p: [0, 0.75, 0] } ]);
-      case 'barrels': return M([
-        { g: P.cyl(0.24, 0.24, 0.55, 8), c: '#6a4a2a', p: [0, 0.27, 0] }, { g: P.cyl(0.25, 0.25, 0.05, 8), c: '#2a2a2a', p: [0, 0.4, 0] },
-        { g: P.cyl(0.24, 0.24, 0.55, 8), c: '#7a5432', p: [0.5, 0.27, 0.1] }, { g: P.cyl(0.25, 0.25, 0.05, 8), c: '#2a2a2a', p: [0.5, 0.15, 0.1] },
-        { g: P.cyl(0.24, 0.24, 0.55, 8), c: '#6a4a2a', p: [0.25, 0.28, -0.35], r: [Math.PI / 2, 0, 0.3] },
-      ]);
-      case 'tentM': return M([ { g: P.cyl(0.8, 0.8, 0.55, 9), c: BE_C.cloth, p: [0, 0.27, 0] }, { g: P.cone(0.84, 1.15, 9), c: BE_C.cloth, p: [0, 1.12, 0] }, { g: P.box(0.32, 0.5, 0.04), c: '#3a3226', p: [0, 0.28, 0.79] } ]);
+      case 'gabion': return M([ { g: new THREE.CylinderGeometry(0.36, 0.34, 0.75, 8, 1, true), c: '#8a7448', p: [0, 0.37, 0], k: 5 }, { g: P.ico(0.34, 0), c: '#5a4a32', p: [0, 0.74, 0], s: [1, 0.3, 1], k: 3 },
+        ...[0, 1, 2, 3, 4, 5].map(i => ({ g: P.cyl(0.018, 0.018, 0.3, 4), c: '#6a5230', p: [0.33 * Math.cos(i * 1.05), 0.84, 0.33 * Math.sin(i * 1.05)], r: [0.15 * Math.sin(i * 1.05), 0, -0.15 * Math.cos(i * 1.05)], k: 0 })) ]);
+      case 'barrels': return M([...beBarrel([0, 0, 0], [0, 0, 0], '#6a4a2a'), ...beBarrel([0.5, 0, 0.1], [0, 0.5, 0], '#7a5432'), ...beBarrel([0.25, 0.25, -0.4], [Math.PI / 2, 0, 0.3], '#6a4a2a')]);
+      case 'tentM': { // 군용 둥근 천막: 벽 + 처진 지붕 + 문 + 중앙 장대 + 고정 줄
+        const L = [
+          beLathe([[0.8, 0], [0.84, 0.25], [0.82, 0.55], [0.78, 0.62]], 10, BE_C.cloth, 4),
+          beLathe([[0.97, 0.56], [0.9, 0.7], [0.68, 1.0], [0.42, 1.3], [0.19, 1.6], [0.05, 1.78], [0, 1.82]], 10, BE_C.cloth, 4),
+          { g: P.box(0.34, 0.5, 0.04), c: '#3a3226', p: [0, 0.28, 0.82], k: 1 }, { g: P.cyl(0.02, 0.02, 0.45, 4), c: BE_C.cloth, p: [0, 1.98, 0], k: 0 },
+        ];
+        for (let i = 0; i < 6; i++) { const a = i / 6 * Math.PI * 2 + 0.5; L.push(beRope([0.93 * Math.cos(a), 0.6, 0.93 * Math.sin(a)], [1.75 * Math.cos(a), 0.02, 1.75 * Math.sin(a)], 0.018, BE_C.cloth, 1)); }
+        return M(L); }
       case 'berm': { // 흙 보루 (길 쪽은 끊긴 둥근 둑)
         const arc = Math.PI - 0.9, t1 = new THREE.TorusGeometry(2.95, 0.5, 4, 14, arc), t2 = new THREE.TorusGeometry(2.95, 0.5, 4, 14, arc);
-        return M([ { g: t1, c: '#6e6a44', p: [0, 0, 0], r: [-Math.PI / 2, 0, 0.45], s: [1, 1, 0.55] }, { g: t2, c: '#6e6a44', p: [0, 0, 0], r: [-Math.PI / 2, 0, Math.PI + 0.45], s: [1, 1, 0.55] } ]);
+        return M([ { g: t1, c: '#6e6a44', p: [0, 0, 0], r: [-Math.PI / 2, 0, 0.45], s: [1, 1, 0.55], k: 3 }, { g: t2, c: '#6e6a44', p: [0, 0, 0], r: [-Math.PI / 2, 0, Math.PI + 0.45], s: [1, 1, 0.55], k: 3 } ]);
       }
     }
     return null;
@@ -351,7 +489,7 @@ function b3EraScenery(scen, sown) {
   if (beEra(BE_ALLY) >= 4 || beEra(BE_FOE) >= 4 || B.units.some(u => u.ut === 'gun')) { const ug = new THREE.InstancedMesh(w3dFieldGunGeo(), R3D.mats.vc, 16); ug.instanceMatrix.setUsage(THREE.DynamicDrawUsage); ug.frustumCulled = false; ug.castShadow = true; ug.count = 0; scen.add(ug); sown.push(ug); B3.beUGun = ug; } else B3.beUGun = null;
   for (const gk in groups) {
     const geo = beGeo(gk), L = groups[gk]; if (!geo) continue;
-    const im = new THREE.InstancedMesh(geo, R3D.mats.vc, L.length);
+    const im = new THREE.InstancedMesh(geo, geo.attributes.bk ? beMatTex() : R3D.mats.vc, L.length);
     im.frustumCulled = false; im.castShadow = gk !== 'berm' && gk !== 'ladder' && gk !== 'wire' && gk !== 'sandbag'; im.receiveShadow = true;
     L.forEach(([d, tint, sc], k) => {
       beMat(D, d, gk, sc); im.setMatrixAt(k, D.matrix);

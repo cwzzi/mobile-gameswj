@@ -32,6 +32,7 @@ function b3Init() {
   sun.castShadow = true; sun.shadow.mapSize.set(1024, 1024);
   const sc = sun.shadow.camera; sc.left = -18; sc.right = 18; sc.top = 18; sc.bottom = -18; sc.near = 1; sc.far = 110;
   sun.shadow.bias = -0.0006; sun.shadow.normalBias = 0.03;
+  sc.layers.enable(1); // 그림자 전용 가벼운 나무 대역
   scene.add(sun, sun.target);
   R3D.regScene(scene); R3D.regLight(sun);
   const pts = [];
@@ -302,7 +303,7 @@ function b3RealScenery(scen, sown) {
 function b3RealFill() {
   const S3 = B3; if (!S3.rItems) return;
   const lowQ = R3D.quality && R3D.quality() === 'low';
-  if (!S3.rpool || S3.rpoolLow !== lowQ) { if (S3.rpool) for (const k in S3.rpool) S3.rpool[k] && S3.rpool[k].dispose(); S3.rpool = {}; for (const k in S3.rItems) S3.rpool[k] = RA.pool(k, S3.scen, lowQ); S3.rpoolLow = lowQ; S3.rfX = -99; }
+  if (!S3.rpool || S3.rpoolLow !== lowQ) { if (S3.rpool) for (const k in S3.rpool) S3.rpool[k] && S3.rpool[k].dispose(); S3.rpool = {}; for (const k in S3.rItems) S3.rpool[k] = RA.pool(k, S3.scen, lowQ, k.startsWith('tree') ? 3 : 0); S3.rpoolLow = lowQ; S3.rfX = -99; }
   if (Math.abs(S3.tx - S3.rfX) + Math.abs(S3.tz - S3.rfZ) < 0.2) return;
   S3.rfX = S3.tx; S3.rfZ = S3.tz;
   const low = R3D.quality && R3D.quality() === 'low', sph = S3.sph;
