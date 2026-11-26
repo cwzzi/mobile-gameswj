@@ -18,19 +18,34 @@ function evBusy() { return !!EV; }
 // 자유 탐험(🚶): 사건이 없어도 영주 등 뒤 시점으로 땅 전체를 걷거나 말 타고 돌아다니며 주민과 이야기한다 (다시 누르면 내려다보는 시점)
 let FREE = false;
 function evTP() { return !!(EV && EV.tp) || FREE; }
-function freeSet(on) {
+function freeSet(on, town) {
   on = !!on && USE3D && MODE === 'world' && !(EV && EV.tp);
   if (on === FREE) return;
-  FREE = on; auto = null; actHeld = false;
+  FREE = on; auto = null; actHeld = false; freeAuto = false;
   if (on) {
-    EVCAM.yaw = 0;
+    const p = S.player; EVCAM.yaw = town ? Math.atan2(town.x + 0.5 - p.x / T, -(town.y + 0.5 - p.y / T)) : 0; // 마을로 들어오면 마을 쪽을 보며 내려앉는다
     if (S.armyMode !== 'guard') { FREE_ARMY = S.armyMode; S.armyMode = 'guard'; for (const s of soldiers) s.post = null; } // 따라오던 병사는 마을에 (시야를 가리지 않게)
-    banner('🚶 자유 탐험', '왼쪽 끌기 이동 · 오른쪽 끌기 시선 · 주민을 톡 하면 대화', 2.4);
+    banner(town ? '🏘️ ' + town.name : '🚶 자유 탐험', town ? '마을을 걸어 보세요 · 주민을 톡 하면 대화 · 마을을 나가면 위 시점' : '왼쪽 끌기 이동 · 오른쪽 끌기 시선 · 주민을 톡 하면 대화', 2.4);
   } else if (FREE_ARMY) { S.armyMode = FREE_ARMY; FREE_ARMY = null; for (const s of soldiers) s.post = null; }
   $('freeBtn').classList.toggle('on', FREE);
   document.body.classList.toggle('free', FREE);
 }
 let FREE_ARMY = null;
+// 마을에 들어가면 자동으로 자유 탐험(등 뒤 시점), 마을을 벗어나면 다시 내려다보는 시점 (WJ: "평소에는 지금 모드, 마을에 들어가면 그 게임 모드")
+// 직접 걸어서(자동 이동 아님) 마을 경계를 넘을 때만 바뀐다. 🚶 버튼으로 직접 켠 탐험은 마을을 나가도 그대로
+let freeAuto = false, freeInTown = null;
+function freeTownAt(px, py, extra) {
+  for (const t of S.towns) { const r = 2.5 + townLevel(t) * 0.6 + extra; if ((px / T - t.x - 0.5) ** 2 + (py / T - t.y - 0.5) ** 2 < r * r) return t; }
+  return null;
+}
+function freeTick() {
+  if (!USE3D || MODE !== 'world' || paused || (EV && EV.tp)) return;
+  const p = S.player, inT = freeTownAt(p.x, p.y, FREE && freeAuto ? 2 : 0);
+  if (freeInTown === null) { freeInTown = !!inT; return; } // 시작·불러오기 직후엔 바꾸지 않는다
+  if (inT && !freeInTown && !FREE && !auto) { freeSet(true, inT); freeAuto = true; }
+  else if (!inT && freeInTown && FREE && freeAuto) freeSet(false);
+  freeInTown = !!inT;
+}
 function evTPSpeed() { return EV && EV.kind === 'thief' && EV.phase === 'search' ? 124 : 85; } // 도둑 추격은 뛰어서
 function evEra() { return clamp(S.era | 0, 0, ERAS.length - 1); }
 
@@ -333,7 +348,7 @@ $('evBoardBtn').addEventListener('click', () => { if (MODE === 'world' && !pause
 
 // ---------- 매 프레임 (updateWorld 뒤, 멈춤 아닐 때) ----------
 function evUpdate(dt) {
-  if (evS !== S) { evS = S; if (FREE) freeSet(false); EV = null; EVCAM.k = 0; EVQ.length = 0; evT = 0; evNext = rr(60, 90); evBadge(); } // 새 게임 · 불러오기
+  if (evS !== S) { evS = S; if (FREE) freeSet(false); freeInTown = null; EV = null; EVCAM.k = 0; EVQ.length = 0; evT = 0; evNext = rr(60, 90); evBadge(); } // 새 게임 · 불러오기
   evClock += dt;
   if (EV && EV.army && !EV.tp) evExitTP();
   if (!EV) {
@@ -617,6 +632,7 @@ function evMarks() { return EV && EV.kind === 'treasure' && (EV.phase === 'searc
 // ---------- HUD (매 프레임, 멈춤과 상관없이) ----------
 function evHud(dt) {
   if (FREE && (MODE !== 'world' || (EV && EV.tp))) freeSet(false);
+  freeTick();
   const tp = evTP();
   EVCAM.k = clamp(EVCAM.k + (tp ? dt : -dt) / 1.3, 0, 1);
   lookHook = tp ? evLook : null;
