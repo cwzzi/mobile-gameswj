@@ -239,7 +239,7 @@
   .tbtn, #townHud, #townExitBtn, #townMap, #townPrompt { display: none; }
   body:not(.town) .tbtn, body:not(.town) #townHud, body:not(.town) #townExitBtn, body:not(.town) #townMap, body:not(.town) #townPrompt { display: none !important; }
   body.town .wbtn, body.town #res, body.town #goal, body.town #minimap, body.town #warBtn, body.town #eraBtn, body.town #hint, body.town .sideBtn, body.town #evHud { display: none !important; }
-  body.town #townHud { display: block; top: calc(8px + env(safe-area-inset-top)); left: 8px; border-radius: 14px; padding: 7px 13px; font-size: 13.5px; line-height: 1.35; border-color: var(--era, var(--accent)); }
+  body.town #townHud { display: block; top: calc(8px + env(safe-area-inset-top)); left: 8px; border-radius: 14px; padding: 7px 13px; font-size: 13.5px; line-height: 1.35; border-color: var(--era, var(--accent)); cursor: pointer; }
   body.town #townHud b { display: block; font-size: 14.5px; color: var(--accent); }
   body.town #townHud small { color: #e8e2d2; font-size: 12px; }
   body.town #townExitBtn { display: flex; align-items: center; gap: 5px; top: calc(8px + env(safe-area-inset-top)); right: 58px; height: 44px; padding: 0 13px; border-radius: 12px; color: #fff; font-weight: 800; font-size: 13.5px; border: 1.5px solid rgba(255,230,150,.55); background: rgba(26,34,42,.78); }
@@ -249,7 +249,8 @@
   body.town #townPrompt b { display: inline-block; background: #fff; color: #1b2028; font-weight: 900; padding: 1px 7px; border-radius: 6px; margin-right: 6px; font-size: 12px; }
   body.town #townActBtn { right: 20px; bottom: calc(28px + env(safe-area-inset-bottom)); width: 78px; height: 78px; background: radial-gradient(circle at 35% 30%, #8fd18a, #327a36); font-size: 14px; line-height: 1.15; }
   body.town #townRunBtn { display: flex; right: 26px; bottom: calc(118px + env(safe-area-inset-bottom)); width: 58px; height: 58px; background: radial-gradient(circle at 35% 30%, #6aa5e0, #2f5c96); font-size: 13px; line-height: 1.15; }
-  body.town #townRunBtn.on { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(242,193,78,.45); }
+  body.town #townRunBtn.on, body.town #townRideBtn.on { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(242,193,78,.45); }
+  body.town #townRideBtn { right: 27px; bottom: calc(184px + env(safe-area-inset-bottom)); width: 56px; height: 56px; background: radial-gradient(circle at 35% 30%, #b88a55, #6e4724); font-size: 13px; line-height: 1.15; }
 </style>
 </head>
 <body>
@@ -280,6 +281,7 @@
 <div id="townPrompt" class="hud glass"></div>
 <div id="townActBtn" class="btn tbtn">💬<br>대화</div>
 <div id="townRunBtn" class="btn tbtn">🏃<br>달리기</div>
+<div id="townRideBtn" class="btn tbtn">🐴<br>승마</div>
 <div id="talkBox"></div>
 
 <div id="battleHud" class="hud">
@@ -311,6 +313,7 @@
 <div id="sortiePanel" class="panel"></div>
 <div id="kPanel" class="panel"></div>
 <div id="evPanel" class="panel"></div>
+<div id="townPanel" class="panel"></div>
 <div id="menuPanel" class="panel help">
   <h2>개척왕</h2>
   <p>넓은 땅을 마음대로 돌아다니며 자원을 모으고, 마을을 세워 영토를 넓히세요. 산적이 마을을 노리고, 때때로 적 군단이 쳐들어옵니다.</p>

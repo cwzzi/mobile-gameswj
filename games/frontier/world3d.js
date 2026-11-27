@@ -458,6 +458,15 @@ function w3dPaint(c) {
       g.globalAlpha = 1;
     }
   }
+  // 오버월드 마을 중심 광장 포장 바닥 (위 시점에서도 건물이 잔디밭에 떠 보이지 않게)
+  const plazaCol = S.era === 0 ? 'rgba(138,112,76,.62)' : S.era === 1 ? 'rgba(202,180,136,.62)' : S.era >= 4 ? 'rgba(154,158,166,.65)' : 'rgba(162,154,140,.62)';
+  for (const t of S.towns) {
+    const cx = (t.x + 0.5 - x0) * P, cy = (t.y + 0.5 - y0) * P, rad = (2.1 + townLevel(t) * 0.18) * P;
+    if (cx + rad < 0 || cy + rad < 0 || cx - rad > CK * P || cy - rad > CK * P) continue;
+    const gr = g.createRadialGradient(cx, cy, rad * 0.55, cx, cy, rad);
+    gr.addColorStop(0, plazaCol); gr.addColorStop(1, 'rgba(140,130,110,0)');
+    g.fillStyle = gr; g.beginPath(); g.arc(cx, cy, rad, 0, Math.PI * 2); g.fill();
+  }
   c.tex.needsUpdate = true;
 }
 

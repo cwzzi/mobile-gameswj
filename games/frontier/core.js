@@ -66,6 +66,7 @@ const pendTouch = new Map();
 const TAP_MOVE = 10, TAP_RANGE = 14, TAP_MAX_MS = 2000;
 function promoteTouch(id) {
   const e = pendTouch.get(id); if (!e) return;
+  if (MODE === 'town' && id === 'm') return; // PC 마을 산책: 마우스 끌기는 화면 어디서든 시선 회전
   if (joy.id !== null || e.x >= VW * 0.62) return;
   pendTouch.delete(id);
   joy.id = id; joy.ox = e.x; joy.oy = e.y; joy.x = 0; joy.y = 0; joy.active = true; joy.sx = e.x; joy.sy = e.y; joy.t0 = e.t; joy.moved = false;

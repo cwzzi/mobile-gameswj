@@ -39,7 +39,7 @@ function resTiles(type, bx, by) {
   }
   return out;
 }
-function prodRate(type, n) { return Math.round(RES_DEF[type].perMin(n) * eraCur().prod * (1 + techBonus('prod'))); }
+function prodRate(type, n) { const art = (S && S.artisan ? S.artisan * 0.08 : 0); return Math.round(RES_DEF[type].perMin(n) * eraCur().prod * (1 + techBonus('prod') + art)); }
 function resRate(b) { const d = RES_DEF[b.type]; if (!d) return 0; return prodRate(b.type, resTiles(b.type, b.x, b.y).length); }
 function resStatus(townId) {
   const parts = [];
@@ -143,7 +143,8 @@ function newGame(opts) {
   const { tiles, hp } = newWorld(seed);
   S = { seed, tiles, hp, wood: 0, stone: 0, gold: 0, towns: [], buildings: [], camps: [], horses: [], won: false, time: 0,
         player: { x: 0, y: 0, hp: 10, mounted: false, dir: 0 }, spawnT: 0,
-        hero: { lv: 1, exp: 0 }, war: null, warT: 0, nextWar: 80, warsWon: 0 };
+        hero: { lv: 1, exp: 0 }, gear: { wpn: 0, arm: 0, mnt: 0 }, buffs: { atkT: 0, spdT: 0 }, artisan: 0,
+        war: null, warT: 0, nextWar: 80, warsWon: 0 };
   { const mt = /[?&]time=(\d+(?:\.\d+)?)\b/.exec(location.search); if (mt) S.time = (((((+mt[1] - 6 + 24) % 24) / 24) - 0.08 + 1) % 1) * DAY_LEN; }
   let best = null;
   for (let k = 0; k < 4000; k++) {
@@ -193,7 +194,7 @@ function spawnCamp(avoidX, avoidY, minD) {
 function townLevel(t) { return Math.min(eraCur().maxLv, 5, 1 + Math.floor(t.pop / 10)); }
 function townRadius(t) { return 3 + townLevel(t) + (eraCur().radius || 0); }
 function townCap(t) { return 6 + 5 * S.buildings.filter(b => b.town === t.id && b.type === 'house').length; }
-function townIncome(t) { const n = k => S.buildings.filter(b => b.town === t.id && b.type === k).length; return Math.round((Math.ceil(t.pop / 3) + 3 * n('market') + 4 * n('factory')) * (eraCur().income + techBonus('income'))); }
+function townIncome(t) { const n = k => S.buildings.filter(b => b.town === t.id && b.type === k).length; const m = t && t.moraleT > 0 ? 1.25 : 1; return Math.round((Math.ceil(t.pop / 3) + 3 * n('market') + 4 * n('factory')) * (eraCur().income + techBonus('income')) * m); }
 function recomputeOwner() {
   owner.fill(-1); ownedCount = 0;
   for (const t of S.towns) {
@@ -261,8 +262,16 @@ function build(type) {
 }
 
 // ---------- 영웅 ----------
-function heroMaxHp() { return 10 + (S.hero.lv - 1) * 2 + eraCur().hp; }
-function heroDmg() { return 1 + Math.floor((S.hero.lv - 1) / 2) + eraCur().atk; }
+function heroMaxHp() { return 10 + (S.hero.lv - 1) * 2 + eraCur().hp + (S.gear ? S.gear.arm * 3 : 0); }
+function heroDmg() { const base = 1 + Math.floor((S.hero.lv - 1) / 2) + eraCur().atk + (S.gear ? S.gear.wpn : 0); return Math.round(base * (S.buffs && S.buffs.atkT > 0 ? 1.25 : 1)); }
+function tickBuffs(dt) {
+  if (!S) return;
+  if (S.buffs) {
+    if (S.buffs.atkT > 0) S.buffs.atkT = Math.max(0, S.buffs.atkT - dt);
+    if (S.buffs.spdT > 0) S.buffs.spdT = Math.max(0, S.buffs.spdT - dt);
+  }
+  for (const t of S.towns) if (t.moraleT > 0) t.moraleT = Math.max(0, t.moraleT - dt);
+}
 function expNeed(lv) { return 60 + lv * 40; }
 function gainExp(n) {
   S.hero.exp += n; let up = false;
@@ -584,6 +593,7 @@ keyHooks.push((k, down) => {
 function updateWorld(dt) {
   if (eraTick(dt)) return; // 군주 서거 → 계승 화면
   S.time += dt;
+  tickBuffs(dt);
   const p = S.player;
   let mv = moveInput();
   if (typeof evMove === 'function') mv = evMove(mv, dt); // 3인칭(사람 찾기): 카메라 기준 이동
@@ -591,7 +601,8 @@ function updateWorld(dt) {
   p.moving = mv.l > 0.08;
   if (p.moving) {
     const onForest = tileAt(p.x / T, p.y / T) === FOREST;
-    const sp = (p.mounted ? 250 * (1 + techBonus('horse')) : typeof evTP === 'function' && evTP() ? evTPSpeed() : 130 * (1 + techBonus('move'))) * (onForest ? 0.7 : 1) * Math.max(0.4, mv.l);
+    const gSpd = (1 + (S.gear ? S.gear.mnt * 0.08 : 0)) * (S.buffs && S.buffs.spdT > 0 ? 1.22 : 1);
+    const sp = (p.mounted ? 250 * (1 + techBonus('horse')) : typeof evTP === 'function' && evTP() ? evTPSpeed() : 130 * (1 + techBonus('move'))) * gSpd * (onForest ? 0.7 : 1) * Math.max(0.4, mv.l);
     moveEnt(p, mv.x * sp * dt, mv.y * sp * dt, 9);
     p.dir = Math.atan2(mv.y, mv.x); p.walk = (p.walk || 0) + dt * sp / 9;
     p.dustT = (p.dustT || 0) - dt;
@@ -1057,7 +1068,7 @@ function load() {
     o.tiles = unb64(o.tiles); o.hp = unb64(o.hp);
     if (o.tiles.length !== W * H) return false;
     o.horses = o.horses.map(h => ({ ...h, vx: 0, vy: 0, t: 0, ridden: false, walk: 0, col: h.col || HORSE_COLS[ri(HORSE_COLS.length)] }));
-    o.hero = o.hero || { lv: 1, exp: 0 }; o.warT = o.warT || 0; o.nextWar = o.nextWar || 80; o.warsWon = o.warsWon || 0; o.war = o.war || null;
+    o.hero = o.hero || { lv: 1, exp: 0 }; o.gear = o.gear || { wpn: 0, arm: 0, mnt: 0 }; o.buffs = o.buffs || { atkT: 0, spdT: 0 }; o.artisan = o.artisan || 0; o.warT = o.warT || 0; o.nextWar = o.nextWar || 80; o.warsWon = o.warsWon || 0; o.war = o.war || null;
     eraMigrate(o); // 옛 저장: 시대·군주·연대기 채워 넣기
     S = o; bandits.length = 0; villagers.length = 0; soldiers.length = 0; shots.length = 0; envoys.length = 0;
     computeDerived(); kOwner.fill(-1);
