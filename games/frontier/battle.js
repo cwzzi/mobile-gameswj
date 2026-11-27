@@ -9,7 +9,7 @@ const COMBO = [
   { arc: 7.0, r: 80, m: 2.2, kb: 300, dur: 0.42, step: 0, launch: 300 },
 ];
 
-function heroBattleDmg() { return 2 * (1 + (S.hero.lv - 1) * 0.15); }
+function heroBattleDmg() { const w = S.gear ? S.gear.wpn * 0.14 : 0; const bf = S.buffs && S.buffs.atkT > 0 ? 1.25 : 1; return 2 * (1 + (S.hero.lv - 1) * 0.15 + w) * bf; }
 
 // ===== 병력: 화면의 병사 한 명이 여러 명을 대표한다 (체력 = 머릿수) =====
 // 전투 양쪽은 병력 묶음 [{ut, n, src?, mil?, aux?}] 을 가진다. 대표 병사(figure) 하나가 rep 명을 데려 나오고,
@@ -182,7 +182,7 @@ function startBattle(war) {
   for (let x = 20; x < BW; x += 46) { B.obs.push({ x, y: 18 + r() * 10, kind: 'tree', v: (r() * 10) | 0, r: 12 }); B.obs.push({ x: x + 20, y: BH - 8 - r() * 10, kind: 'tree', v: (r() * 10) | 0, r: 12 }); }
   if (typeof bEraSetup === 'function') bEraSetup(r); // 시대별 전장 꾸밈·일제 사격·대포 (battleEra.js)
   // 영웅
-  const maxHp = 40 + S.hero.lv * 6;
+  const maxHp = 40 + S.hero.lv * 6 + (S.gear ? S.gear.arm * 8 : 0);
   B.hero = { x: 240, y: 640, hp: maxHp, maxHp, mg: 30, face: 1, dir: 0, combo: 0, comboQ: false, comboWin: 0, atkT: 0, atkDur: 0, atkHit: false,
              dashT: 0, dashCd: 0, musouT: 0, musouTick: 0, inv: 0, walk: 0, hurt: 0, moving: false };
   // 동맹 기마국의 기마 원군 (우리 병력에 더해지지만 전사해도 우리 군대에서는 빠지지 않는다)
@@ -404,7 +404,7 @@ function updateBattle(dt) {
       }
       if (H.atkT <= 0) { H.comboWin = 0.35; if ((H.comboQ || bAtkHeld)) startCombo(); }
     } else if (mv.l > 0.08) {
-      const sp = 175 * Math.max(0.4, mv.l);
+      const sp = 175 * (S.buffs && S.buffs.spdT > 0 ? 1.18 : 1) * Math.max(0.4, mv.l);
       bMove(H, mv.x * sp * dt, mv.y * sp * dt, 10); H.dir = Math.atan2(mv.y, mv.x); H.moving = true;
     } else if (bAtkHeld) startCombo();
   }
