@@ -33,6 +33,8 @@
   #techBtn { top: calc(162px + env(safe-area-inset-top)); }
   #armyBtn { top: calc(212px + env(safe-area-inset-top)); }
   #diploBtn { top: calc(312px + env(safe-area-inset-top)); }
+  #freeBtn { top: calc(362px + env(safe-area-inset-top)); }
+  #freeBtn.on { border: 2px solid var(--accent); box-shadow: inset 0 0 14px -3px var(--accent); }
   #diploBtn.war { border: 2px solid #ff7a6a; animation: pulse 1s infinite; }
   #kPanel { padding: 12px 14px; max-height: 92vh; }
   #kPanel .opt { padding: 7px 10px; font-size: 14px; margin-bottom: 5px; line-height: 1.35; }
@@ -212,7 +214,7 @@
   #evHud.bot { top: auto; bottom: calc(168px + env(safe-area-inset-bottom)); left: 50%; transform: translateX(-50%); white-space: nowrap; font-size: 12.5px; padding: 5px 11px; }
   #evHud small { display: block; font-weight: 600; font-size: 12px; color: #ffe9a8; margin-top: 2px; }
   #evExit { display: none; margin-top: 7px; min-height: 40px; padding: 8px 14px; border-radius: 10px; border: 1px solid #fff6c8; background: linear-gradient(#5a6a58, #36443a); color: #fff; font-weight: 800; font-size: 14px; }
-  body.evs #buildBtn, body.tp #goal, body.tp #buildBtn, body.tp #rideBtn, body.tp #eraBtn, body.tp #warBtn, body.tp .sideBtn { display: none !important; }
+  body.evs #buildBtn, body.tp #goal, body.tp #buildBtn, body.tp:not(.free) #rideBtn, body.tp #eraBtn, body.tp #warBtn, body.tp .sideBtn:not(#freeBtn), body.tp:not(.free) #freeBtn { display: none !important; }
   body.tp #banner { top: 44%; }
   #talkBtn { right: 118px; bottom: calc(24px + env(safe-area-inset-bottom)); width: 70px; height: 70px; background: radial-gradient(circle at 35% 30%, #8fd18a, #3b8a3a); font-size: 14px; line-height: 1.15; display: none; }
   #talkBox { position: fixed; z-index: 14; left: 50%; top: 40%; transform: translate(-50%, calc(-100% - 10px)); max-width: min(78vw, 300px); background: #fffaf0; color: #2a2218; border-radius: 14px;
@@ -233,6 +235,21 @@
   #evHud .evn { font-size: 12px; font-weight: 800; color: #2a1a00; background: var(--accent); border-radius: 7px; padding: 0 6px; margin-left: 4px; white-space: nowrap; }
   .opt.evq { border-color: rgba(242,193,78,.55); }
   .evquote { font-size: 14.5px; line-height: 1.6; background: rgba(255,255,255,.06); border-left: 3px solid var(--accent); border-radius: 8px; padding: 8px 11px; margin: 6px 0 10px; }
+  /* 마을 내부 실사 거리 씬 (town3d.js) */
+  .tbtn, #townHud, #townExitBtn, #townMap, #townPrompt { display: none; }
+  body:not(.town) .tbtn, body:not(.town) #townHud, body:not(.town) #townExitBtn, body:not(.town) #townMap, body:not(.town) #townPrompt { display: none !important; }
+  body.town .wbtn, body.town #res, body.town #goal, body.town #minimap, body.town #warBtn, body.town #eraBtn, body.town #hint, body.town .sideBtn, body.town #evHud { display: none !important; }
+  body.town #townHud { display: block; top: calc(8px + env(safe-area-inset-top)); left: 8px; border-radius: 14px; padding: 7px 13px; font-size: 13.5px; line-height: 1.35; border-color: var(--era, var(--accent)); }
+  body.town #townHud b { display: block; font-size: 14.5px; color: var(--accent); }
+  body.town #townHud small { color: #e8e2d2; font-size: 12px; }
+  body.town #townExitBtn { display: flex; align-items: center; gap: 5px; top: calc(8px + env(safe-area-inset-top)); right: 58px; height: 44px; padding: 0 13px; border-radius: 12px; color: #fff; font-weight: 800; font-size: 13.5px; border: 1.5px solid rgba(255,230,150,.55); background: rgba(26,34,42,.78); }
+  body.town #menuBtn { top: calc(8px + env(safe-area-inset-top)); right: 8px; }
+  body.town #townMap { display: block; left: 12px; bottom: calc(18px + env(safe-area-inset-bottom)); width: 118px; height: 118px; border-radius: 50%; border: 2.5px solid rgba(255,255,255,.45); box-shadow: 0 6px 18px rgba(0,0,0,.55); background: #1e2420; }
+  body.town #townPrompt { left: 50%; transform: translateX(-50%); bottom: calc(34px + env(safe-area-inset-bottom)); padding: 8px 16px; border-radius: 999px; font-size: 13.5px; font-weight: 700; white-space: nowrap; cursor: pointer; border-color: rgba(242,193,78,.65); box-shadow: 0 6px 20px rgba(0,0,0,.5); }
+  body.town #townPrompt b { display: inline-block; background: #fff; color: #1b2028; font-weight: 900; padding: 1px 7px; border-radius: 6px; margin-right: 6px; font-size: 12px; }
+  body.town #townActBtn { right: 20px; bottom: calc(28px + env(safe-area-inset-bottom)); width: 78px; height: 78px; background: radial-gradient(circle at 35% 30%, #8fd18a, #327a36); font-size: 14px; line-height: 1.15; }
+  body.town #townRunBtn { display: flex; right: 26px; bottom: calc(118px + env(safe-area-inset-bottom)); width: 58px; height: 58px; background: radial-gradient(circle at 35% 30%, #6aa5e0, #2f5c96); font-size: 13px; line-height: 1.15; }
+  body.town #townRunBtn.on { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(242,193,78,.45); }
 </style>
 </head>
 <body>
@@ -248,6 +265,7 @@
 <button id="armyBtn" class="hud glass sideBtn" aria-label="군대">🪖</button>
 <button id="evBoardBtn" class="hud glass sideBtn" aria-label="소식 · 의뢰" style="display:none">📜</button>
 <button id="diploBtn" class="hud glass sideBtn" aria-label="이웃 왕국">🏰</button>
+<button id="freeBtn" class="hud glass sideBtn" aria-label="자유 탐험 (등 뒤 시점)" style="display:none">🚶</button>
 <div id="hint" class="hud glass"></div>
 <div id="toast" class="hud"></div>
 <div id="actBtn" class="btn wbtn">행동</div>
@@ -256,6 +274,12 @@
 <div id="talkBtn" class="btn wbtn">말<br>걸기</div>
 <div id="digBtn" class="btn wbtn">⛏️<br>파기</div>
 <div id="evHud" class="hud glass"><div id="evObj"></div><button id="evExit">↩ 돌아가기</button></div>
+<div id="townHud" class="hud glass"></div>
+<button id="townExitBtn" class="hud glass">↩ 월드로</button>
+<canvas id="townMap" class="hud" width="144" height="144"></canvas>
+<div id="townPrompt" class="hud glass"></div>
+<div id="townActBtn" class="btn tbtn">💬<br>대화</div>
+<div id="townRunBtn" class="btn tbtn">🏃<br>달리기</div>
 <div id="talkBox"></div>
 
 <div id="battleHud" class="hud">
@@ -335,6 +359,7 @@
 <script src="battle3d.js"></script>
 <script src="battleEra.js"></script>
 <script src="event.js"></script>
+<script src="town3d.js"></script>
 <script src="main.js"></script>
 </body>
 </html>

@@ -15,7 +15,41 @@ let evT = 0, evNext = 75, evS = null, evClock = 0, evLastGen = -99, evKindLast =
 const EVQ = []; let evQid = 0; // 소식판 (의뢰 목록)
 const EV_KIND_ORDER = ['treasure', 'findPerson', 'thief'];
 function evBusy() { return !!EV; }
-function evTP() { return !!(EV && EV.tp); }
+// 자유 탐험(🚶): 사건이 없어도 영주 등 뒤 시점으로 땅 전체를 걷거나 말 타고 돌아다니며 주민과 이야기한다 (다시 누르면 내려다보는 시점)
+let FREE = false;
+function evTP() { return !!(EV && EV.tp) || FREE; }
+function freeSet(on, town) {
+  on = !!on && USE3D && MODE === 'world' && !(EV && EV.tp);
+  if (on === FREE) return;
+  FREE = on; auto = null; actHeld = false; freeAuto = false;
+  if (on) {
+    const p = S.player; EVCAM.yaw = town ? Math.atan2(town.x + 0.5 - p.x / T, -(town.y + 0.5 - p.y / T)) : 0; // 마을로 들어오면 마을 쪽을 보며 내려앉는다
+    if (S.armyMode !== 'guard') { FREE_ARMY = S.armyMode; S.armyMode = 'guard'; for (const s of soldiers) s.post = null; } // 따라오던 병사는 마을에 (시야를 가리지 않게)
+    banner(town ? '🏘️ ' + town.name : '🚶 자유 탐험', town ? '마을을 걸어 보세요 · 주민을 톡 하면 대화 · 마을을 나가면 위 시점' : '왼쪽 끌기 이동 · 오른쪽 끌기 시선 · 주민을 톡 하면 대화', 2.4);
+  } else if (FREE_ARMY) { S.armyMode = FREE_ARMY; FREE_ARMY = null; for (const s of soldiers) s.post = null; }
+  $('freeBtn').classList.toggle('on', FREE);
+  document.body.classList.toggle('free', FREE);
+}
+let FREE_ARMY = null;
+// 마을에 들어가면 자동으로 자유 탐험(등 뒤 시점), 마을을 벗어나면 다시 내려다보는 시점 (WJ: "평소에는 지금 모드, 마을에 들어가면 그 게임 모드")
+// 직접 걸어서(자동 이동 아님) 마을 경계를 넘을 때만 바뀐다. 🚶 버튼으로 직접 켠 탐험은 마을을 나가도 그대로
+let freeAuto = false, freeInTown = null;
+function freeTownAt(px, py, extra) {
+  for (const t of S.towns) { const r = 2.5 + townLevel(t) * 0.6 + extra; if ((px / T - t.x - 0.5) ** 2 + (py / T - t.y - 0.5) ** 2 < r * r) return t; }
+  return null;
+}
+function freeTick(dt) {
+  if (typeof t3ExitGrace !== 'undefined' && t3ExitGrace > 0) t3ExitGrace = Math.max(0, t3ExitGrace - (dt || 0.016));
+  if (!USE3D || MODE !== 'world' || paused || (EV && EV.tp)) return;
+  const p = S.player, inT = freeTownAt(p.x, p.y, FREE && freeAuto ? 2 : 0);
+  if (freeInTown === null) { freeInTown = !!inT; return; } // 시작·불러오기 직후엔 바꾸지 않는다
+  const fightingHere = S.war && S.war.field && inT && S.war.town === inT.id;
+  if (inT && !freeInTown && !FREE && !auto && !fightingHere && !(typeof t3ExitGrace !== 'undefined' && t3ExitGrace > 0)) {
+    if (typeof enterTown === 'function') { freeInTown = true; enterTown(inT); return; }
+    freeSet(true, inT); freeAuto = true;
+  } else if (!inT && freeInTown && FREE && freeAuto) freeSet(false);
+  freeInTown = !!inT;
+}
 function evTPSpeed() { return EV && EV.kind === 'thief' && EV.phase === 'search' ? 124 : 85; } // 도둑 추격은 뛰어서
 function evEra() { return clamp(S.era | 0, 0, ERAS.length - 1); }
 
@@ -166,7 +200,7 @@ function evBadge() {
   b.dataset.n = n ? String(n) : ''; b.classList.toggle('new', n > 0);
 }
 function evBoard() {
-  if (!S || MODE !== 'world') return;
+  if (!S || (MODE !== 'world' && MODE !== 'town')) return;
   // 빈 소식판을 열면 (25초에 한 번까지) 새 의뢰가 바로 들어온다
   if (!EVQ.length && !EV && S.towns.length && evClock - evLastGen > 25) evOffer();
   paused = true; actHeld = false; auto = null;
@@ -192,6 +226,7 @@ function evNowText() {
 // ---------- 시작 ----------
 // startEvent(kind 또는 소식판 항목) → 묻기 창. 테스트에서 kind 문자열로 부르면 그 자리에서 의뢰를 만든다
 function startEvent(arg) {
+  if (MODE === 'town' && typeof exitTown === 'function') exitTown(true);
   if (EV || MODE !== 'world' || !S || !S.towns.length || S.war) return false;
   let o = typeof arg === 'object' && arg ? arg : null;
   if (!o) { o = evOffer(arg || 'findPerson'); if (!o) return false; }
@@ -270,6 +305,7 @@ function evAsk() {
 }
 function evEnterTP() {
   if (!EV) return;
+  freeSet(false);
   dismount(); auto = null; actHeld = false;
   EV.phase = 'search'; EV.tp = USE3D; EV.t = 0;
   // 따라오던 병사들은 마을에 남는다 (3인칭 화면을 가리지 않게) → 끝나면 원래대로
@@ -317,7 +353,7 @@ $('evBoardBtn').addEventListener('click', () => { if (MODE === 'world' && !pause
 
 // ---------- 매 프레임 (updateWorld 뒤, 멈춤 아닐 때) ----------
 function evUpdate(dt) {
-  if (evS !== S) { evS = S; EV = null; EVCAM.k = 0; EVQ.length = 0; evT = 0; evNext = rr(60, 90); evBadge(); } // 새 게임 · 불러오기
+  if (evS !== S) { evS = S; if (FREE) freeSet(false); freeInTown = null; EV = null; EVCAM.k = 0; EVQ.length = 0; evT = 0; evNext = rr(60, 90); evBadge(); } // 새 게임 · 불러오기
   evClock += dt;
   if (EV && EV.army && !EV.tp) evExitTP();
   if (!EV) {
@@ -507,7 +543,7 @@ function evThiefLost() {
 
 // ---------- 3인칭 이동 (updateWorld) ----------
 function evMove(mv, dt) {
-  if (!EV || !EV.tp) return mv;
+  if (!evTP()) return mv;
   if (keys['q']) EVCAM.yaw -= dt * 1.8; if (keys['e']) EVCAM.yaw += dt * 1.8;
   const y = EVCAM.yaw, c = Math.cos(y), s = Math.sin(y);
   const wx = mv.x * c - mv.y * s, wz = mv.x * s + mv.y * c;
@@ -567,12 +603,13 @@ function evSay(v) {
   evTalk = { v, t: v.hermit ? 7 : 5, html: `<b>${L.role ? L.role + ' ' : ''}${L.name}</b>${L.line}` };
   $('talkBox').innerHTML = evTalk.html; $('talkBox').classList.add('show');
 }
-$('talkBtn').addEventListener('click', () => { if (EV && EV.phase === 'search') evSay(evNearVillager(2)); });
+$('talkBtn').addEventListener('click', () => { if ((EV && EV.phase === 'search') || (FREE && !EV)) evSay(evNearVillager(2)); });
+$('freeBtn').addEventListener('click', () => freeSet(!FREE));
 $('digBtn').addEventListener('click', () => evDig());
 $('talkBox').addEventListener('click', () => { evTalk = null; $('talkBox').classList.remove('show'); });
 // 3인칭에서 화면을 톡: 가까운 마을 사람이면 말 걸기. 3인칭에선 다른 탭 행동(자동 이동)은 하지 않는다
 function evTap(sx, sy) {
-  if (!EV || !EV.tp || !USE3D) return false;
+  if (!evTP() || !USE3D) return false;
   const p = S.player, pr = {}, hk = W3_TP.hk;
   let best = null, bd = 56 * 56;
   for (const v of evTalkers()) {
@@ -581,7 +618,7 @@ function evTap(sx, sy) {
     const d = (pr.x - sx) ** 2 + (pr.y - sy) ** 2; if (d < bd) { bd = d; best = v; }
   }
   if (best) { if (dist2(p.x, p.y, best.x, best.y) < (T * 4) ** 2) evSay(best); else toast('조금 더 가까이 가서 말을 걸어 보세요', 1.5); }
-  else if (evNearMark(1.4)) evDig();
+  else if (EV && evNearMark(1.4)) evDig();
   return true;
 }
 
@@ -599,7 +636,9 @@ function evMarks() { return EV && EV.kind === 'treasure' && (EV.phase === 'searc
 
 // ---------- HUD (매 프레임, 멈춤과 상관없이) ----------
 function evHud(dt) {
-  const tp = !!(EV && EV.tp);
+  if (FREE && (MODE !== 'world' || (EV && EV.tp))) freeSet(false);
+  freeTick(dt);
+  const tp = evTP();
   EVCAM.k = clamp(EVCAM.k + (tp ? dt : -dt) / 1.3, 0, 1);
   lookHook = tp ? evLook : null;
   document.body.classList.toggle('tp', tp || EVCAM.k > 0.5);
@@ -622,10 +661,11 @@ function evHud(dt) {
   }
   const srch = !!(EV && EV.phase === 'search');
   document.body.classList.toggle('evs', srch);
-  const near = srch && !paused && EV.kind !== 'thief' ? evNearVillager(2) : null;
+  const near = (srch && !paused && EV.kind !== 'thief') || (FREE && !EV && !paused) ? evNearVillager(2) : null;
   $('talkBtn').style.display = near ? 'flex' : 'none';
   const dig = srch && !paused && !EV.dig && evNearMark(1.4);
   $('digBtn').style.display = dig ? 'flex' : 'none';
+  { const fb = $('freeBtn'), fv = USE3D && MODE === 'world' && S && !(EV && EV.tp) ? '' : 'none'; if (fb.style.display !== fv) fb.style.display = fv; }
   const bb = $('evBoardBtn'), bv = MODE === 'world' && S && S.towns.length ? '' : 'none'; if (bb.style.display !== bv) bb.style.display = bv;
   // 말풍선: 말하는 사람 머리 위 (안 보이면 화면 아래쪽)
   const tb = $('talkBox');

@@ -415,5 +415,101 @@ const R3D = (() => {
   };
   // 진영별 안장 담요 색
   R.CLOTH = { ally: '#2f5fb8', foe: '#a3322a', bandit: '#5b4a3a', king: '#7a1f3a', wild: '#8a7a5a' };
+
+  // ---------- 공용 절차적 하늘 돔 (그라데이션 · 해/달 · 구름 · 밤 별) ----------
+  // 카메라를 자동 추적하며 깊이를 1.0(무한원)에 고정하므로 cam.far 와 무관하게 절대 잘리지 않는다.
+  R.sky = scene => {
+    const u = {
+      uSkyZ: { value: new THREE.Color('#5d9be0') },
+      uSkyH: { value: new THREE.Color('#dcecf8') },
+      uFog: { value: new THREE.Color('#bcd4e8') },
+      uSunDir: { value: new THREE.Vector3(0.4, 0.7, 0.5).normalize() },
+      uSunCol: { value: new THREE.Color('#fff6e8') },
+      uSunI: { value: 1.0 },
+      uNight: { value: 0.0 },
+      uTime: { value: 0.0 },
+      uCloud: { value: 1.0 },
+    };
+    const mat = new THREE.ShaderMaterial({
+      uniforms: u,
+      side: THREE.BackSide,
+      depthWrite: false,
+      depthTest: true,
+      depthFunc: THREE.LessEqualDepth,
+      fog: false,
+      vertexShader: `varying vec3 vDir;
+void main() {
+  vDir = position;
+  vec4 wp = vec4(cameraPosition + position, 1.0);
+  vec4 cp = projectionMatrix * viewMatrix * wp;
+  gl_Position = cp.xyww;
+}`,
+      fragmentShader: `uniform vec3 uSkyZ, uSkyH, uFog, uSunDir, uSunCol;
+uniform float uSunI, uNight, uTime, uCloud;
+varying vec3 vDir;
+float sh2(vec2 p) { p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
+float sn2(vec2 p) {
+  vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(sh2(i), sh2(i + vec2(1.0, 0.0)), f.x), mix(sh2(i + vec2(0.0, 1.0)), sh2(i + vec2(1.0, 1.0)), f.x), f.y);
+}
+float fbm(vec2 p) {
+  float v = 0.0, a = 0.52;
+  for (int i = 0; i < 3; i++) { v += a * sn2(p); p = p * 2.04 + vec2(13.7, 7.3); a *= 0.48; }
+  return v;
+}
+void main() {
+  vec3 d = normalize(vDir);
+  float y = d.y;
+  float h = clamp(y, 0.0, 1.0);
+  // 지평선 → 천정 그라데이션 + 안개색과 매끄럽게 이음
+  vec3 col = mix(uSkyH, uSkyZ, pow(h, 0.58));
+  col = mix(uFog, col, smoothstep(-0.02, 0.14, y));
+  // 해/달 방향 대기 산란 + 원반
+  float sd = max(dot(d, normalize(uSunDir)), 0.0);
+  float day = 1.0 - uNight;
+  float sunHalo = pow(sd, 7.0) * 0.34 + pow(sd, 64.0) * 0.55;
+  float sunDisc = smoothstep(0.9982, 0.9994, sd);
+  col += uSunCol * (sunHalo * (0.45 + 0.55 * day) + sunDisc * mix(3.2, 1.5, uNight)) * max(uSunI, 0.25);
+  // 구름 (위쪽 반구)
+  if (y > 0.01 && uCloud > 0.01) {
+    vec2 cp = d.xz / (y + 0.24) * 1.45 + vec2(uTime * 0.0085, uTime * 0.0032);
+    float c1 = fbm(cp);
+    float c2 = fbm(cp * 2.1 - vec2(uTime * 0.004, 0.0));
+    float cl = smoothstep(0.47, 0.78, c1 * 0.72 + c2 * 0.28) * smoothstep(0.01, 0.22, y) * uCloud;
+    vec3 cLit = mix(uSkyH * 1.06 + uSunCol * (0.35 * pow(sd, 3.0) + 0.12), uSkyH * 0.48 + vec3(0.05, 0.07, 0.14), uNight);
+    vec3 cShd = mix(mix(uSkyZ, uFog, 0.55) * 0.85, uSkyZ * 0.55, uNight);
+    vec3 cCol = mix(cShd, cLit, smoothstep(0.35, 0.85, c2 + pow(sd, 4.0) * 0.4));
+    col = mix(col, cCol, cl * mix(0.62, 0.28, uNight));
+  }
+  // 밤 별빛
+  if (uNight > 0.05 && y > 0.04) {
+    vec2 sp = d.xz / (y + 0.42) * 85.0;
+    vec2 sid = floor(sp), sf = fract(sp) - 0.5;
+    float r = sh2(sid);
+    if (r > 0.968) {
+      float tw = 0.65 + 0.35 * sin(uTime * (2.5 + fract(r * 37.0) * 4.0) + r * 90.0);
+      float st = smoothstep(0.24, 0.02, length(sf)) * tw * smoothstep(0.04, 0.28, y) * uNight;
+      col += mix(vec3(0.85, 0.92, 1.0), vec3(1.0, 0.94, 0.82), fract(r * 19.0)) * st * 1.7;
+    }
+  }
+  gl_FragColor = vec4(col, 1.0);
+  #include <tonemapping_fragment>
+  #include <encodings_fragment>
+}`,
+    });
+    const mesh = new THREE.Mesh(R.cached('skydome', () => new THREE.SphereGeometry(1, 24, 16)), mat);
+    mesh.frustumCulled = false;
+    mesh.renderOrder = -10;
+    scene.add(mesh);
+    return {
+      mesh, u,
+      update(K, sunDir, night, tm, cloud) {
+        u.uSkyZ.value.copy(K.zen); u.uSkyH.value.copy(K.hor); u.uFog.value.copy(K.fog);
+        u.uSunDir.value.copy(sunDir); u.uSunCol.value.copy(K.sun); u.uSunI.value = K.sI;
+        u.uNight.value = night; u.uTime.value = tm;
+        if (cloud !== undefined) u.uCloud.value = cloud;
+      },
+    };
+  };
   return R;
 })();

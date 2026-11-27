@@ -36,43 +36,71 @@ const RA = (() => {
   let winMat = null;
   function windowMat() {
     if (winMat) return winMat;
-    // 낮엔 어두운 유리, 밤엔 따뜻한 불빛 (R3D.uWin = 밤 정도, R3D.uWinLit = 켜진 창 비율 — 시대·인구에 따라 world3d 가 정함)
-    const m = new THREE.MeshLambertMaterial({ color: 0x0b0c0f, side: THREE.DoubleSide });
+    // 낮엔 하늘을 은은히 비추는 어두운 유리, 밤엔 따뜻한 불빛 (R3D.uWin = 밤 정도, R3D.uWinLit = 켜진 창 비율)
+    const m = new THREE.MeshLambertMaterial({ color: 0x101822, side: THREE.DoubleSide });
     m.onBeforeCompile = sh => {
       sh.uniforms.uWin = R3D.uWin || { value: 0 }; sh.uniforms.uWinLit = R3D.uWinLit || { value: 0.5 };
-      sh.vertexShader = 'varying vec3 vWP2;\n' + sh.vertexShader.replace('#include <project_vertex>', `#include <project_vertex>
+      sh.vertexShader = 'varying vec3 vWP2;\nvarying float vWFres;\n' + sh.vertexShader.replace('#include <project_vertex>', `#include <project_vertex>
   { vec4 wq = vec4(transformed, 1.0);
 #ifdef USE_INSTANCING
     wq = instanceMatrix * wq;
 #endif
-    vWP2 = (modelMatrix * wq).xyz; }`);
-      sh.fragmentShader = 'uniform float uWin, uWinLit;\nvarying vec3 vWP2;\n' + sh.fragmentShader.replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
+    vWP2 = (modelMatrix * wq).xyz;
+    vec3 nv = normalize(normalMatrix * objectNormal), vd = normalize(-mvPosition.xyz);
+    vWFres = pow(1.0 - abs(dot(nv, vd)), 2.2); }`);
+      sh.fragmentShader = 'uniform float uWin, uWinLit;\nvarying vec3 vWP2;\nvarying float vWFres;\n' + sh.fragmentShader.replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
+  float wDay = 1.0 - clamp(uWin * 0.8, 0.0, 1.0);
+  totalEmissiveRadiance += vec3(0.18, 0.28, 0.42) * (0.12 + 0.45 * vWFres) * wDay;
   if (uWin > 0.0) {
     float h = fract(sin(dot(floor(vWP2 * 2.2), vec3(12.9898, 78.233, 37.719))) * 43758.5453);
     if (h < uWinLit) totalEmissiveRadiance += vec3(1.0, 0.62, 0.28) * uWin * (0.75 + 0.5 * fract(h * 7.0));
   }`);
     };
-    m.customProgramCacheKey = () => 'rawin';
+    m.customProgramCacheKey = () => 'rawin2';
     return (winMat = m);
   }
-  // 나무·덤불: 바람에 흔들림 + 벌목 중인 칸(RA.U.chop = 타일 중심 x, z, 세기)은 크게 흔들림. 높이는 모델 m 단위
-  function swayHook(m, key) {
+  // 나무·덤불·풀: 바람에 흔들림 + 벌목 중인 칸 크게 흔들림 + 수관 하단 그늘/역광 투과
+  function swayHook(m, key, isScatter) {
     m.onBeforeCompile = sh => {
       sh.uniforms.uTime = A.U.time; sh.uniforms.uChop = A.U.chop;
-      sh.vertexShader = 'uniform float uTime;\nuniform vec3 uChop;\n' + sh.vertexShader.replace('#include <begin_vertex>', `#include <begin_vertex>
+      const baseH = isScatter ? '0.02' : '1.2', amp = isScatter ? '0.24' : '0.32', hScale = isScatter ? '0.55' : '0.1';
+      sh.vertexShader = 'uniform float uTime;\nuniform vec3 uChop;\nvarying float vLeafH;\n' + sh.vertexShader.replace('#include <begin_vertex>', `#include <begin_vertex>
+  vLeafH = position.y;
 #ifdef USE_INSTANCING
   {
     vec2 ip = vec2(instanceMatrix[3][0], instanceMatrix[3][2]);
-    float hgt = max(0.0, position.y - 1.2) * 0.1;
-    float sw = sin(uTime * 1.7 + ip.x * 0.8 + ip.y * 0.6) * 0.32 * hgt;
+    float hgt = max(0.0, position.y - ${baseH}) * ${hScale};
+    float sw = sin(uTime * ${isScatter ? '2.4' : '1.7'} + ip.x * 0.8 + ip.y * 0.6) * ${amp} * hgt;
     float inT = step(abs(ip.x - uChop.x), 0.5) * step(abs(ip.y - uChop.y), 0.5);
     sw += sin(uTime * 55.0) * uChop.z * inT * 4.0 * hgt;
     transformed.x += sw; transformed.z += sw * 0.5;
   }
+#else
+  {
+    float hgt = max(0.0, position.y - ${baseH}) * ${hScale};
+    float sw = sin(uTime * 1.6 + position.x * 0.5 + position.z * 0.5) * ${amp} * 0.65 * hgt;
+    transformed.x += sw; transformed.z += sw * 0.45;
+  }
 #endif`);
+      if (!isScatter) {
+        sh.fragmentShader = 'varying float vLeafH;\n' + sh.fragmentShader.replace('#include <color_fragment>', `#include <color_fragment>
+  diffuseColor.rgb *= (0.82 + 0.24 * smoothstep(1.2, 6.5, vLeafH));`);
+      }
     };
-    const ob = m.onBeforeCompile; m.onBeforeCompile = sh => { ob(sh); fadeHook(sh); };
-    m.customProgramCacheKey = () => 'rasway3' + key;
+    const ob = m.onBeforeCompile; m.onBeforeCompile = sh => { ob(sh); if (!isScatter) fadeHook(sh); };
+    m.customProgramCacheKey = () => (isScatter ? 'rascat1' : 'rasway4') + key;
+  }
+  // 밤 건물 조명 + 낮/밤 공용 접지 AO(바닥 접촉부 0~1.1m 은은한 그늘 → 땅/보도에 묵직하게 붙어 보임)
+  if (!R3D.uUp) R3D.uUp = { value: new THREE.Color(0, 0, 0) };
+  function upHook(m, key) {
+    m.onBeforeCompile = sh => {
+      sh.uniforms.uUp = R3D.uUp;
+      sh.vertexShader = 'varying float vUpY;\n' + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n  vUpY = position.y;');
+      sh.fragmentShader = 'uniform vec3 uUp;\nvarying float vUpY;\n' + sh.fragmentShader.replace('#include <color_fragment>', `#include <color_fragment>
+  diffuseColor.rgb *= (0.78 + 0.22 * smoothstep(0.0, 1.15, max(vUpY, 0.0)));`).replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
+  totalEmissiveRadiance += uUp * diffuseColor.rgb * (exp(-max(vUpY, 0.0) * 0.55) * 0.9 + 0.12);`);
+    };
+    m.customProgramCacheKey = () => 'raup2' + key;
   }
   // 바위: rock_a 의 붉은 기를 빼고 회색 쪽으로 (채도↓)
   function desatHook(m, k) {
@@ -139,13 +167,14 @@ const RA = (() => {
     const m = new THREE.MeshLambertMaterial({ map: src.map || null, side: src.side, vertexColors: false });
     if (src.alphaTest > 0 || src.transparent || crop || leaf) { m.alphaTest = leaf ? 0.42 : 0.5; m.transparent = false; m.side = /^(scatter_|tree_|bush)/.test(name) ? THREE.FrontSide : THREE.DoubleSide; } // scatter·나무·덤불 카드는 뒷면이 실제 면으로 모델링돼 있다. DoubleSide 면 같은 자리의 앞·뒷면이 겹쳐 그려져 깜빡이고(z-fighting) 법선이 뒤집혀 시커멓게 나온다
     if (src.map) { src.map.anisotropy = Math.min(4, R3D.maxAniso || 1); }
-    // 노멀맵: 큰 건물만, '높음' 품질에서만 (이 카메라 거리에선 차이가 작고 텍스처 메모리를 크게 먹는다)
-    if (src.normalMap && !leaf && !SMALL.has(name)) { nrm.set(m, src.normalMap); m.normalMap = tier === 'high' ? src.normalMap : null; m.normalScale.set(0.9, 0.9); }
-    if (leaf) swayHook(m, name);
+    // 노멀맵: 큰 건물에 '중간' 이상에서 켠다 (마을 거리 3인칭에서 벽돌·석재 질감이 또렷해짐)
+    if (src.normalMap && !leaf && !SMALL.has(name)) { nrm.set(m, src.normalMap); m.normalMap = tier !== 'low' ? src.normalMap : null; m.normalScale.set(0.95, 0.95); }
+    if (leaf) swayHook(m, name, false);
     if (/^rock_/.test(name)) { desatHook(m, name === 'rock_a' ? 0.12 : 0.45); m.color.setScalar(name === 'rock_a' ? 2.5 : 3.1); m.side = THREE.FrontSide; } // 바위 텍스처가 어두워 위에서 보면 시커멓게 보였다
     if (name === 'mountain_a') mountainHook(m);
-    if (/^scatter_/.test(name)) m.color.setScalar(0.92);
-    if (!leaf && !/^rock_/.test(name) && !crop && !/^scatter_/.test(name)) m.color.setScalar(1.16); // 구운 AO 때문에 어두운 건물을 게임 조명에 맞게 조금 밝게
+    if (/^scatter_/.test(name)) { m.color.setScalar(0.92); swayHook(m, name, true); }
+    if (!leaf && !/^rock_/.test(name) && !crop && !/^scatter_/.test(name)) m.color.setScalar(1.16);
+    if (!leaf && !/^rock_/.test(name) && !crop && !/^scatter_/.test(name) && name !== 'mountain_a') upHook(m, src.normalMap ? 'n' : ''); // 구운 AO 때문에 어두운 건물을 게임 조명에 맞게 조금 밝게
     allMats.add(m);
     void rough;
     return { mat: m, role: leaf ? 'leaf' : crop ? 'crop' : 'body' };
@@ -346,40 +375,54 @@ const RA = (() => {
   };
   // 매 프레임 다시 채우는 인스턴스 풀 (화면에 보이는 것만 넣어 그리기·그림자 비용을 줄인다)
   // A.pool(name, scene) → { fill(list, n, shadow) }  list[k] = { m: Float32Array(16), c: [r, g, b] }
-  A.pool = (n, scene, lite) => {
+  A.pool = (n, scene, lite, proxy) => {
     const e = M.get(n); if (!e) return null;
-    const P = { cap: 0, meshes: [] };
+    // proxy(정수 k): 그림자는 잎 카드를 k 장에 1장만 남긴 가벼운 대역(레이어 1 = 그림자 카메라만 봄)이 대신 드리운다.
+    // 위에서 내려다보면 그림자 모양은 거의 같고, 그림자 패스 삼각형은 1/k 로 준다
+    const P = { cap: 0, meshes: [], shadowM: [] };
     const make = cap => {
-      for (const m of P.meshes) { scene.remove(m); m.dispose(); }
+      for (const m of P.meshes.concat(P.shadowM)) { scene.remove(m); m.dispose(); }
       P.meshes = e.parts.map(p => {
-        const im = new THREE.InstancedMesh(lite && p.role === 'leaf' ? liteGeo(n, p.geo) : p.geo, p.mat, cap);
+        const im = new THREE.InstancedMesh(lite && p.role === 'leaf' ? liteGeo(n, p.geo, 2) : p.geo, p.mat, cap);
         im.instanceMatrix.setUsage(THREE.DynamicDrawUsage); im.frustumCulled = false; im.count = 0;
         if (p.role !== 'fire' && p.role !== 'window') { im.setColorAt(0, white); im.instanceColor.setUsage(THREE.DynamicDrawUsage); }
         im.userData.role = p.role; scene.add(im); return im;
+      });
+      P.shadowM = !proxy ? [] : e.parts.filter(p => p.role === 'leaf' || p.role === 'body').map(p => {
+        const im = new THREE.InstancedMesh(p.role === 'leaf' ? liteGeo(n, p.geo, proxy) : p.geo, p.mat, cap);
+        im.instanceMatrix.setUsage(THREE.DynamicDrawUsage); im.frustumCulled = false; im.count = 0;
+        im.layers.set(1); im.castShadow = true; im.receiveShadow = false; scene.add(im); return im;
       });
       P.cap = cap;
     };
     P.fill = (list, cnt, shadow, recv) => {
       if (cnt > P.cap) make(Math.max(32, Math.ceil(cnt * 1.4)));
+      const sp = !!shadow && P.shadowM.length > 0;
       for (const im of P.meshes) {
         const ma = im.instanceMatrix.array, ca = im.instanceColor ? im.instanceColor.array : null;
         for (let k = 0; k < cnt; k++) { ma.set(list[k].m, k * 16); if (ca) { const c = list[k].c; ca[k * 3] = c[0]; ca[k * 3 + 1] = c[1]; ca[k * 3 + 2] = c[2]; } }
         im.count = cnt; im.visible = cnt > 0; im.instanceMatrix.needsUpdate = true; if (ca) im.instanceColor.needsUpdate = true;
-        im.castShadow = !!shadow && im.userData.role !== 'fire'; im.receiveShadow = !!recv;
+        im.castShadow = !!shadow && !sp && im.userData.role !== 'fire'; im.receiveShadow = !!recv;
+      }
+      for (const im of P.shadowM) {
+        const ma = im.instanceMatrix.array, c2 = sp ? cnt : 0;
+        for (let k = 0; k < c2; k++) ma.set(list[k].m, k * 16);
+        im.count = c2; im.visible = c2 > 0; im.instanceMatrix.needsUpdate = true;
       }
     };
-    P.hide = () => { for (const im of P.meshes) { im.count = 0; im.visible = false; } };
-    P.dispose = () => { for (const m of P.meshes) { scene.remove(m); m.dispose(); } P.meshes = []; P.cap = 0; };
+    P.hide = () => { for (const im of P.meshes.concat(P.shadowM)) { im.count = 0; im.visible = false; } };
+    P.dispose = () => { for (const m of P.meshes.concat(P.shadowM)) { scene.remove(m); m.dispose(); } P.meshes = []; P.shadowM = []; P.cap = 0; };
     return P;
   };
   // 낮음 품질용 가벼운 나무: 잎 카드(사각형 = 연속한 삼각형 2개)를 하나 걸러 하나만 남기고 1.3배로 키워 빈틈을 메운다
   const liteC = new Map();
-  function liteGeo(n, g) {
-    if (liteC.has(n)) return liteC.get(n);
+  function liteGeo(n, g, every) {
+    every = every || 2; const ck = n + '|' + every, grow = every === 2 ? 1.36 : Math.sqrt(every) * 0.95;
+    if (liteC.has(ck)) return liteC.get(ck);
     const idx = g.index ? g.index.array : null, uv = g.attributes.uv;
-    if (!idx || !uv) { liteC.set(n, g); return g; }
+    if (!idx || !uv) { liteC.set(ck, g); return g; }
     const pos = g.attributes.position, out = [], scaled = new Set(), P = pos.array.slice ? new Float32Array(pos.array) : null;
-    if (!P || pos.itemSize !== 3 || pos.isInterleavedBufferAttribute) { liteC.set(n, g); return g; }
+    if (!P || pos.itemSize !== 3 || pos.isInterleavedBufferAttribute) { liteC.set(ck, g); return g; }
     let card = 0;
     for (let t = 0; t < idx.length; t += 3) {
       const a = idx[t], b = idx[t + 1], c = idx[t + 2];
@@ -387,17 +430,17 @@ const RA = (() => {
       if (!leafy) { out.push(a, b, c); continue; }
       const q = [idx[t + 3], idx[t + 4], idx[t + 5]], sh = [a, b, c].filter(v => q.includes(v)).length;
       if (sh < 2) { out.push(a, b, c); continue; } // 사각형이 아니면 그대로
-      const keep = card++ % 2 === 0, vs = [...new Set([a, b, c, ...q])];
+      const keep = card++ % every === 0, vs = [...new Set([a, b, c, ...q])];
       if (keep) {
         let cx = 0, cy = 0, cz = 0; for (const v of vs) { cx += P[v * 3]; cy += P[v * 3 + 1]; cz += P[v * 3 + 2]; }
         cx /= vs.length; cy /= vs.length; cz /= vs.length;
-        for (const v of vs) if (!scaled.has(v)) { scaled.add(v); P[v * 3] = cx + (P[v * 3] - cx) * 1.3; P[v * 3 + 1] = cy + (P[v * 3 + 1] - cy) * 1.3; P[v * 3 + 2] = cz + (P[v * 3 + 2] - cz) * 1.3; }
+        for (const v of vs) if (!scaled.has(v)) { scaled.add(v); P[v * 3] = cx + (P[v * 3] - cx) * grow; P[v * 3 + 1] = cy + (P[v * 3 + 1] - cy) * grow; P[v * 3 + 2] = cz + (P[v * 3 + 2] - cz) * grow; }
         out.push(a, b, c, q[0], q[1], q[2]);
       }
       t += 3;
     }
     const lg = g.clone(); lg.setAttribute('position', new THREE.BufferAttribute(P, 3)); lg.setIndex(out); lg.computeBoundingSphere();
-    liteC.set(n, lg); return lg;
+    liteC.set(ck, lg); return lg;
   }
   // 인스턴스 하나의 행렬·색 (pool.fill 용)
   A.item = o => {
@@ -409,8 +452,8 @@ const RA = (() => {
   };
   A.setTier = t => {
     if (t === tier) return; const was = tier; tier = t;
-    if ((was === 'high') === (t === 'high')) return;
-    for (const [m, nm] of nrm) { m.normalMap = t === 'high' ? nm : null; m.needsUpdate = true; }
+    if ((was !== 'low') === (t !== 'low')) return;
+    for (const [m, nm] of nrm) { m.normalMap = t !== 'low' ? nm : null; m.needsUpdate = true; }
   };
   A.tier = () => tier;
 

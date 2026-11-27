@@ -32,6 +32,7 @@ function b3Init() {
   sun.castShadow = true; sun.shadow.mapSize.set(1024, 1024);
   const sc = sun.shadow.camera; sc.left = -18; sc.right = 18; sc.top = 18; sc.bottom = -18; sc.near = 1; sc.far = 110;
   sun.shadow.bias = -0.0006; sun.shadow.normalBias = 0.03;
+  sc.layers.enable(1); // 그림자 전용 가벼운 나무 대역
   scene.add(sun, sun.target);
   R3D.regScene(scene); R3D.regLight(sun);
   const pts = [];
@@ -302,7 +303,7 @@ function b3RealScenery(scen, sown) {
 function b3RealFill() {
   const S3 = B3; if (!S3.rItems) return;
   const lowQ = R3D.quality && R3D.quality() === 'low';
-  if (!S3.rpool || S3.rpoolLow !== lowQ) { if (S3.rpool) for (const k in S3.rpool) S3.rpool[k] && S3.rpool[k].dispose(); S3.rpool = {}; for (const k in S3.rItems) S3.rpool[k] = RA.pool(k, S3.scen, lowQ); S3.rpoolLow = lowQ; S3.rfX = -99; }
+  if (!S3.rpool || S3.rpoolLow !== lowQ) { if (S3.rpool) for (const k in S3.rpool) S3.rpool[k] && S3.rpool[k].dispose(); S3.rpool = {}; for (const k in S3.rItems) S3.rpool[k] = RA.pool(k, S3.scen, lowQ, k.startsWith('tree') ? 3 : 0); S3.rpoolLow = lowQ; S3.rfX = -99; }
   if (Math.abs(S3.tx - S3.rfX) + Math.abs(S3.tz - S3.rfZ) < 0.2) return;
   S3.rfX = S3.tx; S3.rfZ = S3.tz;
   const low = R3D.quality && R3D.quality() === 'low', sph = S3.sph;
@@ -549,6 +550,7 @@ function b3Grade(H) {
   G.lift.setRGB(0.014, 0.004, 0.024); G.gain.setRGB(1.05, 0.98, 0.9);
   R3D.renderer.toneMappingExposure = R3D.fx && R3D.fx.on ? 1 : 1.1;
   if (R3D.uWin) { R3D.uWin.value = 0.55; R3D.uWinLit.value = 0.55; } // 해 질 녘: 창문 몇 개에 불
+  if (R3D.uUp) R3D.uUp.value.setRGB(1.0, 0.56, 0.26).multiplyScalar(0.12);
   if (R3D.uRim) R3D.uRim.value.setRGB(1.0, 0.72, 0.45).multiplyScalar(0.42);
   if (typeof b3EraGrade === 'function') b3EraGrade(G); // 시대별 색감 (battleEra.js)
 }

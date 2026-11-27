@@ -3,6 +3,7 @@
 resize();
 buildSprites();
 if (!load()) { newGame(); showStart(false); } // 처음이면 시대·왕조 고르기
+{ const mt = /[?&]time=(\d+(?:\.\d+)?)\b/.exec(location.search); if (mt && S) S.time = (((((+mt[1] - 6 + 24) % 24) / 24) - 0.08 + 1) % 1) * DAY_LEN; }
 // 3D(WebGL) 가능하면 오픈월드는 3D로, 아니면 기존 2D. 강제 2D: 주소 끝에 ?2d 또는 localStorage 'frontier-render'='2d'
 const USE3D = R3D.available() && R3D.init();
 // 그래픽 품질 (☰ 메뉴): 자동/높음/중간/낮음 → localStorage 'frontier-gfx' (post3d.js)
@@ -50,8 +51,17 @@ function frame(now) {
   try {
     if (USE3D) R3D.show(true);
     if (MODE === 'battle' && B) {
+      if (typeof T3 !== 'undefined' && T3 && T3.active) exitTown(true);
       updateBattle(dt);
       if (USE3D) drawBattle3D(); else drawBattle();
+    } else if (MODE === 'town' && USE3D && typeof T3 !== 'undefined' && T3 && T3.active) {
+      if (USE3D) b3Cleanup();
+      if (!paused) {
+        updateTown3D(dt);
+        saveT += dt; if (saveT > 10) { saveT = 0; save(); }
+      }
+      tickBanner(dt);
+      if (MODE === 'town' && T3 && T3.active) { drawTown3D(); hudTown(); }
     } else {
       if (USE3D) b3Cleanup(); // 전투 장면 정리(dispose)
       if (!paused) {
@@ -76,6 +86,9 @@ window.__game = { get S() { return S; }, get B() { return B; }, get owned() { re
   addDev(n) { S.dev += n; }, get paused() { return paused; },
   // 그래픽 확인용: 하루 중 시각(0 해돋이 · 6 정오 · 12 해넘이 · 18 자정, 24시간 기준) / 품질
   startEvent, get ev() { return EV; }, get evq() { return EVQ; }, evBoard, evDig, EVCAM, evSay, evNearVillager,
+  enterTown: t => typeof enterTown === 'function' && enterTown(typeof t === 'number' ? S.towns[t] : t || S.towns[0]),
+  exitTown: () => typeof exitTown === 'function' && exitTown(false),
+  get T3() { return typeof T3 !== 'undefined' ? T3 : null; },
   get quiet() { return QUIET; }, setQuiet(on) { if (R3D.fx) R3D.fx.setQuiet(on); }, get style() { return STYLE; },
   setTime(h) { S.time = (((h / 24) - 0.08 + 1) % 1) * DAY_LEN; }, setGfx(q) { if (R3D.fx) R3D.fx.set(q); },
   get gfx() { return R3D.fx ? { setting: R3D.fx.setting, tier: R3D.fx.tier, post: R3D.fx.on, hdr: R3D.fx.hdr, pr: R3D.pr, avgMs: R3D.fx.avgMs, stats: R3D.stats } : null; },

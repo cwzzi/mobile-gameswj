@@ -100,6 +100,14 @@ vec4 gW = vec4(1.0, 0.0, 0.0, 0.0); vec2 gP = vWP.xz, gQ = gP * uRGs;
     diffuseColor.rgb *= mix(vec3(1.0), clamp(t, 0.25, 2.2), uRGk);
   }
   { float l = dot(diffuseColor.rgb, vec3(0.3, 0.59, 0.11)); diffuseColor.rgb = max(mix(vec3(l), diffuseColor.rgb, 1.0), 0.0); }
+  { // 숲 바닥: 나무 그늘 아래라 어둡고 낙엽·흙빛 (잎 사이로 보이는 바닥이 형광 초록으로 튀지 않게)
+    float fl = dot(diffuseColor.rgb, vec3(0.3, 0.59, 0.11));
+    diffuseColor.rgb = mix(diffuseColor.rgb, mix(vec3(fl), diffuseColor.rgb, 0.55) * vec3(0.62, 0.6, 0.48), gW.a * 0.85);
+  }
+  { // 흘러가는 구름 그림자 (낮 동안 들판과 숲 위로 은은하게 이동)
+    float cs = texture2D(uDetail, gP * 0.016 + vec2(uCTime * 0.0045, uCTime * 0.002)).r;
+    diffuseColor.rgb *= mix(1.0, 0.88 + 0.15 * smoothstep(0.3, 0.7, cs), uCDay);
+  }
 }
 #endif`;
 const W3_RG_NRM = `#include <normal_fragment_maps>
@@ -112,7 +120,7 @@ if (uRGn > 0.5) {
   normal = normalize((viewMatrix * vec4(gN, 0.0)).xyz);
 }
 #endif`;
-const W3_RGU = { k: { value: 0.8 }, ns: { value: 0.9 }, nOn: { value: 1 } }; // 질감 세기 · 노멀 세기 · 노멀 켜짐(낮음 품질이면 끔)
+const W3_RGU = { k: { value: 0.8 }, ns: { value: 0.9 }, nOn: { value: 1 }, cTime: { value: 0 }, cDay: { value: 1 } }; // 질감 세기 · 노멀 세기 · 노멀 켜짐 · 구름 그림자
 function w3dRealGround() {
   const G = typeof RA !== 'undefined' && RA.ground;
   if (!G || !R3D.renderer || R3D.renderer.capabilities.maxTextures < 14) return null;
@@ -122,22 +130,22 @@ function w3dGroundMat(tex, rep, splat) {
   const m = new THREE.MeshLambertMaterial({ map: tex });
   const det = w3dDetailTex(), RG = w3dRealGround(), terr = RG ? null : w3dTerrTex();
   m.onBeforeCompile = sh => {
-    Object.assign(sh.uniforms, { uDetail: { value: det }, uRep: { value: rep }, uSplat: { value: splat || null }, uWorld: { value: new THREE.Vector2(W, H) } });
+    Object.assign(sh.uniforms, { uDetail: { value: det }, uRep: { value: rep }, uSplat: { value: splat || null }, uWorld: { value: new THREE.Vector2(W, H) }, uCTime: W3_RGU.cTime, uCDay: W3_RGU.cDay });
     sh.vertexShader = 'varying vec3 vWP;\n' + sh.vertexShader.replace('#include <project_vertex>', '#include <project_vertex>\n  vWP = (modelMatrix * vec4(transformed, 1.0)).xyz;');
     if (RG) {
       const nOn = { get value() { return RG.non.value * W3_RGU.nOn.value; } };
       Object.assign(sh.uniforms, { uRG: RG.on, uRGn: nOn, uRGs: { value: 0.42 }, uRGk: W3_RGU.k, uRGns: W3_RGU.ns,
         uGa: { value: RG.grass.a.tex }, uDa: { value: RG.dirt.a.tex }, uSa: { value: RG.sand.a.tex }, uRa: { value: RG.rock.a.tex },
         uGn: { value: RG.grass.n.tex }, uDn: { value: RG.dirt.n.tex }, uSn: { value: RG.sand.n.tex }, uRn: { value: RG.rock.n.tex } });
-      sh.fragmentShader = (splat ? '#define SPLAT\n' : '') + 'varying vec3 vWP;\nuniform sampler2D uDetail, uSplat, uGa, uDa, uSa, uRa, uGn, uDn, uSn, uRn;\nuniform float uRep, uRG, uRGn, uRGs, uRGk, uRGns;\nuniform vec2 uWorld;\n' +
+      sh.fragmentShader = (splat ? '#define SPLAT\n' : '') + 'varying vec3 vWP;\nuniform sampler2D uDetail, uSplat, uGa, uDa, uSa, uRa, uGn, uDn, uSn, uRn;\nuniform float uRep, uRG, uRGn, uRGs, uRGk, uRGns, uCTime, uCDay;\nuniform vec2 uWorld;\n' +
         sh.fragmentShader.replace('#include <map_fragment>', W3_RG_MAP).replace('#include <normal_fragment_maps>', W3_RG_NRM);
     } else {
       Object.assign(sh.uniforms, { uTerr: { value: terr.tex }, uTerrOn: terr.on });
-      sh.fragmentShader = (splat ? '#define SPLAT\n' : '') + 'varying vec3 vWP;\nuniform sampler2D uDetail, uTerr, uSplat;\nuniform float uRep, uTerrOn;\nuniform vec2 uWorld;\n' +
+      sh.fragmentShader = (splat ? '#define SPLAT\n' : '') + 'varying vec3 vWP;\nuniform sampler2D uDetail, uTerr, uSplat;\nuniform float uRep, uTerrOn, uCTime, uCDay;\nuniform vec2 uWorld;\n' +
         sh.fragmentShader.replace('#include <map_fragment>', W3_GROUND_MAP).replace('#include <normal_fragment_maps>', W3_GROUND_NRM);
     }
   };
-  m.customProgramCacheKey = () => 'w3ground4' + (splat ? 'S' : '') + (RG ? 'R' : '');
+  m.customProgramCacheKey = () => 'w3ground5' + (splat ? 'S' : '') + (RG ? 'R' : '');
   return m;
 }
 // 물: 노멀맵 2겹(흐름) + 하늘 반사(프레넬) + 해/달 반짝임 + 가까운 불빛 8개의 반사(물 위로 길게 번지는 빛)
@@ -247,6 +255,7 @@ function w3dInit() {
   sun.castShadow = true; sun.shadow.mapSize.set(1024, 1024);
   const sc = sun.shadow.camera; sc.left = -21; sc.right = 21; sc.top = 21; sc.bottom = -21; sc.near = 1; sc.far = 110;
   sun.shadow.bias = -0.0006; sun.shadow.normalBias = 0.03;
+  sc.layers.enable(1); // 레이어 1: 그림자만 드리우는 가벼운 나무 대역 (real3d RA.pool proxy)
   scene.add(sun, sun.target);
   R3D.regScene(scene); R3D.regLight(sun);
   const pts = [];
@@ -304,7 +313,8 @@ function w3dInit() {
     const m = new THREE.InstancedMesh(w3dLampGeo(k), R3D.mats.vc, 160);
     m.instanceMatrix.setUsage(THREE.DynamicDrawUsage); m.frustumCulled = false; m.count = 0; m.castShadow = true; scene.add(m); lamps[k] = m;
   }
-  W3 = { scene, cam, hemi, sun, pts, water, splat, glows, pools, lamps, waves, wtex, mask, detail, blobs, treeMat, treeMatA, goldMat, uTime, uChop, ring, slash, aver: -1,
+  const sky = R3D.sky ? R3D.sky(scene) : null;
+  W3 = { scene, cam, hemi, sun, pts, sky, water, splat, glows, pools, lamps, waves, wtex, mask, detail, blobs, treeMat, treeMatA, goldMat, uTime, uChop, ring, slash, aver: -1,
     frustum: new THREE.Frustum(), pm: new THREE.Matrix4(), chunks: [], dyn: new Map(), pool: new Map(), frame: 0,
     arrows: [], S: null, tx: 0, tz: 0, lastT: performance.now(), dist: 30, look: new WeakMap() };
   R3D.onResize.push(w3dResize); w3dResize();
@@ -574,29 +584,48 @@ function w3dBuildProps(c) {
 // 보이는 청크의 사실적 나무·바위·덤불 중 화면(+그림자 여유) 안의 것만 모델별 InstancedMesh 하나씩에 채운다
 const W3_RKINDS = ['tree_broadleaf_a', 'tree_broadleaf_b', 'tree_conifer', 'bush', 'rock_a', 'rock_b', 'mountain_a', 'scatter_grass', 'scatter_flowers'];
 const W3_RRAD = { mountain_a: 2.6, scatter_grass: 0.6, scatter_flowers: 0.6 };
-const w3dRealBuf = {};
+const w3dRealBuf = {}, w3dRealBufF = {};
+// 나무 LOD: 화면 가운데(영주 근처)에서 W3_RNEAR 칸 밖의 나무는 잎 카드 절반짜리(1.3배)로 그린다.
+// 위에서 내려다보는 거리에선 모양 차이가 거의 안 보이고 나무 삼각형이 크게 준다 (3인칭이면 카메라에서 W3_RNEAR_TP 밖)
+const W3_RNEAR = 7, W3_RNEAR_TP = 9;
 function w3dRealFill() {
   if (!w3dRealOK()) return;
   const lowQ = R3D.quality && R3D.quality() === 'low';
   if (!W3.rpool || W3.rpoolV !== RA.ver || W3.rpoolLow !== lowQ) { // 낮음 품질은 잎 카드 절반짜리 나무
     if (W3.rpool) for (const k in W3.rpool) W3.rpool[k] && W3.rpool[k].dispose();
-    W3.rpool = {}; for (const k of W3_RKINDS) W3.rpool[k] = RA.pool(k, W3.scene, lowQ); W3.rpoolV = RA.ver; W3.rpoolLow = lowQ; W3.realDirty = true;
+    if (W3.rpoolF) for (const k in W3.rpoolF) W3.rpoolF[k] && W3.rpoolF[k].dispose();
+    W3.rpool = {}; W3.rpoolF = {};
+    for (const k of W3_RKINDS) {
+      const tree = k.startsWith('tree');
+      W3.rpool[k] = RA.pool(k, W3.scene, lowQ, tree ? 3 : 0);
+      if (tree && !lowQ) W3.rpoolF[k] = RA.pool(k, W3.scene, true, 3);
+    }
+    W3.rpoolV = RA.ver; W3.rpoolLow = lowQ; W3.realDirty = true;
   }
   const tpS = !!W3.tpOn; if (W3.rfTP !== tpS) { W3.rfTP = tpS; W3.realDirty = true; } // 바닥 풀 카드는 3인칭에서만 (위에서 보면 가는 X 자 무늬로만 보였다)
-  const moved = Math.abs(W3.tx - (W3.rfX || -99)) + Math.abs(W3.tz - (W3.rfZ || -99)) > 0.15;
+  const cp = W3.cam.position, ox = tpS ? cp.x : W3.tx, oz = tpS ? cp.z : W3.tz;
+  const moved = Math.abs(ox - (W3.rfX || -99)) + Math.abs(oz - (W3.rfZ || -99)) > 0.15;
   if (!moved && !W3.realDirty) return;
-  W3.rfX = W3.tx; W3.rfZ = W3.tz; W3.realDirty = false;
-  const low = R3D.quality && R3D.quality() === 'low', sph = w3dSphere, F = W3.frustum;
-  const cnt = {}; for (const k of W3_RKINDS) { cnt[k] = 0; if (!w3dRealBuf[k]) w3dRealBuf[k] = []; }
+  W3.rfX = ox; W3.rfZ = oz; W3.realDirty = false;
+  const low = R3D.quality && R3D.quality() === 'low', sph = w3dSphere, F = W3.frustum, nr2 = (tpS ? W3_RNEAR_TP : W3_RNEAR) ** 2;
+  const cnt = {}, cntF = {}; for (const k of W3_RKINDS) { cnt[k] = 0; cntF[k] = 0; if (!w3dRealBuf[k]) { w3dRealBuf[k] = []; w3dRealBufF[k] = []; } }
   for (const c of W3.chunks) {
     if (!c.real || !c.props || !c.props.visible) continue;
     for (const k in c.real) {
       if (k === 'scatter_grass' && !tpS) continue;
-      const L = c.real[k], buf = w3dRealBuf[k], rad = W3_RRAD[k] || (k.startsWith('tree') ? (low ? 1.2 : 2.0) : 0.8), sc = k.startsWith('scatter');
-      for (const e of L) { if (sc && Math.abs(e.x - W3.tx) + Math.abs(e.z - W3.tz) > 20) continue; sph.center.set(e.x, 0.6, e.z); sph.radius = rad; if (F.intersectsSphere(sph)) buf[cnt[k]++] = e; }
+      const L = c.real[k], buf = w3dRealBuf[k], bufF = w3dRealBufF[k], lod = !!W3.rpoolF[k], rad = W3_RRAD[k] || (k.startsWith('tree') ? (low ? 1.2 : 2.0) : 0.8), sc = k.startsWith('scatter');
+      for (const e of L) {
+        if (sc && Math.abs(e.x - W3.tx) + Math.abs(e.z - W3.tz) > 20) continue;
+        sph.center.set(e.x, 0.6, e.z); sph.radius = rad; if (!F.intersectsSphere(sph)) continue;
+        if (lod && (e.x - ox) ** 2 + (e.z - oz) ** 2 > nr2) bufF[cntF[k]++] = e; else buf[cnt[k]++] = e;
+      }
     }
   }
-  for (const k of W3_RKINDS) { const P = W3.rpool[k]; if (P) P.fill(w3dRealBuf[k], cnt[k], !low && k !== 'bush' && k !== 'mountain_a' && !k.startsWith('scatter'), k === 'mountain_a' || k.startsWith('scatter')); }
+  for (const k of W3_RKINDS) {
+    const sh = !low && k !== 'bush' && k !== 'mountain_a' && !k.startsWith('scatter'), rc = k === 'mountain_a' || k.startsWith('scatter');
+    const P = W3.rpool[k]; if (P) P.fill(w3dRealBuf[k], cnt[k], sh, rc);
+    const PF = W3.rpoolF[k]; if (PF) PF.fill(w3dRealBufF[k], cntF[k], sh, rc);
+  }
 }
 // ---------- 사실적 환경 모델 (real3d.js) ----------
 function w3dRealOK() { return typeof RA !== 'undefined' && RA.ok; }
@@ -1043,13 +1072,16 @@ function w3dLighting(src) {
   w3dSunDir.set(Math.cos(a) * 0.8, 0.24 + Math.max(0, Math.sin(a)) * 1.0, 0.55).normalize();
   W3.sun.color.copy(K.sun); W3.sun.intensity = K.sI;
   W3.hemi.color.copy(K.sky); W3.hemi.groundColor.copy(K.gnd); W3.hemi.intensity = K.hI;
+  if (W3.sky) W3.sky.update(K, w3dSunDir, night, S.time, 1.0);
+  W3_RGU.cTime.value = S.time; W3_RGU.cDay.value = 1 - night;
   // 색보정·노출 (후처리가 꺼진 낮음 품질에선 렌더러 노출만)
   const G = R3D.grade;
   G.exposure = K.ex; G.bloom = K.bl; G.threshold = K.th; G.knee = 0.6; G.sat = K.sat; G.contrast = K.con; G.lift.copy(K.lift); G.gain.copy(K.gain); G.vignette = K.vig;
   R3D.renderer.toneMappingExposure = R3D.fx && R3D.fx.on ? 1 : K.ex;
   // 창문: 밤이면 켜짐. 시대·인구가 클수록 켜진 창이 많다
   const pop = S.towns.reduce((s, t) => s + t.pop, 0);
-  if (R3D.uWin) { R3D.uWin.value = on * 1.15; R3D.uWinLit.value = clamp(0.3 + S.era * 0.14 + pop / 300, 0.2, 0.95); }
+  if (R3D.uWin) { R3D.uWin.value = on * 1.6; R3D.uWinLit.value = clamp(0.42 + S.era * 0.14 + pop / 300, 0.3, 0.97); }
+  if (R3D.uUp) R3D.uUp.value.setRGB(1.0, 0.56, 0.26).multiplyScalar(on * (0.8 + S.era * 0.1)); // 밤: 건물 아랫벽에 횃불·등불빛 (시대가 갈수록 밝게)
   R3D.mats.glow.emissiveIntensity = on * 1.8;
   if (R3D.uRim) R3D.uRim.value.setRGB(1.0, 0.93, 0.8).multiplyScalar(0.28).lerp(w3dC1.setRGB(0.45, 0.55, 1.0).multiplyScalar(0.14), on);
   // 물
@@ -1115,14 +1147,16 @@ function drawWorld3D() {
   cam.updateMatrixWorld();
   W3.pm.multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse); W3.frustum.setFromProjectionMatrix(W3.pm);
 
-  // 그림자 카메라: 화면 중심보다 조금 북쪽(위), 1단위 격자에 맞춰 흔들림 방지
-  let scx = Math.round(W3.tx), scz = Math.round(W3.tz - 2);
-  if (ek > 0.5) { scx = Math.round(px + Math.sin(EVCAM.yaw) * 7); scz = Math.round(pz - Math.cos(EVCAM.yaw) * 7); } // 3인칭: 앞쪽 위주
-  W3.sun.target.position.set(scx, 0, scz); W3.sun.position.copy(w3dSunDir).multiplyScalar(45).add(W3.sun.target.position);
-  W3.sun.target.updateMatrixWorld();
-  { // 그림자 범위를 화면에 맞게 좁혀 해상도를 높인다
+  // 그림자 카메라: 텍셀 단위로 맞춰 이동 시 그림자 경계 떨림 방지
+  {
     const sh = ek > 0.5 ? 12 : clamp(Math.round(W3.dist * 0.55), 10, 21), sc = W3.sun.shadow.camera;
     if (sc.right !== sh) { sc.left = -sh; sc.right = sh; sc.top = sh; sc.bottom = -sh; sc.updateProjectionMatrix(); }
+    const texel = (sh * 2) / Math.max(256, W3.sun.shadow.mapSize.x || 1024);
+    const rx = ek > 0.5 ? px + Math.sin(EVCAM.yaw) * 7 : W3.tx;
+    const rz = ek > 0.5 ? pz - Math.cos(EVCAM.yaw) * 7 : W3.tz - 2;
+    const scx = Math.round(rx / texel) * texel, scz = Math.round(rz / texel) * texel;
+    W3.sun.target.position.set(scx, 0, scz); W3.sun.position.copy(w3dSunDir).multiplyScalar(45).add(W3.sun.target.position);
+    W3.sun.target.updateMatrixWorld();
   }
 
   // 바뀐 타일/영토 반영
@@ -1440,6 +1474,8 @@ function drawWorld3D() {
 
 // ---------- 3인칭 시점 (event.js 의 EVCAM: k 0 = 위에서 · 1 = 어깨 뒤, yaw = 바라보는 방향, 0 = 북쪽(-z)) ----------
 const W3_TP = { hk: 0.6, back: 1.65, up: 1.5, side: 0.32, ahead: 4, lookY: 0.8, fov: 56, fovP: 70, far: 28, fogD: 14 }; // far: 안개 끝(fogD × 1.95)까지만 그린다 (마을 건너편까지 그리면 100만 삼각형)
+// 자유 탐험(event.js FREE): 넓은 땅이 멀리까지 보이게 안개·그리는 거리를 늘린 3인칭 (먼 나무는 LOD 라 사건 3인칭보다 조금만 무겁다)
+const W3_TPF = Object.assign({}, W3_TP, { far: 46, fogD: 23, up: 1.7 });
 // 3인칭: 영주가 건물·성채·성벽·말뚝 울타리를 뚫고 지나가지 않게, 그리기 직전에 밖으로 밀어낸다 (world.js 이동 규칙은 그대로 · 장면 속 사건에서만)
 function w3dPushBox(p, cx, cz, hx, hz, r) {
   const x = p.x / T, z = p.y / T, dx = x - cx, dz = z - cz, ox = hx + r - Math.abs(dx), oz = hz + r - Math.abs(dz);
@@ -1507,7 +1543,7 @@ function w3dTPCam(cam, px, pz, k) {
     return 1;
   }
   W3.tpOn = true;
-  const e = k * k * (3 - 2 * k), P = W3_TP, yaw = EVCAM.yaw;
+  const e = k * k * (3 - 2 * k), P = typeof FREE !== 'undefined' && FREE ? W3_TPF : W3_TP, yaw = EVCAM.yaw;
   const fx = Math.sin(yaw), fz = -Math.cos(yaw), rx = Math.cos(yaw), rz = Math.sin(yaw);
   // 카메라와 영주 사이에 숲·건물이 있으면 카메라를 영주 쪽으로 당긴다 (나무 속에 카메라가 박히지 않게)
   let bk = P.back;

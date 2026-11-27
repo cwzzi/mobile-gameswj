@@ -136,6 +136,7 @@ function moveEnt(e, dx, dy, r) {
 }
 
 function newGame(opts) {
+  if (typeof T3 !== 'undefined' && T3 && T3.active && typeof exitTown === 'function') exitTown(true);
   opts = opts || {};
   const seed = (Date.now() & 0xffffff) ^ 0x5eed;
   kOwner.fill(-1); envoys.length = 0;
@@ -143,6 +144,7 @@ function newGame(opts) {
   S = { seed, tiles, hp, wood: 0, stone: 0, gold: 0, towns: [], buildings: [], camps: [], horses: [], won: false, time: 0,
         player: { x: 0, y: 0, hp: 10, mounted: false, dir: 0 }, spawnT: 0,
         hero: { lv: 1, exp: 0 }, war: null, warT: 0, nextWar: 80, warsWon: 0 };
+  { const mt = /[?&]time=(\d+(?:\.\d+)?)\b/.exec(location.search); if (mt) S.time = (((((+mt[1] - 6 + 24) % 24) / 24) - 0.08 + 1) % 1) * DAY_LEN; }
   let best = null;
   for (let k = 0; k < 4000; k++) {
     const x = W / 2 + ri(40) - 20, y = H / 2 + ri(40) - 20;
@@ -520,7 +522,7 @@ function onBattleEnd(win, st) {
 // ---------- 패널 ----------
 const bp = $('buildPanel');
 function openBuild() {
-  if (!S || MODE !== 'world') return;
+  if (!S || (MODE !== 'world' && MODE !== 'town')) return;
   paused = true; actHeld = false; auto = null;
   const { x, y } = playerTile();
   const tid = owner[y * W + x];
@@ -536,6 +538,9 @@ function openBuild() {
     const E = eraCur(), lvCap = townLevel(t) >= E.maxLv && t.pop >= E.maxLv * 10;
     html += `<h2>${t.name} ${E.town} <span style="font-size:13px;color:#b8c2b0">Lv${townLevel(t)}/${E.maxLv}</span></h2>`;
     html += `<div class="sub">인구 ${t.pop}/${cap} · 영토 반경 ${townRadius(t)} · 수입 ${townIncome(t)}🪙/5초<br>집 ${cnt('house')} · 농장 ${cnt('farm')} · 학당 ${cnt('school')} · 망루 ${cnt('tower')} · 시장 ${cnt('market')}${cnt('barracks') + cnt('range') + cnt('stable') ? ` · 군사 ${cnt('barracks') + cnt('range') + cnt('stable')}` : ''}${cnt('factory') ? ` · 공장 ${cnt('factory')}` : ''}${resStatus(t.id) ? '<br>' + resStatus(t.id) : ''}<br>${lvCap ? `<b style="color:var(--accent)">${E.name}의 한계 Lv${E.maxLv}</b> — 시대가 발전하면 더 커집니다` : '인구가 10 늘 때마다 레벨업 → 영토 확장'}</div>`;
+    if (MODE === 'world' && typeof USE3D !== 'undefined' && USE3D && typeof enterTown === 'function') {
+      html += `<button class="opt primary" data-a="enterTown" data-tid="${t.id}"><span class="ic">🏘️</span><span>마을 거리로 들어가기<small>실사 3D 거리 산책 · 주민 대화 · 시설 이용</small></span></button>`;
+    }
     const locked = [];
     for (const k in BUILD) {
       const B = BUILD[k];
@@ -557,8 +562,9 @@ bp.addEventListener('click', e => {
   const btn = e.target.closest('button'); if (!btn || btn.disabled) return;
   const a = btn.dataset.a;
   if (a === 'army') { bp.classList.remove('show'); openArmyPanel(); return; }
+  if (a === 'enterTown') { const tt = townById(+btn.dataset.tid); closePanels(); if (tt && typeof enterTown === 'function') enterTown(tt); return; }
   if (a === 'town') { pay(newTownCost()); foundTown(); }
-  else if (BUILD[a] && buildUnlocked(a)) build(a);
+  else if (BUILD[a] && buildUnlocked(a)) { build(a); if (MODE === 'town' && typeof T3 !== 'undefined' && T3 && T3.town) { const ct = T3.town; closePanels(); enterTown(ct); return; } }
   closePanels();
 });
 $('menuBtn').addEventListener('click', () => { paused = true; auto = null; $('goalHelp').innerHTML = `<b>목표</b> 영토 ${GOAL_TILES}칸 차지하기 (지금 ${ownedCount}칸) · 전쟁 승리 ${S.warsWon}회`; $('menuPanel').classList.add('show'); });
