@@ -37,12 +37,15 @@ const FX3D = (() => {
   const PREFILTER = `uniform sampler2D tSrc; uniform vec2 uTexel; uniform float uThreshold, uKnee;
 varying vec2 vUv;
 vec3 s(vec2 o) { return texture2D(tSrc, vUv + o * uTexel).rgb; }
+float kw(vec3 c) { return 1.0 / (1.0 + max(c.r, max(c.g, c.b)) * 0.5); }
 void main() {
-  vec3 c = (s(vec2(-1.0, -1.0)) + s(vec2(1.0, -1.0)) + s(vec2(-1.0, 1.0)) + s(vec2(1.0, 1.0))) * 0.25;
+  vec3 c0 = s(vec2(-1.0, -1.0)), c1 = s(vec2(1.0, -1.0)), c2 = s(vec2(-1.0, 1.0)), c3 = s(vec2(1.0, 1.0));
+  float w0 = kw(c0), w1 = kw(c1), w2 = kw(c2), w3 = kw(c3);
+  vec3 c = (c0 * w0 + c1 * w1 + c2 * w2 + c3 * w3) / (w0 + w1 + w2 + w3);
   float br = max(c.r, max(c.g, c.b));
   float rq = clamp(br - uThreshold + uKnee, 0.0, 2.0 * uKnee); rq = rq * rq / (4.0 * uKnee + 1e-4);
   c *= max(rq, br - uThreshold) / max(br, 1e-4);
-  gl_FragColor = vec4(min(c, vec3(32.0)), 1.0);
+  gl_FragColor = vec4(min(c, vec3(24.0)), 1.0);
 }`;
   const DOWN = `uniform sampler2D tSrc; uniform vec2 uTexel;
 varying vec2 vUv;
@@ -106,7 +109,8 @@ void main() {
   c = mix(vec3(l), c, uSat);
   c = c * uGain + uLift * (1.0 - c);
   vec3 s = toSRGB(max(c, 0.0));
-  s = clamp((s - 0.5) * uContrast + 0.5, 0.0, 1.0);
+  vec3 sc = s * s * (3.0 - 2.0 * s);
+  s = mix(clamp((s - 0.5) * uContrast + 0.5, 0.0, 1.0), mix(s, sc, clamp((uContrast - 1.0) * 1.5, 0.0, 0.65)), step(1.0, uContrast));
   // 비네트
   vec2 d = vUv - 0.5; d.x *= 0.8;
   s *= 1.0 - uVig * smoothstep(0.18, 0.62, dot(d, d) * 1.6);

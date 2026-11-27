@@ -182,7 +182,7 @@ function researchInfo() {
 
 // ---------- 기술 패널 ----------
 function openTechPanel() {
-  if (!S || MODE !== 'world') return;
+  if (!S || (MODE !== 'world' && MODE !== 'town')) return;
   paused = true; actHeld = false; auto = null;
   $('menuPanel').classList.remove('show'); $('eraPanel').classList.remove('show');
   renderTechPanel();
@@ -350,7 +350,7 @@ function updateTraining(dt) {
 
 // ---------- 군대 패널 ----------
 function openArmyPanel() {
-  if (!S || MODE !== 'world') return;
+  if (!S || (MODE !== 'world' && MODE !== 'town')) return;
   paused = true; actHeld = false; auto = null;
   $('menuPanel').classList.remove('show');
   renderArmyPanel();

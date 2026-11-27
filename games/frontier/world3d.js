@@ -104,6 +104,10 @@ vec4 gW = vec4(1.0, 0.0, 0.0, 0.0); vec2 gP = vWP.xz, gQ = gP * uRGs;
     float fl = dot(diffuseColor.rgb, vec3(0.3, 0.59, 0.11));
     diffuseColor.rgb = mix(diffuseColor.rgb, mix(vec3(fl), diffuseColor.rgb, 0.55) * vec3(0.62, 0.6, 0.48), gW.a * 0.85);
   }
+  { // 흘러가는 구름 그림자 (낮 동안 들판과 숲 위로 은은하게 이동)
+    float cs = texture2D(uDetail, gP * 0.016 + vec2(uCTime * 0.0045, uCTime * 0.002)).r;
+    diffuseColor.rgb *= mix(1.0, 0.88 + 0.15 * smoothstep(0.3, 0.7, cs), uCDay);
+  }
 }
 #endif`;
 const W3_RG_NRM = `#include <normal_fragment_maps>
@@ -116,7 +120,7 @@ if (uRGn > 0.5) {
   normal = normalize((viewMatrix * vec4(gN, 0.0)).xyz);
 }
 #endif`;
-const W3_RGU = { k: { value: 0.8 }, ns: { value: 0.9 }, nOn: { value: 1 } }; // 질감 세기 · 노멀 세기 · 노멀 켜짐(낮음 품질이면 끔)
+const W3_RGU = { k: { value: 0.8 }, ns: { value: 0.9 }, nOn: { value: 1 }, cTime: { value: 0 }, cDay: { value: 1 } }; // 질감 세기 · 노멀 세기 · 노멀 켜짐 · 구름 그림자
 function w3dRealGround() {
   const G = typeof RA !== 'undefined' && RA.ground;
   if (!G || !R3D.renderer || R3D.renderer.capabilities.maxTextures < 14) return null;
@@ -126,22 +130,22 @@ function w3dGroundMat(tex, rep, splat) {
   const m = new THREE.MeshLambertMaterial({ map: tex });
   const det = w3dDetailTex(), RG = w3dRealGround(), terr = RG ? null : w3dTerrTex();
   m.onBeforeCompile = sh => {
-    Object.assign(sh.uniforms, { uDetail: { value: det }, uRep: { value: rep }, uSplat: { value: splat || null }, uWorld: { value: new THREE.Vector2(W, H) } });
+    Object.assign(sh.uniforms, { uDetail: { value: det }, uRep: { value: rep }, uSplat: { value: splat || null }, uWorld: { value: new THREE.Vector2(W, H) }, uCTime: W3_RGU.cTime, uCDay: W3_RGU.cDay });
     sh.vertexShader = 'varying vec3 vWP;\n' + sh.vertexShader.replace('#include <project_vertex>', '#include <project_vertex>\n  vWP = (modelMatrix * vec4(transformed, 1.0)).xyz;');
     if (RG) {
       const nOn = { get value() { return RG.non.value * W3_RGU.nOn.value; } };
       Object.assign(sh.uniforms, { uRG: RG.on, uRGn: nOn, uRGs: { value: 0.42 }, uRGk: W3_RGU.k, uRGns: W3_RGU.ns,
         uGa: { value: RG.grass.a.tex }, uDa: { value: RG.dirt.a.tex }, uSa: { value: RG.sand.a.tex }, uRa: { value: RG.rock.a.tex },
         uGn: { value: RG.grass.n.tex }, uDn: { value: RG.dirt.n.tex }, uSn: { value: RG.sand.n.tex }, uRn: { value: RG.rock.n.tex } });
-      sh.fragmentShader = (splat ? '#define SPLAT\n' : '') + 'varying vec3 vWP;\nuniform sampler2D uDetail, uSplat, uGa, uDa, uSa, uRa, uGn, uDn, uSn, uRn;\nuniform float uRep, uRG, uRGn, uRGs, uRGk, uRGns;\nuniform vec2 uWorld;\n' +
+      sh.fragmentShader = (splat ? '#define SPLAT\n' : '') + 'varying vec3 vWP;\nuniform sampler2D uDetail, uSplat, uGa, uDa, uSa, uRa, uGn, uDn, uSn, uRn;\nuniform float uRep, uRG, uRGn, uRGs, uRGk, uRGns, uCTime, uCDay;\nuniform vec2 uWorld;\n' +
         sh.fragmentShader.replace('#include <map_fragment>', W3_RG_MAP).replace('#include <normal_fragment_maps>', W3_RG_NRM);
     } else {
       Object.assign(sh.uniforms, { uTerr: { value: terr.tex }, uTerrOn: terr.on });
-      sh.fragmentShader = (splat ? '#define SPLAT\n' : '') + 'varying vec3 vWP;\nuniform sampler2D uDetail, uTerr, uSplat;\nuniform float uRep, uTerrOn;\nuniform vec2 uWorld;\n' +
+      sh.fragmentShader = (splat ? '#define SPLAT\n' : '') + 'varying vec3 vWP;\nuniform sampler2D uDetail, uTerr, uSplat;\nuniform float uRep, uTerrOn, uCTime, uCDay;\nuniform vec2 uWorld;\n' +
         sh.fragmentShader.replace('#include <map_fragment>', W3_GROUND_MAP).replace('#include <normal_fragment_maps>', W3_GROUND_NRM);
     }
   };
-  m.customProgramCacheKey = () => 'w3ground4' + (splat ? 'S' : '') + (RG ? 'R' : '');
+  m.customProgramCacheKey = () => 'w3ground5' + (splat ? 'S' : '') + (RG ? 'R' : '');
   return m;
 }
 // 물: 노멀맵 2겹(흐름) + 하늘 반사(프레넬) + 해/달 반짝임 + 가까운 불빛 8개의 반사(물 위로 길게 번지는 빛)
@@ -309,7 +313,8 @@ function w3dInit() {
     const m = new THREE.InstancedMesh(w3dLampGeo(k), R3D.mats.vc, 160);
     m.instanceMatrix.setUsage(THREE.DynamicDrawUsage); m.frustumCulled = false; m.count = 0; m.castShadow = true; scene.add(m); lamps[k] = m;
   }
-  W3 = { scene, cam, hemi, sun, pts, water, splat, glows, pools, lamps, waves, wtex, mask, detail, blobs, treeMat, treeMatA, goldMat, uTime, uChop, ring, slash, aver: -1,
+  const sky = R3D.sky ? R3D.sky(scene) : null;
+  W3 = { scene, cam, hemi, sun, pts, sky, water, splat, glows, pools, lamps, waves, wtex, mask, detail, blobs, treeMat, treeMatA, goldMat, uTime, uChop, ring, slash, aver: -1,
     frustum: new THREE.Frustum(), pm: new THREE.Matrix4(), chunks: [], dyn: new Map(), pool: new Map(), frame: 0,
     arrows: [], S: null, tx: 0, tz: 0, lastT: performance.now(), dist: 30, look: new WeakMap() };
   R3D.onResize.push(w3dResize); w3dResize();
@@ -1067,6 +1072,8 @@ function w3dLighting(src) {
   w3dSunDir.set(Math.cos(a) * 0.8, 0.24 + Math.max(0, Math.sin(a)) * 1.0, 0.55).normalize();
   W3.sun.color.copy(K.sun); W3.sun.intensity = K.sI;
   W3.hemi.color.copy(K.sky); W3.hemi.groundColor.copy(K.gnd); W3.hemi.intensity = K.hI;
+  if (W3.sky) W3.sky.update(K, w3dSunDir, night, S.time, 1.0);
+  W3_RGU.cTime.value = S.time; W3_RGU.cDay.value = 1 - night;
   // 색보정·노출 (후처리가 꺼진 낮음 품질에선 렌더러 노출만)
   const G = R3D.grade;
   G.exposure = K.ex; G.bloom = K.bl; G.threshold = K.th; G.knee = 0.6; G.sat = K.sat; G.contrast = K.con; G.lift.copy(K.lift); G.gain.copy(K.gain); G.vignette = K.vig;
@@ -1140,14 +1147,16 @@ function drawWorld3D() {
   cam.updateMatrixWorld();
   W3.pm.multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse); W3.frustum.setFromProjectionMatrix(W3.pm);
 
-  // 그림자 카메라: 화면 중심보다 조금 북쪽(위), 1단위 격자에 맞춰 흔들림 방지
-  let scx = Math.round(W3.tx), scz = Math.round(W3.tz - 2);
-  if (ek > 0.5) { scx = Math.round(px + Math.sin(EVCAM.yaw) * 7); scz = Math.round(pz - Math.cos(EVCAM.yaw) * 7); } // 3인칭: 앞쪽 위주
-  W3.sun.target.position.set(scx, 0, scz); W3.sun.position.copy(w3dSunDir).multiplyScalar(45).add(W3.sun.target.position);
-  W3.sun.target.updateMatrixWorld();
-  { // 그림자 범위를 화면에 맞게 좁혀 해상도를 높인다
+  // 그림자 카메라: 텍셀 단위로 맞춰 이동 시 그림자 경계 떨림 방지
+  {
     const sh = ek > 0.5 ? 12 : clamp(Math.round(W3.dist * 0.55), 10, 21), sc = W3.sun.shadow.camera;
     if (sc.right !== sh) { sc.left = -sh; sc.right = sh; sc.top = sh; sc.bottom = -sh; sc.updateProjectionMatrix(); }
+    const texel = (sh * 2) / Math.max(256, W3.sun.shadow.mapSize.x || 1024);
+    const rx = ek > 0.5 ? px + Math.sin(EVCAM.yaw) * 7 : W3.tx;
+    const rz = ek > 0.5 ? pz - Math.cos(EVCAM.yaw) * 7 : W3.tz - 2;
+    const scx = Math.round(rx / texel) * texel, scz = Math.round(rz / texel) * texel;
+    W3.sun.target.position.set(scx, 0, scz); W3.sun.position.copy(w3dSunDir).multiplyScalar(45).add(W3.sun.target.position);
+    W3.sun.target.updateMatrixWorld();
   }
 
   // 바뀐 타일/영토 반영

@@ -38,12 +38,16 @@ function freeTownAt(px, py, extra) {
   for (const t of S.towns) { const r = 2.5 + townLevel(t) * 0.6 + extra; if ((px / T - t.x - 0.5) ** 2 + (py / T - t.y - 0.5) ** 2 < r * r) return t; }
   return null;
 }
-function freeTick() {
+function freeTick(dt) {
+  if (typeof t3ExitGrace !== 'undefined' && t3ExitGrace > 0) t3ExitGrace = Math.max(0, t3ExitGrace - (dt || 0.016));
   if (!USE3D || MODE !== 'world' || paused || (EV && EV.tp)) return;
   const p = S.player, inT = freeTownAt(p.x, p.y, FREE && freeAuto ? 2 : 0);
   if (freeInTown === null) { freeInTown = !!inT; return; } // 시작·불러오기 직후엔 바꾸지 않는다
-  if (inT && !freeInTown && !FREE && !auto) { freeSet(true, inT); freeAuto = true; }
-  else if (!inT && freeInTown && FREE && freeAuto) freeSet(false);
+  const fightingHere = S.war && S.war.field && inT && S.war.town === inT.id;
+  if (inT && !freeInTown && !FREE && !auto && !fightingHere && !(typeof t3ExitGrace !== 'undefined' && t3ExitGrace > 0)) {
+    if (typeof enterTown === 'function') { freeInTown = true; enterTown(inT); return; }
+    freeSet(true, inT); freeAuto = true;
+  } else if (!inT && freeInTown && FREE && freeAuto) freeSet(false);
   freeInTown = !!inT;
 }
 function evTPSpeed() { return EV && EV.kind === 'thief' && EV.phase === 'search' ? 124 : 85; } // 도둑 추격은 뛰어서
@@ -196,7 +200,7 @@ function evBadge() {
   b.dataset.n = n ? String(n) : ''; b.classList.toggle('new', n > 0);
 }
 function evBoard() {
-  if (!S || MODE !== 'world') return;
+  if (!S || (MODE !== 'world' && MODE !== 'town')) return;
   // 빈 소식판을 열면 (25초에 한 번까지) 새 의뢰가 바로 들어온다
   if (!EVQ.length && !EV && S.towns.length && evClock - evLastGen > 25) evOffer();
   paused = true; actHeld = false; auto = null;
@@ -222,6 +226,7 @@ function evNowText() {
 // ---------- 시작 ----------
 // startEvent(kind 또는 소식판 항목) → 묻기 창. 테스트에서 kind 문자열로 부르면 그 자리에서 의뢰를 만든다
 function startEvent(arg) {
+  if (MODE === 'town' && typeof exitTown === 'function') exitTown(true);
   if (EV || MODE !== 'world' || !S || !S.towns.length || S.war) return false;
   let o = typeof arg === 'object' && arg ? arg : null;
   if (!o) { o = evOffer(arg || 'findPerson'); if (!o) return false; }
@@ -632,7 +637,7 @@ function evMarks() { return EV && EV.kind === 'treasure' && (EV.phase === 'searc
 // ---------- HUD (매 프레임, 멈춤과 상관없이) ----------
 function evHud(dt) {
   if (FREE && (MODE !== 'world' || (EV && EV.tp))) freeSet(false);
-  freeTick();
+  freeTick(dt);
   const tp = evTP();
   EVCAM.k = clamp(EVCAM.k + (tp ? dt : -dt) / 1.3, 0, 1);
   lookHook = tp ? evLook : null;

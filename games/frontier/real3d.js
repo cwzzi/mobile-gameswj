@@ -36,55 +36,71 @@ const RA = (() => {
   let winMat = null;
   function windowMat() {
     if (winMat) return winMat;
-    // 낮엔 어두운 유리, 밤엔 따뜻한 불빛 (R3D.uWin = 밤 정도, R3D.uWinLit = 켜진 창 비율 — 시대·인구에 따라 world3d 가 정함)
-    const m = new THREE.MeshLambertMaterial({ color: 0x0b0c0f, side: THREE.DoubleSide });
+    // 낮엔 하늘을 은은히 비추는 어두운 유리, 밤엔 따뜻한 불빛 (R3D.uWin = 밤 정도, R3D.uWinLit = 켜진 창 비율)
+    const m = new THREE.MeshLambertMaterial({ color: 0x101822, side: THREE.DoubleSide });
     m.onBeforeCompile = sh => {
       sh.uniforms.uWin = R3D.uWin || { value: 0 }; sh.uniforms.uWinLit = R3D.uWinLit || { value: 0.5 };
-      sh.vertexShader = 'varying vec3 vWP2;\n' + sh.vertexShader.replace('#include <project_vertex>', `#include <project_vertex>
+      sh.vertexShader = 'varying vec3 vWP2;\nvarying float vWFres;\n' + sh.vertexShader.replace('#include <project_vertex>', `#include <project_vertex>
   { vec4 wq = vec4(transformed, 1.0);
 #ifdef USE_INSTANCING
     wq = instanceMatrix * wq;
 #endif
-    vWP2 = (modelMatrix * wq).xyz; }`);
-      sh.fragmentShader = 'uniform float uWin, uWinLit;\nvarying vec3 vWP2;\n' + sh.fragmentShader.replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
+    vWP2 = (modelMatrix * wq).xyz;
+    vec3 nv = normalize(normalMatrix * objectNormal), vd = normalize(-mvPosition.xyz);
+    vWFres = pow(1.0 - abs(dot(nv, vd)), 2.2); }`);
+      sh.fragmentShader = 'uniform float uWin, uWinLit;\nvarying vec3 vWP2;\nvarying float vWFres;\n' + sh.fragmentShader.replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
+  float wDay = 1.0 - clamp(uWin * 0.8, 0.0, 1.0);
+  totalEmissiveRadiance += vec3(0.18, 0.28, 0.42) * (0.12 + 0.45 * vWFres) * wDay;
   if (uWin > 0.0) {
     float h = fract(sin(dot(floor(vWP2 * 2.2), vec3(12.9898, 78.233, 37.719))) * 43758.5453);
     if (h < uWinLit) totalEmissiveRadiance += vec3(1.0, 0.62, 0.28) * uWin * (0.75 + 0.5 * fract(h * 7.0));
   }`);
     };
-    m.customProgramCacheKey = () => 'rawin';
+    m.customProgramCacheKey = () => 'rawin2';
     return (winMat = m);
   }
-  // 나무·덤불: 바람에 흔들림 + 벌목 중인 칸(RA.U.chop = 타일 중심 x, z, 세기)은 크게 흔들림. 높이는 모델 m 단위
-  function swayHook(m, key) {
+  // 나무·덤불·풀: 바람에 흔들림 + 벌목 중인 칸 크게 흔들림 + 수관 하단 그늘/역광 투과
+  function swayHook(m, key, isScatter) {
     m.onBeforeCompile = sh => {
       sh.uniforms.uTime = A.U.time; sh.uniforms.uChop = A.U.chop;
-      sh.vertexShader = 'uniform float uTime;\nuniform vec3 uChop;\n' + sh.vertexShader.replace('#include <begin_vertex>', `#include <begin_vertex>
+      const baseH = isScatter ? '0.02' : '1.2', amp = isScatter ? '0.24' : '0.32', hScale = isScatter ? '0.55' : '0.1';
+      sh.vertexShader = 'uniform float uTime;\nuniform vec3 uChop;\nvarying float vLeafH;\n' + sh.vertexShader.replace('#include <begin_vertex>', `#include <begin_vertex>
+  vLeafH = position.y;
 #ifdef USE_INSTANCING
   {
     vec2 ip = vec2(instanceMatrix[3][0], instanceMatrix[3][2]);
-    float hgt = max(0.0, position.y - 1.2) * 0.1;
-    float sw = sin(uTime * 1.7 + ip.x * 0.8 + ip.y * 0.6) * 0.32 * hgt;
+    float hgt = max(0.0, position.y - ${baseH}) * ${hScale};
+    float sw = sin(uTime * ${isScatter ? '2.4' : '1.7'} + ip.x * 0.8 + ip.y * 0.6) * ${amp} * hgt;
     float inT = step(abs(ip.x - uChop.x), 0.5) * step(abs(ip.y - uChop.y), 0.5);
     sw += sin(uTime * 55.0) * uChop.z * inT * 4.0 * hgt;
     transformed.x += sw; transformed.z += sw * 0.5;
   }
-#endif`);
-    };
-    const ob = m.onBeforeCompile; m.onBeforeCompile = sh => { ob(sh); fadeHook(sh); };
-    m.customProgramCacheKey = () => 'rasway3' + key;
+#else
+  {
+    float hgt = max(0.0, position.y - ${baseH}) * ${hScale};
+    float sw = sin(uTime * 1.6 + position.x * 0.5 + position.z * 0.5) * ${amp} * 0.65 * hgt;
+    transformed.x += sw; transformed.z += sw * 0.45;
   }
-  // 밤 건물 조명: 벽 아래쪽이 횃불·등불에 비친 듯 따뜻하게 밝다 (모델 높이 m 기준, 4 m 위로 갈수록 옅어짐).
-  // 실제 광원이 아니라 재질의 발광 한 줄이라 비용은 거의 없다. 세기 R3D.uUp(색 × 세기)은 장면이 시간에 맞춰 정한다
+#endif`);
+      if (!isScatter) {
+        sh.fragmentShader = 'varying float vLeafH;\n' + sh.fragmentShader.replace('#include <color_fragment>', `#include <color_fragment>
+  diffuseColor.rgb *= (0.82 + 0.24 * smoothstep(1.2, 6.5, vLeafH));`);
+      }
+    };
+    const ob = m.onBeforeCompile; m.onBeforeCompile = sh => { ob(sh); if (!isScatter) fadeHook(sh); };
+    m.customProgramCacheKey = () => (isScatter ? 'rascat1' : 'rasway4') + key;
+  }
+  // 밤 건물 조명 + 낮/밤 공용 접지 AO(바닥 접촉부 0~1.1m 은은한 그늘 → 땅/보도에 묵직하게 붙어 보임)
   if (!R3D.uUp) R3D.uUp = { value: new THREE.Color(0, 0, 0) };
   function upHook(m, key) {
     m.onBeforeCompile = sh => {
       sh.uniforms.uUp = R3D.uUp;
       sh.vertexShader = 'varying float vUpY;\n' + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n  vUpY = position.y;');
-      sh.fragmentShader = 'uniform vec3 uUp;\nvarying float vUpY;\n' + sh.fragmentShader.replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
+      sh.fragmentShader = 'uniform vec3 uUp;\nvarying float vUpY;\n' + sh.fragmentShader.replace('#include <color_fragment>', `#include <color_fragment>
+  diffuseColor.rgb *= (0.78 + 0.22 * smoothstep(0.0, 1.15, max(vUpY, 0.0)));`).replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
   totalEmissiveRadiance += uUp * diffuseColor.rgb * (exp(-max(vUpY, 0.0) * 0.55) * 0.9 + 0.12);`);
     };
-    m.customProgramCacheKey = () => 'raup' + key;
+    m.customProgramCacheKey = () => 'raup2' + key;
   }
   // 바위: rock_a 의 붉은 기를 빼고 회색 쪽으로 (채도↓)
   function desatHook(m, k) {
@@ -151,12 +167,12 @@ const RA = (() => {
     const m = new THREE.MeshLambertMaterial({ map: src.map || null, side: src.side, vertexColors: false });
     if (src.alphaTest > 0 || src.transparent || crop || leaf) { m.alphaTest = leaf ? 0.42 : 0.5; m.transparent = false; m.side = /^(scatter_|tree_|bush)/.test(name) ? THREE.FrontSide : THREE.DoubleSide; } // scatter·나무·덤불 카드는 뒷면이 실제 면으로 모델링돼 있다. DoubleSide 면 같은 자리의 앞·뒷면이 겹쳐 그려져 깜빡이고(z-fighting) 법선이 뒤집혀 시커멓게 나온다
     if (src.map) { src.map.anisotropy = Math.min(4, R3D.maxAniso || 1); }
-    // 노멀맵: 큰 건물만, '높음' 품질에서만 (이 카메라 거리에선 차이가 작고 텍스처 메모리를 크게 먹는다)
-    if (src.normalMap && !leaf && !SMALL.has(name)) { nrm.set(m, src.normalMap); m.normalMap = tier === 'high' ? src.normalMap : null; m.normalScale.set(0.9, 0.9); }
-    if (leaf) swayHook(m, name);
+    // 노멀맵: 큰 건물에 '중간' 이상에서 켠다 (마을 거리 3인칭에서 벽돌·석재 질감이 또렷해짐)
+    if (src.normalMap && !leaf && !SMALL.has(name)) { nrm.set(m, src.normalMap); m.normalMap = tier !== 'low' ? src.normalMap : null; m.normalScale.set(0.95, 0.95); }
+    if (leaf) swayHook(m, name, false);
     if (/^rock_/.test(name)) { desatHook(m, name === 'rock_a' ? 0.12 : 0.45); m.color.setScalar(name === 'rock_a' ? 2.5 : 3.1); m.side = THREE.FrontSide; } // 바위 텍스처가 어두워 위에서 보면 시커멓게 보였다
     if (name === 'mountain_a') mountainHook(m);
-    if (/^scatter_/.test(name)) m.color.setScalar(0.92);
+    if (/^scatter_/.test(name)) { m.color.setScalar(0.92); swayHook(m, name, true); }
     if (!leaf && !/^rock_/.test(name) && !crop && !/^scatter_/.test(name)) m.color.setScalar(1.16);
     if (!leaf && !/^rock_/.test(name) && !crop && !/^scatter_/.test(name) && name !== 'mountain_a') upHook(m, src.normalMap ? 'n' : ''); // 구운 AO 때문에 어두운 건물을 게임 조명에 맞게 조금 밝게
     allMats.add(m);
@@ -436,8 +452,8 @@ const RA = (() => {
   };
   A.setTier = t => {
     if (t === tier) return; const was = tier; tier = t;
-    if ((was === 'high') === (t === 'high')) return;
-    for (const [m, nm] of nrm) { m.normalMap = t === 'high' ? nm : null; m.needsUpdate = true; }
+    if ((was !== 'low') === (t !== 'low')) return;
+    for (const [m, nm] of nrm) { m.normalMap = t !== 'low' ? nm : null; m.needsUpdate = true; }
   };
   A.tier = () => tier;
 
